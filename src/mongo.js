@@ -132,18 +132,15 @@ var mongo = {
             
         })
     },
-    addMongoIndexes: (cb) => {
-        db.collection('accounts').createIndex( {name:1}, function() {
-            db.collection('accounts').createIndex( {balance:1}, function() {
-                db.collection('accounts').createIndex( {node_appr:1}, function() {
-                    db.collection('contents').createIndex( {ts:1}, function() {
-                        db.collection('contents').createIndex( {author:1}, function() {
-                            cb()
-                        })
-                    })
-                })
-            })
-        })
+    addMongoIndexes: async (cb) => {
+        await db.collection('accounts').createIndex({name:1})
+        await db.collection('accounts').createIndex({balance:1})
+        await db.collection('accounts').createIndex({node_appr:1})
+        await db.collection('accounts').createIndex({pub:1})
+        await db.collection('accounts').createIndex({'keys.pub':1})
+        await db.collection('contents').createIndex({ts:1})
+        await db.collection('contents').createIndex({author:1})
+        cb()
     },
     fillInMemoryBlocks: (cb,headBlock) => {
         let query = {}
@@ -154,17 +151,18 @@ var mongo = {
         }).toArray(function(err, blocks) {
             if (err) throw err
             chain.recentBlocks = blocks.reverse()
+            eco.loadHistory()
             cb()
         })
     },
-    lastBlock: (cb) => {
+    lastBlock: () => new Promise((rs,rj) => {
         db.collection('blocks').findOne({}, {
             sort: {_id: -1}
         }, function(err, block) {
-            if (err) throw err
-            cb(block)
+            if (err) return rj(err)
+            rs(block)
         })
-    },
+    }),
     restoreBlocks: (cb) => {
         let dump_dir = process.cwd() + '/dump'
         let dump_location = dump_dir + '/blocks.zip'
@@ -193,7 +191,8 @@ var mongo = {
                 }
             })
             
-            mongorestore.on('close', () => db.collection('blocks').findOne({_id: 0}, (gError,gBlock) => mongo.lastBlock((block) => {
+            mongorestore.on('close', () => db.collection('blocks').findOne({_id: 0}, async (gError,gBlock) => {
+                let block = await mongo.lastBlock()
                 if (gError) throw gError
                 if (!gBlock) return cb('Genesis block not found in dump')
                 if (gBlock.hash !== config.originHash)return cb('Genesis block hash in dump does not match config.originHash')
@@ -201,7 +200,7 @@ var mongo = {
                 logr.info('Finished importing ' + block._id + ' blocks')
                 chain.restoredBlocks = block._id
                 cb(null)
-            })))
+            }))
         })
     }
 } 

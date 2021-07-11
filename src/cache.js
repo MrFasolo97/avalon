@@ -248,15 +248,12 @@ var cache = {
                     })
                 })
 
-        // no operation compression (dumb and slow)
-        // for (let i = 0; i < cache.changes.length; i++) {
-        //     executions.push(function(callback) {
-        //         var change = cache.changes[i]
-        //         db.collection(change.collection).updateOne(change.query, change.changes, function() {
-        //             callback()
-        //         })
-        //     })
-        // }
+        // leader stats
+        if (process.env.LEADER_STATS === '1') {
+            let leaderStatsWriteOps = leaderStats.getWriteOps()
+            for (let op in leaderStatsWriteOps)
+                executions.push(leaderStatsWriteOps[op])
+        }
         
         var timeBefore = new Date().getTime()
         parallel(executions, function(err, results) {
@@ -301,11 +298,10 @@ var cache = {
             return '_id'
         }
     },
-    warmup: function(collection, maxDoc, cb) {
-        if (!collection || !maxDoc || maxDoc === 0) {
-            cb(null)
-            return
-        }
+    warmup: (collection, maxDoc) => new Promise((rs,rj) => {
+        if (!collection || !maxDoc || maxDoc === 0)
+            return rs(null)
+
         switch (collection) {
         case 'accounts':
             db.collection(collection).find({}, {
@@ -315,7 +311,7 @@ var cache = {
                 if (err) throw err
                 for (let i = 0; i < accounts.length; i++)
                     cache[collection][accounts[i].name] = accounts[i]
-                cb(null)
+                rs(null)
             })
             break
 
@@ -327,28 +323,31 @@ var cache = {
                 if (err) throw err
                 for (let i = 0; i < contents.length; i++)
                     cache[collection][contents[i]._id] = contents[i]
-                cb(null)
+                rs(null)
             })
             break
     
         default:
-            cb('Collection type not found')
+            rj('Collection type not found')
             break
         }
-    },
-    warmupLeaders: (cb) => {
-        db.collection('accounts').find(
-            {pub_leader: {$exists:true}}
-        ).toArray((e,accs) => {
+    }),
+    warmupLeaders: () => new Promise((rs) => {
+        db.collection('accounts').find({
+            $and: [
+                {pub_leader: {$exists:true}},
+                {pub_leader: {$ne: ""}}
+            ]
+        }).toArray((e,accs) => {
             if (e) throw e
             for (let i in accs) {
                 cache.leaders[accs[i].name] = 1
                 if (!cache.accounts[accs[i].name])
                     cache.accounts[accs[i].name] = accs[i]
             }
-            cb(accs.length)
+            rs(accs.length)
         })
-    }
+    })
 }
 
 module.exports = cache

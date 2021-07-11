@@ -11,66 +11,68 @@ validate = require('./validate')
 eco = require('./economics.js')
 rankings = require('./rankings.js')
 consensus = require('./consensus')
+leaderStats = require('./leaderStats')
 
 // verify node version
-var allowNodeV = [10, 12, 14]
+var allowNodeV = [10, 12, 14, 16]
 const currentNodeV = parseInt(process.versions.node.split('.')[0])
 if (allowNodeV.indexOf(currentNodeV) === -1) {
     logr.fatal('Wrong NodeJS version. Allowed versions: v'+allowNodeV.join(', v'))
     process.exit(1)
+} else if (currentNodeV === 10) {
+    logr.warn('NodeJS v10 has reached end of life, hence v10 support for Avalon will be removed in the future. Please upgrade to the latest supported NodeJS v' + allowNodeV[allowNodeV.length])
 } else logr.info('Correctly using NodeJS v'+process.versions.node)
 
 erroredRebuild = false
 
 // init the database and load most recent blocks in memory directly
-mongo.init(function() {
-    var timeStart = new Date().getTime()
-    cache.warmup('accounts', parseInt(process.env.WARMUP_ACCOUNTS), function(err) {
-        if (err) throw err
-        logr.info(Object.keys(cache.accounts).length+' acccounts loaded in RAM in '+(new Date().getTime()-timeStart)+' ms')
-        timeStart = new Date().getTime()
-        
-        cache.warmup('contents', parseInt(process.env.WARMUP_CONTENTS), function(err) {
-            if (err) throw err
-            logr.info(Object.keys(cache.contents).length+' contents loaded in RAM in '+(new Date().getTime()-timeStart)+' ms')
-            timeStart = new Date().getTime()
+mongo.init(async function() {
+    // Warmup accounts
+    let timeStart = new Date().getTime()
+    await cache.warmup('accounts', parseInt(process.env.WARMUP_ACCOUNTS))
+    logr.info(Object.keys(cache.accounts).length+' acccounts loaded in RAM in '+(new Date().getTime()-timeStart)+' ms')
+    
+    // Warmup contents
+    timeStart = new Date().getTime()
+    await cache.warmup('contents', parseInt(process.env.WARMUP_CONTENTS))
+    logr.info(Object.keys(cache.contents).length+' contents loaded in RAM in '+(new Date().getTime()-timeStart)+' ms')
+    
+    // Warmup leaders
+    timeStart = new Date().getTime()
+    let leaderCount = await cache.warmupLeaders()
+    logr.info(leaderCount+' leaders loaded in RAM in '+(new Date().getTime()-timeStart)+' ms')
 
-            cache.warmupLeaders((leaderCount)=>{
-                logr.info(leaderCount+' leaders loaded in RAM in '+(new Date().getTime()-timeStart)+' ms')
-                
-                // Rebuild chain state if specified. This verifies the integrity of every block and transactions and rebuild the state.
-                let rebuildResumeBlock = parseInt(process.env.REBUILD_RESUME_BLK)
-                let isResumingRebuild = !isNaN(rebuildResumeBlock) && rebuildResumeBlock > 0
-                if ((process.env.REBUILD_STATE === '1' || process.env.REBUILD_STATE === 1) && !isResumingRebuild) {
-                    logr.info('Chain state rebuild requested, unzipping blocks.zip...')
-                    mongo.restoreBlocks((e)=>{
-                        if (e) return logr.error(e)
-                        startRebuild(0)
-                    })
-                    return
-                }
-
-                mongo.lastBlock(function(block) {
-                    // Resuming an interrupted rebuild
-                    if (isResumingRebuild) {
-                        logr.info('Resuming interrupted rebuild from block ' + rebuildResumeBlock)
-                        config = require('./config').read(rebuildResumeBlock - 1)
-                        chain.restoredBlocks = block._id
-                        mongo.fillInMemoryBlocks(() => 
-                            db.collection('blocks').findOne({_id:rebuildResumeBlock-1 - (rebuildResumeBlock-1)%config.leaders},(e,b) => 
-                                chain.minerSchedule(b,(sch) => {
-                                    chain.schedule = sch
-                                    startRebuild(rebuildResumeBlock)
-                                })),rebuildResumeBlock)
-                        return
-                    }
-                    logr.info('#' + block._id + ' is the latest block in our db')
-                    config = require('./config.js').read(block._id)
-                    mongo.fillInMemoryBlocks(startDaemon)
-                })
-            })
+    // Warmup leader stats
+    await leaderStats.loadIndex()
+    
+    // Rebuild chain state if specified. This verifies the integrity of every block and transactions and rebuild the state.
+    let rebuildResumeBlock = parseInt(process.env.REBUILD_RESUME_BLK)
+    let isResumingRebuild = !isNaN(rebuildResumeBlock) && rebuildResumeBlock > 0
+    if ((process.env.REBUILD_STATE === '1' || process.env.REBUILD_STATE === 1) && !isResumingRebuild) {
+        logr.info('Chain state rebuild requested, unzipping blocks.zip...')
+        mongo.restoreBlocks((e)=>{
+            if (e) return logr.error(e)
+            startRebuild(0)
         })
-    })
+        return
+    }
+
+    let block = await mongo.lastBlock()
+    // Resuming an interrupted rebuild
+    if (isResumingRebuild) {
+        logr.info('Resuming interrupted rebuild from block ' + rebuildResumeBlock)
+        config = require('./config').read(rebuildResumeBlock - 1)
+        chain.restoredBlocks = block._id
+        mongo.fillInMemoryBlocks(() => 
+            db.collection('blocks').findOne({_id:rebuildResumeBlock-1 - (rebuildResumeBlock-1)%config.leaders},(e,b) => {
+                chain.schedule = chain.minerSchedule(b)
+                startRebuild(rebuildResumeBlock)
+            }),rebuildResumeBlock)
+        return
+    }
+    logr.info('#' + block._id + ' is the latest block in our db')
+    config = require('./config.js').read(block._id)
+    mongo.fillInMemoryBlocks(startDaemon)
 })
 
 function startRebuild(startBlock) {
@@ -98,9 +100,7 @@ function startDaemon() {
     // start miner schedule
     db.collection('blocks').findOne({_id: chain.getLatestBlock()._id - (chain.getLatestBlock()._id % config.leaders)}, function(err, block) {
         if (err) throw err
-        chain.minerSchedule(block, function(minerSchedule) {
-            chain.schedule = minerSchedule
-        })
+        chain.schedule = chain.minerSchedule(block)
     })
 
     // init hot/trending
@@ -110,7 +110,7 @@ function startDaemon() {
     // start the websocket server
     p2p.init()
     // and connect to peers
-    p2p.connect(process.env.PEERS ? process.env.PEERS.split(',') : [])
+    p2p.connect(process.env.PEERS ? process.env.PEERS.split(',') : [], true)
 
     // regularly clean up old txs from mempool
     setInterval(function() {

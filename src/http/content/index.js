@@ -18,9 +18,9 @@ module.exports = {
                 }, { sort: {ts:-1} }).toArray(function (err, contents) {
                     res.send(contents)
                 })
-            } 
+            }
             /*
-            else if (filterAttrs.length == 2) {
+            } else if (filterAttrs.length == 2) {
                 authors = filterAttrs[0]
                 tags = filterAttrs[1]
                 if ((authors.length == 1 && authors[0] == "all") && tags.length != 1) {

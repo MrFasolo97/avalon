@@ -7,12 +7,13 @@ module.exports = {
         // $API_URL/filter?author=author1,author2,...,authorN&tag=tag1,tag2,...,tagN&limit=x&ts=tsfrom,tsto
         app.get('/content/:filter', (req, res) => {
             var filterParam = req.params.filter
-            var filter = filterParam.split('?')
+            var filter = filterParam.split(':')
             var filterBy = filter[1]
             var filterAttrs = filterBy.split('&')
 
             if (filterAttrs.length == 1) {
                 authors = filterAttrs[0].split('=')[1]
+                authors = authors.split(",")
                 db.collection('contents').find({
                     author: { $in : authors }
                 }, { sort: {ts:-1} }).toArray(function (err, contents) {

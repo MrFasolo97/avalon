@@ -4,50 +4,54 @@ module.exports = {
     init: (app) => {
         // get content by tag with limit by certain author
         // filter = author,tag,limit,ts(from, to)
+        // $API_URL/filter?author=author1,author2,...,authorN&tag=tag1,tag2,...,tagN&limit=x&ts=tsfrom,tsto
         app.get('/content/:filter', (req, res) => {
             var filterParam = req.params.filter
-            var filter = filterParam.split(',')
-            if (filter.length == 1) {
-                author = filter[0]
+            var filter = filterParam.split('?')
+            var filterBy = filter[1]
+            var filterAttrs = filterBy.split('&')
+
+            if (filterAttrs.length == 1) {
+                authors = filterAttrs[0].split('=')[1]
                 db.collection('contents').find({
-                    author: author
+                    author: { $in : authors }
                 }, { sort: {ts:-1} }).toArray(function (err, contents) {
                     res.send(contents)
                 })
-            } else if (filter.length == 2) {
-                author = filter[0]
-                tag = filter[1]
-                if (author == "all" && tag != "all") {
+            } else if (filterAttrs.length == 2) {
+                authors = filterAttrs[0]
+                tags = filterAttrs[1]
+                if ((authors.length == 1 && authors[0] == "all") && tags.length != 1) {
                     db.collection('contents').find({
-                        'json.tag': tag
+                        'json.tag': { $in: tags }
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (author != "all" && tag != "all") {
+                } else if (authors.length != 1 && tags.length != 1) {
                     db.collection('contents').find({
                         $and: [
-                            { author: author },
-                            { 'json.tag': tag }
+                            author: { $in : authors },
+                            'json.tag': { $in: tags }
                         ]
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (author == "all" && tag == "all") {
+                } else if ((authors.length == 1 && authors[0] == "all") && (tags.length == 1 && tags[0] == "all")) {
                     db.collection('contents').find({
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (author != "all" && tag == "all") {
+                } else if (authors.length != 1  && (tags.length == 1 && tags[0] == "all")) {
                     db.collection('contents').find({
-                        author: author,
+                        author: { $in : authors },
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
                 }
-            } else if (filter.length == 3) {
-                author = filter[0]
-                tag = filter[1]
-                limit = parseInt(filter[2])
+            } else if (filterAttrs.length == 3) {
+                author = filterAttrs[0]
+                tag = filterAttrs[1]
+                limit = parseInt(filterAttrs[2])
 
                 if (author != "all" && tag != "all" && limit != -1) {
                     db.collection('contents').find({
@@ -102,11 +106,11 @@ module.exports = {
                         res.send(contents)
                     })
                 }
-            } else if (filter.length == 4) {
-                author = filter[0]
-                tag = filter[1]
-                limit = parseInt(filter[2])
-                tsrange = filter[3].split(":")
+            } else if (filterAttrs.length == 4) {
+                author = filterAttrs[0]
+                tag = filterAttrs[1]
+                limit = parseInt(filterAttrs[2])
+                tsrange = filterAttrs[3].split(":")
                 if (tsrange.length == 2) {
                     tsfrom = parseInt(tsrange[0]) * 1000
                     tsto = parseInt(tsrange[1]) * 1000

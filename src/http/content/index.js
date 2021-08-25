@@ -14,8 +14,20 @@ module.exports = {
             if (filterAttrs.length == 1) {
                 authors = filterAttrs[0].split('=')[1]
                 authors = authors.split(",")
+
+                authors_in = []
+                authors_ex = []
+                for(var i=0; i<authors.length; i++) 
+                    if(authors[i].includes("^")) 
+                        authors_ex.push(authors[i])
+                    else
+                        authors_in.push(authors[i])
+
                 db.collection('contents').find({
-                    author: { $in : authors }
+                    $and: [
+                        author: { $in : authors_in },
+                        author: { $nin : authors_ex }
+                    ]
                 }, { sort: {ts:-1} }).toArray(function (err, contents) {
                     res.send(contents)
                 })
@@ -117,7 +129,7 @@ module.exports = {
                 tags = tags.split(",")
                 limit = parseInt(filterAttrs[2].split("=")[1])
                 tsrange = filterAttrs[3].split("=")[1]
-                tsrange = tsrange.split("-")
+                tsrange = tsrange.split(",")
                 if (tsrange.length == 2) {
                     tsfrom = parseInt(tsrange[0]) * 1000
                     tsto = parseInt(tsrange[1]) * 1000

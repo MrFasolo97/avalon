@@ -74,33 +74,30 @@ module.exports = {
                 console.log(tags_in)
                 console.log(tags_ex)
 
-                if (authors[0] == "all" && tags[0]!= "all") {
+                if (authors.include("all") && !tags.include("all")) {
                     db.collection('contents').find({
-                            $and: [
-                                { 'json.tag': { $in: tags_in } },
-                                { 'json.tag': { $nin: tags_ex } },
-                            ],
-                        $or: [
-                        { 
-                            $and: [
-                                { 'json.tag': { $in: tags_in } },
-                                { 'json.tag': { $nin: tags_ex } },
-                            ],
-                        },
-                        { 
-                            $and: [
-                                { votes: { $elemMatch: { tag: { $in: tags_in } } } },
-                                { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
-                            ]
-                        }]
+                        $and: [
+                            { author: { $nin : authors_ex } },
+                            { 
+                                $or: [
+                                { 
+                                    $and: [
+                                        { 'json.tag': { $in: tags_in } },
+                                        { 'json.tag': { $nin: tags_ex } },
+                                    ],
+                                },
+                                { 
+                                    $and: [
+                                        { votes: { $elemMatch: { tag: { $in: tags_in } } } },
+                                        { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
+                                    ]
+                                }]
+                            }
+                        ]
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (authors[0] != "all" && tags[0] != "all") {
-                    console.log(authors)
-                    console.log(tags)
-                    console.log(tags_in)
-                    console.log(tags_ex)
+                } else if (!authors.include("all") && !tags.include("all")) {
                     db.collection('contents').find({
                         $and: [
                             { author: { $in : authors_in } },
@@ -124,16 +121,31 @@ module.exports = {
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (authors[0] == "all" && tags[0] == "all") {
+                } else if (authors.include("all") && tags.include("all")) {
                     db.collection('contents').find({
+                        $and: [
+                            { author: { $nin : authors_ex } },
+                            { 
+                                $or: [
+                                    { 'json.tag': { $nin: tags_ex } },
+                                    { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
+                                ]
+                            }
+                        ] 
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (authors[0] != "all"  && tags[0] == "all") {
+                } else if (!authors.include("all")  && tags.include("all") {
                     db.collection('contents').find({
                         $and: [
                             { author: { $in : authors_in } },
-                            { author: { $nin : authors_ex } }
+                            { author: { $nin : authors_ex } },
+                            { 
+                                $or: [
+                                    { 'json.tag': { $nin: tags_ex } },
+                                    { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
+                                ]
+                            }
                         ]
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)

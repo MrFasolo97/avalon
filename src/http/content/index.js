@@ -127,7 +127,7 @@ module.exports = {
                 if (authors[0] == "all" && tags[0]!= "all" && limit == -1) {
                     db.collection('contents').find({
                         $and: [
-                            'json.tag': { $in: tags },
+                            { 'json.tag': { $in: tags } },
                             { ts: { $gte: tsfrom } },
                             { ts: { $lte: tsto } }
                         ]
@@ -157,7 +157,7 @@ module.exports = {
                 } else if (authors[0] != "all"  && tags[0] == "all" && limit == -1) {
                     db.collection('contents').find({
                         $and: [
-                            author: { $in : authors },
+                            { author: { $in : authors } },
                             { ts: { $gte: tsfrom } },
                             { ts: { $lte: tsto } }
                         ]
@@ -167,7 +167,7 @@ module.exports = {
                 } else if (authors[0] == "all" && tags[0]!= "all" && limit != -1) {
                     db.collection('contents').find({
                         $and: [
-                            'json.tag': { $in: tags },
+                            { 'json.tag': { $in: tags } },
                             { ts: { $gte: tsfrom } },
                             { ts: { $lte: tsto } }
                         ]
@@ -197,7 +197,7 @@ module.exports = {
                 } else if (authors[0] != "all"  && tags[0] == "all" && limit != -1) {
                     db.collection('contents').find({
                         $and: [
-                            author: { $in : authors },
+                            { author: { $in : authors } },
                             { ts: { $gte: tsfrom } },
                             { ts: { $lte: tsto } }
                         ]

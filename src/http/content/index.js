@@ -74,15 +74,19 @@ module.exports = {
                             ],
                         },
                         { 
-                            // $and: [
-                            //     { votes: { $elemmatch: { tag: { $in: tags_in } } } },
-                            //     { votes: { $elemmatch: { tag: { $nin: tags_ex } } } } 
-                            // ]
+                            $and: [
+                                { votes: { $elemmatch: { tag: { $in: tags_in } } } },
+                                { votes: { $elemmatch: { tag: { $nin: tags_ex } } } } 
+                            ]
                         }]
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
                 } else if (authors[0] != "all" && tags[0] != "all") {
+                    console.log(authors)
+                    console.log(tags)
+                    console.log(tags_in)
+                    console.log(tags_ex)
                     db.collection('contents').find({
                         $and: [
                             { author: { $in : authors_in } },
@@ -96,10 +100,10 @@ module.exports = {
                                     ],
                                 },
                                 { 
-                                    // $and: [
-                                    //     { votes: { $elemmatch: { tag: { $in: tags_in } } } },
-                                    //     { votes: { $elemmatch: { tag: { $nin: tags_ex } } } } 
-                                    // ]
+                                    $and: [
+                                        { votes: { $elemmatch: { tag: { $in: tags_in } } } },
+                                        { votes: { $elemmatch: { tag: { $nin: tags_ex } } } } 
+                                    ]
                                 }]
                             }
                         ]

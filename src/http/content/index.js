@@ -106,19 +106,19 @@ module.exports = {
                             { author: { $in : authors_in } },
                             { author: { $nin : authors_ex } },
                             { 
-                                $or: [
-                                { 
+                            //     $or: [
+                            //     { 
                                     $and: [
                                         { 'json.tag': { $in: tags_in } },
                                         { 'json.tag': { $nin: tags_ex } },
                                     ],
-                                },
-                                { 
-                                    $and: [
-                                        { votes: { $elemmatch: { tag: { $in: tags_in } } } },
-                                        { votes: { $elemmatch: { tag: { $nin: tags_ex } } } } 
-                                    ]
-                                }]
+                                // },
+                                // { 
+                                //     $and: [
+                                //         { votes: { $elemmatch: { tag: { $in: tags_in } } } },
+                                //         { votes: { $elemmatch: { tag: { $nin: tags_ex } } } } 
+                                //     ]
+                                // }]
                             }
                         ]
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {

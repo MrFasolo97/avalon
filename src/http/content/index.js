@@ -47,7 +47,7 @@ module.exports = {
 
                 authors_in = []
                 authors_ex = []
-                for(var i=0; i<authors.length; i++) {} 
+                for(var i=0; i<authors.length; i++)  
                     if(authors[i].includes("^")) 
                         authors_ex.push(authors[i])
                     else

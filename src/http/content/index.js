@@ -56,7 +56,7 @@ module.exports = {
                 authors = authors.split(",")
                 tags = filterAttrs[1].split('=')[1]
                 tags = tags.split(",")
-                limit = parseInt(filterAttrs[2]) 
+                limit = parseInt(filterAttrs[2].split("=")[1]) 
                 if (authors[0] == "all" && tags[0]!= "all" && limit == -1) {
                     db.collection('contents').find({
                         'json.tag': { $in: tags }

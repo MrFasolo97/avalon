@@ -80,18 +80,19 @@ module.exports = {
                             { author: { $nin : authors_ex } },
                             { 
                                 $or: [
-                                { 
-                                    $and: [
-                                        { 'json.tag': { $in: tags_in } },
-                                        { 'json.tag': { $nin: tags_ex } },
-                                    ],
-                                },
-                                { 
-                                    $and: [
-                                        { votes: { $elemMatch: { tag: { $in: tags_in } } } },
-                                        { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
-                                    ]
-                                }]
+                                    { 
+                                        $and: [
+                                            { 'json.tag': { $in: tags_in } },
+                                            { 'json.tag': { $nin: tags_ex } },
+                                        ],
+                                    },
+                                    { 
+                                        $and: [
+                                            { votes: { $elemMatch: { tag: { $in: tags_in } } } },
+                                            { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
+                                        ]
+                                    }
+                                ]
                             }
                         ]
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
@@ -104,18 +105,19 @@ module.exports = {
                             { author: { $nin : authors_ex } },
                             { 
                                 $or: [
-                                { 
-                                    $and: [
-                                        { 'json.tag': { $in: tags_in } },
-                                        { 'json.tag': { $nin: tags_ex } },
-                                    ],
-                                },
-                                { 
-                                    $and: [
-                                        { votes: { $elemMatch: { tag: { $in: tags_in } } } },
-                                        { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
-                                    ]
-                                }]
+                                    { 
+                                        $and: [
+                                            { 'json.tag': { $in: tags_in } },
+                                            { 'json.tag': { $nin: tags_ex } },
+                                        ],
+                                    },
+                                    { 
+                                        $and: [
+                                            { votes: { $elemMatch: { tag: { $in: tags_in } } } },
+                                            { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
+                                        ]
+                                    }
+                                ]
                             }
                         ]
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
@@ -135,7 +137,7 @@ module.exports = {
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (!authors.include("all")  && tags.include("all") {
+                } else if (!authors.include("all")  && tags.include("all")) {
                     db.collection('contents').find({
                         $and: [
                             { author: { $in : authors_in } },

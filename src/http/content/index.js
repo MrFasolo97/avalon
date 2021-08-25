@@ -4,7 +4,7 @@ module.exports = {
     init: (app) => {
         // get content by tag with limit by certain author
         // filter = author,tag,limit,ts(from, to)
-        // $API_URL/filter?author=author1,author2,...,authorN&tag=tag1,tag2,...,tagN&limit=x&ts=tsfrom,tsto
+        // $API_URL/filter?author=author1,author2,...,authorN&tag=tag1,tag2,...,tagN&limit=x&ts=tsfrom-tsto
         app.get('/content/:filter', (req, res) => {
             var filterParam = req.params.filter
             var filter = filterParam.split(':')
@@ -110,161 +110,102 @@ module.exports = {
                         res.send(contents)
                     })
                 }
-            }
-            /*
-            else if (filterAttrs.length == 3) {
-                author = filterAttrs[0]
-                tag = filterAttrs[1]
-                limit = parseInt(filterAttrs[2])
-
-                if (author != "all" && tag != "all" && limit != -1) {
-                    db.collection('contents').find({
-                        $and: [
-                            { author: author },
-                            { 'json.tag': tag }
-                        ]
-                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (author == "all" && tag != "all" && limit != -1) {
-                    db.collection('contents').find({
-                        'json.tag': tag
-                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (author != "all" && tag == "all" && limit != -1) {
-                    db.collection('contents').find({
-                        author: author
-                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (author == "all" && tag == "all" && limit != -1) {
-                    db.collection('contents').find({
-                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (author != "all" && tag != "all" && limit == -1) {
-                    db.collection('contents').find({
-                        $and: [
-                            { author: author },
-                            { 'json.tag': tag }
-                        ]
-                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (author == "all" && tag != "all" && limit == -1) {
-                    db.collection('contents').find({
-                        'json.tag': tag
-                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (author != "all" && tag == "all" && limit == -1) {
-                    db.collection('contents').find({
-                        author: author
-                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (author == "all" && tag == "all" && limit == -1) {
-                    db.collection('contents').find({
-                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                }
             } else if (filterAttrs.length == 4) {
-                author = filterAttrs[0]
-                tag = filterAttrs[1]
-                limit = parseInt(filterAttrs[2])
-                tsrange = filterAttrs[3].split(":")
+                authors = filterAttrs[0].split('=')[1]
+                authors = authors.split(",")
+                tags = filterAttrs[1].split('=')[1]
+                tags = tags.split(",")
+                limit = parseInt(filterAttrs[2].split("=")[1])
+                tsrange = filterAttrs[3].split("=")[1]
+                tsrange = tsrange.split("-")
                 if (tsrange.length == 2) {
                     tsfrom = parseInt(tsrange[0]) * 1000
                     tsto = parseInt(tsrange[1]) * 1000
                 } else {
                     return
-                }
-
-                if (author != "all" && tag != "all" && limit != -1) {
+                } 
+                if (authors[0] == "all" && tags[0]!= "all" && limit == -1) {
                     db.collection('contents').find({
                         $and: [
-                            { author: author },
-                            { 'json.tag': tag },
-                            { ts: { $gte: tsfrom } },
-                            { ts: { $lte: tsto } }
-                        ]
-                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (author == "all" && tag != "all" && limit != -1) {
-                    db.collection('contents').find({
-                        $and: [
-                            { 'json.tag': tag },
-                            { ts: { $gte: tsfrom } },
-                            { ts: { $lte: tsto } }
-                        ]
-                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (author != "all" && tag == "all" && limit != -1) {
-                    db.collection('contents').find({
-                        $and: [
-                            { author: author },
-                            { ts: { $gte: tsfrom } },
-                            { ts: { $lte: tsto } }
-                        ]
-                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (author == "all" && tag == "all" && limit != -1) {
-                    db.collection('contents').find({
-                        $and: [
-                            { ts: { $gte: tsfrom } },
-                            { ts: { $lte: tsto } }
-                        ]
-                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (author != "all" && tag != "all" && limit == -1) {
-                    db.collection('contents').find({
-                        $and: [
-                            { author: author },
-                            { 'json.tag': tag },
+                            'json.tag': { $in: tags },
                             { ts: { $gte: tsfrom } },
                             { ts: { $lte: tsto } }
                         ]
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (author == "all" && tag != "all" && limit == -1) {
+                } else if (authors[0] != "all" && tags[0] != "all" && limit == -1) {
                     db.collection('contents').find({
                         $and: [
-                            { 'json.tag': tag },
+                            { author: { $in : authors } },
+                            { 'json.tag': { $in: tags } },
                             { ts: { $gte: tsfrom } },
                             { ts: { $lte: tsto } }
                         ]
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (author != "all" && tag == "all" && limit == -1) {
+                } else if (authors[0] == "all" && tags[0] == "all" && limit == -1) {
                     db.collection('contents').find({
                         $and: [
-                            { author: author },
+                            { ts: { $gte: tsfrom } },
+                            { ts: { $lte: tsto } }
+                        ] 
+                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
+                        res.send(contents)
+                    })
+                } else if (authors[0] != "all"  && tags[0] == "all" && limit == -1) {
+                    db.collection('contents').find({
+                        $and: [
+                            author: { $in : authors },
                             { ts: { $gte: tsfrom } },
                             { ts: { $lte: tsto } }
                         ]
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (author == "all" && tag == "all" && limit == -1) {
+                } else if (authors[0] == "all" && tags[0]!= "all" && limit != -1) {
+                    db.collection('contents').find({
+                        $and: [
+                            'json.tag': { $in: tags },
+                            { ts: { $gte: tsfrom } },
+                            { ts: { $lte: tsto } }
+                        ]
+                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
+                        res.send(contents)
+                    })
+                } else if (authors[0] != "all" && tags[0] != "all" && limit != -1) {
+                    db.collection('contents').find({
+                        $and: [
+                            { author: { $in : authors } },
+                            { 'json.tag': { $in: tags } },
+                            { ts: { $gte: tsfrom } },
+                            { ts: { $lte: tsto } }
+                        ]
+                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
+                        res.send(contents)
+                    })
+                } else if (authors[0] == "all" && tags[0] == "all" && limit != -1) {
                     db.collection('contents').find({
                         $and: [
                             { ts: { $gte: tsfrom } },
                             { ts: { $lte: tsto } }
+                        ] 
+                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
+                        res.send(contents)
+                    })
+                } else if (authors[0] != "all"  && tags[0] == "all" && limit != -1) {
+                    db.collection('contents').find({
+                        $and: [
+                            author: { $in : authors },
+                            { ts: { $gte: tsfrom } },
+                            { ts: { $lte: tsto } }
                         ]
-                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
+                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
                         res.send(contents)
                     })
                 }
             }
-            */
         })
         // get new contents
         app.get('/content/:author/:link', (req, res) => {

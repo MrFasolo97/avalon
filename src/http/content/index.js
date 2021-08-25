@@ -19,8 +19,6 @@ module.exports = {
                 }, { sort: {ts:-1} }).toArray(function (err, contents) {
                     res.send(contents)
                 })
-            }
-            /*
             } else if (filterAttrs.length == 2) {
                 authors = filterAttrs[0]
                 tags = filterAttrs[1]
@@ -33,8 +31,8 @@ module.exports = {
                 } else if (authors.length != 1 && tags.length != 1) {
                     db.collection('contents').find({
                         $and: [
-                            author: { $in : authors },
-                            'json.tag': { $in: tags }
+                            { author: { $in : authors } },
+                            { 'json.tag': { $in: tags } }
                         ]
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
@@ -51,7 +49,9 @@ module.exports = {
                         res.send(contents)
                     })
                 }
-            } else if (filterAttrs.length == 3) {
+            }
+            /*
+            else if (filterAttrs.length == 3) {
                 author = filterAttrs[0]
                 tag = filterAttrs[1]
                 limit = parseInt(filterAttrs[2])

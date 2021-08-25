@@ -64,7 +64,7 @@ module.exports = {
                 for(var i=0; i<tags.length; i++) 
                     if(tags[i].includes("^")) {
                         s = tags[i].substring(1, tags[i].length)
-                        tags_ex.push(tags[i])
+                        tags_ex.push(s)
                     } else {
                         tags_in.push(tags[i])
                     }

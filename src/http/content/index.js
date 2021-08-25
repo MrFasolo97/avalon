@@ -48,10 +48,13 @@ module.exports = {
                 authors_in = []
                 authors_ex = []
                 for(var i=0; i<authors.length; i++)  
-                    if(authors[i].includes("^")) 
-                        authors_ex.push(authors[i])
-                    else
+                    if(authors[i].includes("^")) {
+                        s = authors[i].substring(1, authors[i].length)
+                        authors_ex.push(s)
+                    }
+                    else {
                         authors_in.push(authors[i])
+                    }
 
                 tags = filterAttrs[1].split('=')[1]
                 tags = tags.split(",")
@@ -59,26 +62,37 @@ module.exports = {
                 tags_in = []
                 tags_ex = []
                 for(var i=0; i<tags.length; i++) 
-                    if(tags[i].includes("^")) 
+                    if(tags[i].includes("^")) {
+                        s = tags[i].substring(1, tags[i].length)
                         tags_ex.push(tags[i])
-                    else
+                    } else {
                         tags_in.push(tags[i])
+                    }
+
+                console.log(authors_in)
+                console.log(authors_ex)
+                console.log(tags_in)
+                console.log(tags_ex)
 
                 if (authors[0] == "all" && tags[0]!= "all") {
                     db.collection('contents').find({
-                        $or: [
-                        { 
                             $and: [
                                 { 'json.tag': { $in: tags_in } },
                                 { 'json.tag': { $nin: tags_ex } },
                             ],
-                        },
-                        { 
-                            $and: [
-                                { votes: { $elemmatch: { tag: { $in: tags_in } } } },
-                                { votes: { $elemmatch: { tag: { $nin: tags_ex } } } } 
-                            ]
-                        }]
+                        // $or: [
+                        // { 
+                        //     $and: [
+                        //         { 'json.tag': { $in: tags_in } },
+                        //         { 'json.tag': { $nin: tags_ex } },
+                        //     ],
+                        // },
+                        // { 
+                        //     $and: [
+                        //         { votes: { $elemmatch: { tag: { $in: tags_in } } } },
+                        //         { votes: { $elemmatch: { tag: { $nin: tags_ex } } } } 
+                        //     ]
+                        // }]
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })

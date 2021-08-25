@@ -48,7 +48,7 @@ module.exports = {
                         res.send(contents)
                     })
                 }
-            } 
+            }
             /*
             else if (filterAttrs.length == 3) {
                 author = filterAttrs[0]

@@ -74,7 +74,7 @@ module.exports = {
                 console.log(tags_in)
                 console.log(tags_ex)
 
-                if (authors_in.include("all") && !tags_in.include("all")) {
+                if (authors.includes("all") && !tags.includes("all")) {
                     db.collection('contents').find({
                         $and: [
                             { author: { $nin : authors_ex } },
@@ -98,7 +98,7 @@ module.exports = {
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (!authors_in.include("all") && !tags_in.include("all")) {
+                } else if (!authors.includes("all") && !tags.includes("all")) {
                     db.collection('contents').find({
                         $and: [
                             { author: { $in : authors_in } },
@@ -123,7 +123,7 @@ module.exports = {
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (authors_in.include("all") && tags_in.include("all")) {
+                } else if (authors.includes("all") && tags.includes("all")) {
                     db.collection('contents').find({
                         $and: [
                             { author: { $nin : authors_ex } },
@@ -137,7 +137,7 @@ module.exports = {
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (!authors_in.include("all")  && tags_in.include("all")) {
+                } else if (!authors.includes("all")  && tags.includes("all")) {
                     db.collection('contents').find({
                         $and: [
                             { author: { $in : authors_in } },

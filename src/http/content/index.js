@@ -20,15 +20,19 @@ module.exports = {
                     res.send(contents)
                 })
             } else if (filterAttrs.length == 2) {
-                authors = filterAttrs[0]
-                tags = filterAttrs[1]
-                if ((authors.length == 1 && authors[0] == "all") && tags.length != 1) {
+                authors = filterAttrs[0].split('=')[1]
+                authors = authors.split(",")
+                tags = filterAttrs[1].split('=')[1]
+                tags = tags.split(",")
+                console.log(authors)
+                console.log(tags)
+                if (authors[0] == "all" && tags[0]!= "all") {
                     db.collection('contents').find({
                         'json.tag': { $in: tags }
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (authors.length != 1 && tags.length != 1) {
+                } else if (authors[0] != "all" && tags[0] != "all") {
                     db.collection('contents').find({
                         $and: [
                             { author: { $in : authors } },
@@ -37,12 +41,12 @@ module.exports = {
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if ((authors.length == 1 && authors[0] == "all") && (tags.length == 1 && tags[0] == "all")) {
+                } else if (authors[0] == "all" && tags[0] == "all") {
                     db.collection('contents').find({
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (authors.length != 1  && (tags.length == 1 && tags[0] == "all")) {
+                } else if (authors[0] != "all"  && tags[0] == "all") {
                     db.collection('contents').find({
                         author: { $in : authors },
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {

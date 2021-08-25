@@ -23,30 +23,63 @@ module.exports = {
                     else
                         authors_in.push(authors[i])
 
-                db.collection('contents').find({
-                    $and: [
-                        { author: { $in : authors_in } },
-                        { author: { $nin : authors_ex } }
-                    ]
-                }, { sort: {ts:-1} }).toArray(function (err, contents) {
-                    res.send(contents)
-                })
+                if(authors_in.includes("all")) {
+                    db.collection('contents').find({
+                        $and: [
+                            { author: { $nin : authors_ex } }
+                        ]
+                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
+                        res.send(contents)
+                    })
+                } else {
+                    db.collection('contents').find({
+                        $and: [
+                            { author: { $in : authors_in } },
+                            { author: { $nin : authors_ex } }
+                        ]
+                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
+                        res.send(contents)
+                    })
+                }
             } else if (filterAttrs.length == 2) {
                 authors = filterAttrs[0].split('=')[1]
                 authors = authors.split(",")
+
+                authors_in = []
+                authors_ex = []
+                for(var i=0; i<authors.length; i++) 
+                    if(authors[i].includes("^")) 
+                        authors_ex.push(authors[i])
+                    else
+                        authors_in.push(authors[i]
+
                 tags = filterAttrs[1].split('=')[1]
                 tags = tags.split(",")
+
+                tags_in = []
+                tags_ex = []
+                for(var i=0; i<tags.length; i++) 
+                    if(tags[i].includes("^")) 
+                        tags_ex.push(tags[i])
+                    else
+                        tags_in.push(tags[i]
+
                 if (authors[0] == "all" && tags[0]!= "all") {
                     db.collection('contents').find({
-                        'json.tag': { $in: tags }
+                        $and: [
+                            { 'json.tag': { $in: tags_in } },
+                            { 'json.tag': { $nin: tags_ex } } 
+                        ]
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })
                 } else if (authors[0] != "all" && tags[0] != "all") {
                     db.collection('contents').find({
                         $and: [
-                            { author: { $in : authors } },
-                            { 'json.tag': { $in: tags } }
+                            { author: { $in : authors_in } },
+                            { author: { $nin : authors_ex } },
+                            { 'json.tag': { $in: tags_in } },
+                            { 'json.tag': { $nin: tags_ex } }
                         ]
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
@@ -58,7 +91,10 @@ module.exports = {
                     })
                 } else if (authors[0] != "all"  && tags[0] == "all") {
                     db.collection('contents').find({
-                        author: { $in : authors },
+                        $and: [
+                            { author: { $in : authors_in } },
+                            { author: { $nin : authors_ex } }
+                        ]
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
                     })

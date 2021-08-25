@@ -47,11 +47,11 @@ module.exports = {
 
                 authors_in = []
                 authors_ex = []
-                for(var i=0; i<authors.length; i++) 
+                for(var i=0; i<authors.length; i++) {} 
                     if(authors[i].includes("^")) 
                         authors_ex.push(authors[i])
                     else
-                        authors_in.push(authors[i]
+                        authors_in.push(authors[i])
 
                 tags = filterAttrs[1].split('=')[1]
                 tags = tags.split(",")
@@ -62,7 +62,7 @@ module.exports = {
                     if(tags[i].includes("^")) 
                         tags_ex.push(tags[i])
                     else
-                        tags_in.push(tags[i]
+                        tags_in.push(tags[i])
 
                 if (authors[0] == "all" && tags[0]!= "all") {
                     db.collection('contents').find({

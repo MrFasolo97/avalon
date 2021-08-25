@@ -25,8 +25,8 @@ module.exports = {
 
                 db.collection('contents').find({
                     $and: [
-                        author: { $in : authors_in },
-                        author: { $nin : authors_ex }
+                        { author: { $in : authors_in } },
+                        { author: { $nin : authors_ex } }
                     ]
                 }, { sort: {ts:-1} }).toArray(function (err, contents) {
                     res.send(contents)

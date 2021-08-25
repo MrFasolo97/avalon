@@ -74,10 +74,10 @@ module.exports = {
                             ],
                         },
                         { 
-                            $and: [
-                                { votes: { $elemmatch: { tag: { $in: tags_in } } } },
-                                { votes: { $elemmatch: { tag: { $nin: tags_ex } } } } 
-                            ]
+                            // $and: [
+                            //     { votes: { $elemmatch: { tag: { $in: tags_in } } } },
+                            //     { votes: { $elemmatch: { tag: { $nin: tags_ex } } } } 
+                            // ]
                         }]
                     }, { sort: {ts:-1} }).toArray(function (err, contents) {
                         res.send(contents)
@@ -96,10 +96,10 @@ module.exports = {
                                     ],
                                 },
                                 { 
-                                    $and: [
-                                        { votes: { $elemmatch: { tag: { $in: tags_in } } } },
-                                        { votes: { $elemmatch: { tag: { $nin: tags_ex } } } } 
-                                    ]
+                                    // $and: [
+                                    //     { votes: { $elemmatch: { tag: { $in: tags_in } } } },
+                                    //     { votes: { $elemmatch: { tag: { $nin: tags_ex } } } } 
+                                    // ]
                                 }]
                             }
                         ]

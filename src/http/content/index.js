@@ -269,9 +269,37 @@ module.exports = {
             } else if (filterAttrs.length == 4) {
                 authors = filterAttrs[0].split('=')[1]
                 authors = authors.split(",")
+
+                authors_in = []
+                authors_ex = []
+                for(var i=0; i<authors.length; i++)  
+                    if(authors[i].includes("^")) {
+                        s = authors[i].substring(1, authors[i].length)
+                        authors_ex.push(s)
+                    }
+                    else {
+                        authors_in.push(authors[i])
+                    }
+
                 tags = filterAttrs[1].split('=')[1]
                 tags = tags.split(",")
-                limit = parseInt(filterAttrs[2].split("=")[1])
+
+                tags_in = []
+                tags_ex = []
+                for(var i=0; i<tags.length; i++) 
+                    if(tags[i].includes("^")) {
+                        s = tags[i].substring(1, tags[i].length)
+                        tags_ex.push(s)
+                    } else {
+                        tags_in.push(tags[i])
+                    }
+
+                limit = parseInt(filterAttrs[2].split("=")[1]) 
+
+                if(limit == -1) {
+                    limit = Number.MAX_SAFE_INTEGER
+                }
+
                 tsrange = filterAttrs[3].split("=")[1]
                 tsrange = tsrange.split(",")
                 if (tsrange.length == 2) {
@@ -280,80 +308,87 @@ module.exports = {
                 } else {
                     return
                 } 
-                if (authors[0] == "all" && tags[0]!= "all" && limit == -1) {
+
+                if (authors.includes("all") && !tags.includes("all")) {
                     db.collection('contents').find({
                         $and: [
-                            { 'json.tag': { $in: tags } },
+                            { author: { $nin : authors_ex } },
+                            { 
+                                $or: [
+                                    { 
+                                        $and: [
+                                            { 'json.tag': { $in: tags_in } },
+                                            { 'json.tag': { $nin: tags_ex } },
+                                        ],
+                                    },
+                                    { 
+                                        $and: [
+                                            { votes: { $elemMatch: { tag: { $in: tags_in } } } },
+                                            { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
+                                        ]
+                                    }
+                                ]
+                            },
                             { ts: { $gte: tsfrom } },
                             { ts: { $lte: tsto } }
                         ]
-                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
+                    }, { sort: {ts:-1}, limit: limit}).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (authors[0] != "all" && tags[0] != "all" && limit == -1) {
+                } else if (!authors.includes("all") && !tags.includes("all")) {
                     db.collection('contents').find({
                         $and: [
-                            { author: { $in : authors } },
-                            { 'json.tag': { $in: tags } },
+                            { author: { $in : authors_in } },
+                            { author: { $nin : authors_ex } },
+                            { 
+                                $or: [
+                                    { 
+                                        $and: [
+                                            { 'json.tag': { $in: tags_in } },
+                                            { 'json.tag': { $nin: tags_ex } },
+                                        ],
+                                    },
+                                    { 
+                                        $and: [
+                                            { votes: { $elemMatch: { tag: { $in: tags_in } } } },
+                                            { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
+                                        ]
+                                    }
+                                ]
+                            },
                             { ts: { $gte: tsfrom } },
                             { ts: { $lte: tsto } }
                         ]
-                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
+                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (authors[0] == "all" && tags[0] == "all" && limit == -1) {
+                } else if (authors.includes("all") && tags.includes("all")) {
                     db.collection('contents').find({
                         $and: [
+                            { author: { $nin : authors_ex } },
+                            { 
+                                $or: [
+                                    { 'json.tag': { $nin: tags_ex } },
+                                    { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
+                                ]
+                            },
                             { ts: { $gte: tsfrom } },
                             { ts: { $lte: tsto } }
                         ] 
-                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (authors[0] != "all"  && tags[0] == "all" && limit == -1) {
-                    db.collection('contents').find({
-                        $and: [
-                            { author: { $in : authors } },
-                            { ts: { $gte: tsfrom } },
-                            { ts: { $lte: tsto } }
-                        ]
-                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (authors[0] == "all" && tags[0]!= "all" && limit != -1) {
-                    db.collection('contents').find({
-                        $and: [
-                            { 'json.tag': { $in: tags } },
-                            { ts: { $gte: tsfrom } },
-                            { ts: { $lte: tsto } }
-                        ]
                     }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
                         res.send(contents)
                     })
-                } else if (authors[0] != "all" && tags[0] != "all" && limit != -1) {
+                } else if (!authors.includes("all")  && tags.includes("all")) {
                     db.collection('contents').find({
                         $and: [
-                            { author: { $in : authors } },
-                            { 'json.tag': { $in: tags } },
-                            { ts: { $gte: tsfrom } },
-                            { ts: { $lte: tsto } }
-                        ]
-                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (authors[0] == "all" && tags[0] == "all" && limit != -1) {
-                    db.collection('contents').find({
-                        $and: [
-                            { ts: { $gte: tsfrom } },
-                            { ts: { $lte: tsto } }
-                        ] 
-                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (authors[0] != "all"  && tags[0] == "all" && limit != -1) {
-                    db.collection('contents').find({
-                        $and: [
-                            { author: { $in : authors } },
+                            { author: { $in : authors_in } },
+                            { author: { $nin : authors_ex } },
+                            { 
+                                $or: [
+                                    { 'json.tag': { $nin: tags_ex } },
+                                    { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
+                                ]
+                            },
                             { ts: { $gte: tsfrom } },
                             { ts: { $lte: tsto } }
                         ]

@@ -16,7 +16,7 @@ module.exports = {
             var filterKeys = []
 
             for (var k=0; k<filterAttrs.length; k++) {
-                var kv = filtterAttrs[k].split('=')
+                var kv = filterAttrs[k].split('=')
 
                 if (kv.length == 2) {
                     var key = kv[0]

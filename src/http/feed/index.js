@@ -215,12 +215,8 @@ module.exports = {
                                 { author: { $in: account.follows } },
                                 { author: { $nin : authors_ex } },
                                 { pa: null },
-                                { 
-                                    $or: [
-                                        { 'json.tag': { $nin: tags_ex } },
-                                        { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
-                                    ]
-                                },
+                                { 'json.tag': { $nin: tags_ex } },
+                                { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
                                 { ts: { $gte: tsfrom } },
                                 { ts: { $lte: tsto } },
                             ] 
@@ -240,12 +236,8 @@ module.exports = {
                                 { author: { $in : authors_in } },
                                 { author: { $nin : authors_ex } },
                                 { pa: null },
-                                { 
-                                    $or: [
-                                        { 'json.tag': { $nin: tags_ex } },
-                                        { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
-                                    ]
-                                },
+                                { 'json.tag': { $nin: tags_ex } },
+                                { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
                                 { ts: { $gte: tsfrom } },
                                 { ts: { $lte: tsto } },
                             ]

@@ -55,7 +55,6 @@ module.exports = {
                 }
             }
 
-
             console.log(filterMap)
 
             if (filterAttrs.length == 1) {

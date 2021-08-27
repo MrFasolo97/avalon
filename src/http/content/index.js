@@ -36,7 +36,7 @@ module.exports = {
             }
             console.log(filterKeys)
 
-            for (var k=0; k<defaultKeys; k++) {
+            for (var k=0; k<defaultKeys.length; k++) {
                 var key = defaultKeys[k]
                 console.log(key)
 

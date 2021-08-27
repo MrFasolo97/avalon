@@ -30,12 +30,6 @@ module.exports = {
 
         // get new contents with filter by author, tag, limit, tsrange
         app.get('/new/:filter', (req, res) => {
-            db.collection('contents').find(
-                { pa: null }
-                , { sort: { ts: -1 }, limit: 50 }).toArray(function (err, contents) {
-                res.send(contents)
-            })
-
             var filterParam = req.params.filter
             var filter = filterParam.split(':')
             var filterBy = filter[1]

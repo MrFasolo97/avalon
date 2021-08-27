@@ -86,7 +86,7 @@ module.exports = {
                         filterMap['tags'] = []
                         filterMap['tags'].push("all") 
                     } else if (key == 'limit') {
-                        filterMap['limit'] = Number.MAX_SAFE_INTEGER
+                        filterMap['limit'] = 50 
                     } else if (key == 'tsrange') {
                         filterMap['tsrange'] = []
                         filterMap['tsrange'].push(0)

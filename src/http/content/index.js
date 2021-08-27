@@ -57,12 +57,8 @@ module.exports = {
                 }
             }
 
-            console.log(filterMap)
-
             {
                 authors = filterMap['authors']
-                console.log(authors)
-                authors = authors.split(",")
 
                 authors_in = []
                 authors_ex = []
@@ -76,7 +72,6 @@ module.exports = {
                     }
 
                 tags = filterMap['tags']
-                tags = tags.split(",")
 
                 tags_in = []
                 tags_ex = []
@@ -95,7 +90,6 @@ module.exports = {
                 }
 
                 tsrange = filterMap['tsrange']
-                tsrange = tsrange.split(",")
                 if (tsrange.length == 2) {
                     tsfrom = parseInt(tsrange[0]) * 1000
                     tsto = parseInt(tsrange[1]) * 1000

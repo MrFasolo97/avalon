@@ -180,12 +180,8 @@ module.exports = {
                     $and: [
                         { pa: null },
                         { author: { $nin : authors_ex } },
-                        { 
-                            $or: [
-                                { 'json.tag': { $nin: tags_ex } },
-                                { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
-                            ]
-                        },
+                        { 'json.tag': { $nin: tags_ex } },
+                        { votes: { $elemMatch: { tag: { $nin: tags_ex } } } },
                         { ts: { $gte: tsfrom } },
                         { ts: { $lte: tsto } }
                     ] 
@@ -198,12 +194,8 @@ module.exports = {
                         { pa: null },
                         { author: { $in : authors_in } },
                         { author: { $nin : authors_ex } },
-                        { 
-                            $or: [
-                                { 'json.tag': { $nin: tags_ex } },
-                                { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
-                            ]
-                        },
+                        { 'json.tag': { $nin: tags_ex } },
+                        { votes: { $elemMatch: { tag: { $nin: tags_ex } } } }, 
                         { ts: { $gte: tsfrom } },
                         { ts: { $lte: tsto } }
                     ]

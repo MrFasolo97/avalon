@@ -164,7 +164,6 @@ module.exports = {
                                 },
                                 { ts: { $gte: tsfrom } },
                                 { ts: { $lte: tsto } },
-                                { ts: { $lte: content.ts } }
                             ]
                         }, { sort: {ts:-1}, limit: limit}).toArray(function (err, contents) {
                             res.send(contents)
@@ -200,7 +199,6 @@ module.exports = {
                                 },
                                 { ts: { $gte: tsfrom } },
                                 { ts: { $lte: tsto } },
-                                { ts: { $lte: content.ts } }
                             ]
                         }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
                             res.send(contents)
@@ -225,7 +223,6 @@ module.exports = {
                                 },
                                 { ts: { $gte: tsfrom } },
                                 { ts: { $lte: tsto } },
-                                { ts: { $lte: content.ts } }
                             ] 
                         }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
                             res.send(contents)
@@ -251,7 +248,6 @@ module.exports = {
                                 },
                                 { ts: { $gte: tsfrom } },
                                 { ts: { $lte: tsto } },
-                                { ts: { $lte: content.ts } }
                             ]
                         }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
                             res.send(contents)

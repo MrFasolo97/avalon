@@ -34,11 +34,14 @@ module.exports = {
                     }
                 }
             }
+            console.log(filterKeys)
 
             for (var k=0; k<defaultKeys; k++) {
                 var key = defaultKeys[k]
+                console.log(key)
 
                 if (filterKeys.includes(key) == false) {
+                    console.log('here')
                     if (key == 'authors') {
                         filterMap['authors'] = []
                         filterMap['authors'].push("all") 

@@ -46,8 +46,8 @@ module.exports = {
                         filterMap['authors'] = []
                         filterMap['authors'].push("all") 
                     } else if (key == 'tags') {
-                        filterMap['tags'] = val.split(',')
-                        filterMap['authors'].push("all") 
+                        filterMap['tags'] = []
+                        filterMap['tags'].push("all") 
                     } else if (key == 'limit') {
                         filterMap['limit'] = Number.MAX_SAFE_INTEGER
                     } else if (key == 'tsrange') {

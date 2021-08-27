@@ -69,7 +69,7 @@ module.exports = {
                     else
                         authors_in.push(authors[i])
 
-                if(authorsin.includes("all")) {
+                if(authors_in.includes("all")) {
                     db.collection('contents').find({
                         $and: [
                             { author: { $nin : authors_ex } }

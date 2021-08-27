@@ -34,7 +34,6 @@ module.exports = {
                     }
                 }
             }
-            console.log(filterKeys)
 
             for (var k=0; k<defaultKeys.length; k++) {
                 var key = defaultKeys[k]
@@ -58,40 +57,8 @@ module.exports = {
                 }
             }
 
-            console.log(filterMap)
-
-            if (filterAttrs.length == 1) {
-                authors = filterAttrs[0].split('=')[1]
-                authors = authors.split(",")
-
-                authors_in = []
-                authors_ex = []
-                for(var i=0; i<authors.length; i++) 
-                    if(authors[i].includes("^")) 
-                        authors_ex.push(authors[i])
-                    else
-                        authors_in.push(authors[i])
-
-                if(authors_in.includes("all")) {
-                    db.collection('contents').find({
-                        $and: [
-                            { author: { $nin : authors_ex } }
-                        ]
-                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else {
-                    db.collection('contents').find({
-                        $and: [
-                            { author: { $in : authors_in } },
-                            { author: { $nin : authors_ex } }
-                        ]
-                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                }
-            } else if (filterAttrs.length == 2) {
-                authors = filterAttrs[0].split('=')[1]
+            {
+                authors = filterMap['authors']
                 authors = authors.split(",")
 
                 authors_in = []
@@ -105,7 +72,7 @@ module.exports = {
                         authors_in.push(authors[i])
                     }
 
-                tags = filterAttrs[1].split('=')[1]
+                tags = filterMap['tags']
                 tags = tags.split(",")
 
                 tags_in = []
@@ -118,238 +85,13 @@ module.exports = {
                         tags_in.push(tags[i])
                     }
 
-                console.log(authors_in)
-                console.log(authors_ex)
-                console.log(tags_in)
-                console.log(tags_ex)
-
-                if (authors.includes("all") && !tags.includes("all")) {
-                    db.collection('contents').find({
-                        $and: [
-                            { author: { $nin : authors_ex } },
-                            { 
-                                $or: [
-                                    { 
-                                        $and: [
-                                            { 'json.tag': { $in: tags_in } },
-                                            { 'json.tag': { $nin: tags_ex } },
-                                        ],
-                                    },
-                                    { 
-                                        $and: [
-                                            { votes: { $elemMatch: { tag: { $in: tags_in } } } },
-                                            { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
-                                        ]
-                                    }
-                                ]
-                            }
-                        ]
-                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (!authors.includes("all") && !tags.includes("all")) {
-                    db.collection('contents').find({
-                        $and: [
-                            { author: { $in : authors_in } },
-                            { author: { $nin : authors_ex } },
-                            { 
-                                $or: [
-                                    { 
-                                        $and: [
-                                            { 'json.tag': { $in: tags_in } },
-                                            { 'json.tag': { $nin: tags_ex } },
-                                        ],
-                                    },
-                                    { 
-                                        $and: [
-                                            { votes: { $elemMatch: { tag: { $in: tags_in } } } },
-                                            { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
-                                        ]
-                                    }
-                                ]
-                            }
-                        ]
-                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (authors.includes("all") && tags.includes("all")) {
-                    db.collection('contents').find({
-                        $and: [
-                            { author: { $nin : authors_ex } },
-                            { 
-                                $or: [
-                                    { 'json.tag': { $nin: tags_ex } },
-                                    { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
-                                ]
-                            }
-                        ] 
-                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (!authors.includes("all")  && tags.includes("all")) {
-                    db.collection('contents').find({
-                        $and: [
-                            { author: { $in : authors_in } },
-                            { author: { $nin : authors_ex } },
-                            { 
-                                $or: [
-                                    { 'json.tag': { $nin: tags_ex } },
-                                    { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
-                                ]
-                            }
-                        ]
-                    }, { sort: {ts:-1} }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                }
-            } else if (filterAttrs.length == 3) {  
-                authors = filterAttrs[0].split('=')[1]
-                authors = authors.split(",")
-
-                authors_in = []
-                authors_ex = []
-                for(var i=0; i<authors.length; i++)  
-                    if(authors[i].includes("^")) {
-                        s = authors[i].substring(1, authors[i].length)
-                        authors_ex.push(s)
-                    }
-                    else {
-                        authors_in.push(authors[i])
-                    }
-
-                tags = filterAttrs[1].split('=')[1]
-                tags = tags.split(",")
-
-                tags_in = []
-                tags_ex = []
-                for(var i=0; i<tags.length; i++) 
-                    if(tags[i].includes("^")) {
-                        s = tags[i].substring(1, tags[i].length)
-                        tags_ex.push(s)
-                    } else {
-                        tags_in.push(tags[i])
-                    }
-
-                limit = parseInt(filterAttrs[2].split("=")[1]) 
+                limit = filterMap['limit'] 
 
                 if(limit == -1) {
                     limit = Number.MAX_SAFE_INTEGER
                 }
 
-                if (authors.includes("all") && !tags.includes("all")) {
-                    db.collection('contents').find({
-                        $and: [
-                            { author: { $nin : authors_ex } },
-                            { 
-                                $or: [
-                                    { 
-                                        $and: [
-                                            { 'json.tag': { $in: tags_in } },
-                                            { 'json.tag': { $nin: tags_ex } },
-                                        ],
-                                    },
-                                    { 
-                                        $and: [
-                                            { votes: { $elemMatch: { tag: { $in: tags_in } } } },
-                                            { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
-                                        ]
-                                    }
-                                ]
-                            }
-                        ]
-                    }, { sort: {ts:-1}, limit: limit}).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (!authors.includes("all") && !tags.includes("all")) {
-                    db.collection('contents').find({
-                        $and: [
-                            { author: { $in : authors_in } },
-                            { author: { $nin : authors_ex } },
-                            { 
-                                $or: [
-                                    { 
-                                        $and: [
-                                            { 'json.tag': { $in: tags_in } },
-                                            { 'json.tag': { $nin: tags_ex } },
-                                        ],
-                                    },
-                                    { 
-                                        $and: [
-                                            { votes: { $elemMatch: { tag: { $in: tags_in } } } },
-                                            { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
-                                        ]
-                                    }
-                                ]
-                            }
-                        ]
-                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (authors.includes("all") && tags.includes("all")) {
-                    db.collection('contents').find({
-                        $and: [
-                            { author: { $nin : authors_ex } },
-                            { 
-                                $or: [
-                                    { 'json.tag': { $nin: tags_ex } },
-                                    { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
-                                ]
-                            }
-                        ] 
-                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                } else if (!authors.includes("all")  && tags.includes("all")) {
-                    db.collection('contents').find({
-                        $and: [
-                            { author: { $in : authors_in } },
-                            { author: { $nin : authors_ex } },
-                            { 
-                                $or: [
-                                    { 'json.tag': { $nin: tags_ex } },
-                                    { votes: { $elemMatch: { tag: { $nin: tags_ex } } } } 
-                                ]
-                            }
-                        ]
-                    }, { sort: {ts:-1}, limit: limit }).toArray(function (err, contents) {
-                        res.send(contents)
-                    })
-                }
-            } else if (filterAttrs.length == 4) {
-                authors = filterAttrs[0].split('=')[1]
-                authors = authors.split(",")
-
-                authors_in = []
-                authors_ex = []
-                for(var i=0; i<authors.length; i++)  
-                    if(authors[i].includes("^")) {
-                        s = authors[i].substring(1, authors[i].length)
-                        authors_ex.push(s)
-                    }
-                    else {
-                        authors_in.push(authors[i])
-                    }
-
-                tags = filterAttrs[1].split('=')[1]
-                tags = tags.split(",")
-
-                tags_in = []
-                tags_ex = []
-                for(var i=0; i<tags.length; i++) 
-                    if(tags[i].includes("^")) {
-                        s = tags[i].substring(1, tags[i].length)
-                        tags_ex.push(s)
-                    } else {
-                        tags_in.push(tags[i])
-                    }
-
-                limit = parseInt(filterAttrs[2].split("=")[1]) 
-
-                if(limit == -1) {
-                    limit = Number.MAX_SAFE_INTEGER
-                }
-
-                tsrange = filterAttrs[3].split("=")[1]
+                tsrange = filterMap['tsrange']
                 tsrange = tsrange.split(",")
                 if (tsrange.length == 2) {
                     tsfrom = parseInt(tsrange[0]) * 1000

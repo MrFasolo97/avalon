@@ -24,11 +24,11 @@ module.exports = {
                     var val = kv[1]
 
                     if (key == 'authors') {
-                        fliterMap['authors'] = val.split(',')
+                        filterMap['authors'] = val.split(',')
                     } else if (key == 'tags') {
-                        fliterMap['tags'] = val.split(',')
+                        filterMap['tags'] = val.split(',')
                     } else if (key == 'limit') {
-                        fliterMap['limit'] = parseInt(val) 
+                        filterMap['limit'] = parseInt(val) 
                     } else if (key == 'tsrange') {
                         filterMap['tsrange'] = val.split(',')
                     }
@@ -40,13 +40,13 @@ module.exports = {
 
                 if (filterKeys.includes(key) == false) {
                     if (key == 'authors') {
-                        fliterMap['authors'] = []
-                        fliterMap['authors'].push("all") 
+                        filterMap['authors'] = []
+                        filterMap['authors'].push("all") 
                     } else if (key == 'tags') {
-                        fliterMap['tags'] = val.split(',')
-                        fliterMap['authors'].push("all") 
+                        filterMap['tags'] = val.split(',')
+                        filterMap['authors'].push("all") 
                     } else if (key == 'limit') {
-                        fliterMap['limit'] = Number.MAX_SAFE_INTEGER
+                        filterMap['limit'] = Number.MAX_SAFE_INTEGER
                     } else if (key == 'tsrange') {
                         filterMap['tsrange'] = []
                         filterMap['tsrange'].push(0)

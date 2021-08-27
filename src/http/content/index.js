@@ -57,8 +57,11 @@ module.exports = {
                 }
             }
 
+            console.log(filterMap)
+
             {
                 authors = filterMap['authors']
+                console.log(authors)
                 authors = authors.split(",")
 
                 authors_in = []

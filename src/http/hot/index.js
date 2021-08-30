@@ -58,6 +58,8 @@ module.exports = {
                 limit = Number.MAX_SAFE_INTEGER
             }
 
+            var minTs = new Date().getTime() - rankings.types['hot'].halfLife*expireFactor
+
             if (tags.includes('all')) {
                 db.collection('contents').find(
                     {

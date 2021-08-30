@@ -58,6 +58,9 @@ module.exports = {
                 limit = Number.MAX_SAFE_INTEGER
             }
 
+            var hotHalfTime = 43200 // 12 hours
+            var expireFactor = 5000
+
             var minTs = new Date().getTime() - rankings.types['hot'].halfLife*expireFactor
 
             if (tags.includes('all')) {

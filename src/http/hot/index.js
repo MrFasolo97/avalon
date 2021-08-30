@@ -1,5 +1,26 @@
 module.exports = {
     init: (app) => {
+        // get hot
+        app.get('/hot', (req, res) => {
+            res.send(rankings.contents.hot.slice(0, 50))
+        })
+        app.get('/hot/:author/:link', (req, res) => {
+            var filteredContents = []
+            var isPastRelativeContent = false
+            var added = 0
+            for (let i = 0; i < rankings.contents.hot.length; i++) {
+                if (isPastRelativeContent) {
+                    filteredContents.push(rankings.contents.hot[i])
+                    added++
+                }
+                if (added >= 50) break
+                if (rankings.contents.hot[i].author === req.params.author
+                    && rankings.contents.hot[i].link === req.params.link)
+                    isPastRelativeContent = true
+            }
+            res.send(filteredContents)
+        })
+        // get hot with tags and limit filter
         app.get('/hot/:filter', (req, res) => {
             var filterParam = req.params.filter
             var filter = filterParam.split(':')
@@ -58,10 +79,7 @@ module.exports = {
                 limit = Number.MAX_SAFE_INTEGER
             }
 
-            var hotHalfTime = 43200 // 12 hours
-            var expireFactor = 5000
-
-            var minTs = new Date().getTime() - rankings.types['hot'].halfLife*expireFactor
+            var minTs = new Date().getTime() - rankings.types['hot'].halfLife*rankings.expireFactor
 
             if (tags.includes('all')) {
                 db.collection('contents').find(
@@ -92,7 +110,6 @@ module.exports = {
                         contents = contents.sort(function(a,b) {
                             return b.score - a.score
                         })
-                        //rankings.contents['hot'] = contents
                         res.send(contents.slice(0, limit))
                 })
             } else {
@@ -141,26 +158,6 @@ module.exports = {
                         res.send(contents.slice(0, limit))
                 })
             }
-        })
-        // get hot
-        app.get('/hot', (req, res) => {
-            res.send(rankings.contents.hot.slice(0, 50))
-        })
-        app.get('/hot/:author/:link', (req, res) => {
-            var filteredContents = []
-            var isPastRelativeContent = false
-            var added = 0
-            for (let i = 0; i < rankings.contents.hot.length; i++) {
-                if (isPastRelativeContent) {
-                    filteredContents.push(rankings.contents.hot[i])
-                    added++
-                }
-                if (added >= 50) break
-                if (rankings.contents.hot[i].author === req.params.author
-                    && rankings.contents.hot[i].link === req.params.link)
-                    isPastRelativeContent = true
-            }
-            res.send(filteredContents)
         })
     }
 }

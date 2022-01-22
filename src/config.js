@@ -71,13 +71,13 @@ var config = {
             // masterFee = 19 => <5% fee
             masterFee: 9,
             // the init account username
-            masterName: 'dtube',
+            masterName: 'moments',
             // if false master can create accounts with usernames without burning tokens
             masterPaysForUsernames: false,
             // the master account public original key (irrelevant if using genesis)
-            masterPub: 'dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz',
+            masterPub: 'tDrPYzamiFj7AkcqbggkDVTKuXKtyRQdW6cRpG9n13vP',
             // the master account public leader key  (irrelevant if using genesis)
-            masterPubLeader: 'dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz',
+            masterPubLeader: 'tDrPYzamiFj7AkcqbggkDVTKuXKtyRQdW6cRpG9n13vP',
             // the maximum time drift in ms before a block is invalid
             maxDrift: 200,
             // the maximum number of transactions in a single block
@@ -91,7 +91,7 @@ var config = {
             // the maximum number of mentions triggering a notification
             notifMaxMentions: 10,
             // the sha256sum hash of block 0 (new origin hash -> new chain)
-            originHash: 'da5fe18d0844f1f97bf5a94e7780dec18b4ab015e32383ede77158e059bacbb2',
+            originHash: 'na5fe18d0844f1f97bf5a94e7780dec18b4ab015e32383ede77158e059bacbb2',
             // the default number of random bytes to use for new key generation
             randomBytesLength: 32,
             // the minimum hourly reward pool (including leader rewards)

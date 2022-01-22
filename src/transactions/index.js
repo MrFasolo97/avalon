@@ -2,7 +2,7 @@ const { performance } = require('perf_hooks')
 const WARN_SLOW_VALID = process.env.WARN_SLOW_VALID || 5
 const WARN_SLOW_EXEC = process.env.WARN_SLOW_EXEC || 5
 
-var transactions = [
+const transactions = [
     require('./newAccount.js'),
     require('./approveNode.js'),
     require('./disaproveNode.js'),
@@ -26,7 +26,12 @@ var transactions = [
     require('./newWeightedKey.js'),
     require('./setSignThreshold.js'),
     require('./setPasswordWeight.js'),
-    require('./createProposal.js'),
+    require('./unsetSignThreshold.js'),
+    require('./newAccountWithBw.js'),
+    require('./playlistJson.js'),
+    require('./playlistPush.js'),
+    require('./playlistPop.js'),
+    require('./createProposal.js')
 ]
 
 module.exports = {
@@ -54,11 +59,16 @@ module.exports = {
         NEW_WEIGHTED_KEY: 20,
         SET_SIG_THRESHOLD: 21,
         SET_PASSWORD_WEIGHT: 22,
-        CREATE_PROPOSAL:23,
+        UNSET_SIG_THRESHOLD: 23,
+        NEW_ACCOUNT_WITH_BW: 24,
+        PLAYLIST_JSON: 25,
+        PLAYLIST_PUSH: 26,
+        PLAYLIST_POP: 27,
+        CREATE_PROPOSAL:28,
     },
     validate: (tx, ts, legitUser, cb) => {
         // logr.debug('tx:'+tx.type+' validation begins')
-        var startTime = performance.now()
+        let startTime = performance.now()
         // will make sure the transaction type exists (redondant ?)
         if (!transactions[tx.type]) {
             logr.error('No transaction type ?!')
@@ -73,7 +83,7 @@ module.exports = {
             }
 
         transactions[tx.type].validate(tx, ts, legitUser, function(isValid, error) {
-            var timeDiff = performance.now()-startTime
+            let timeDiff = performance.now()-startTime
             if (timeDiff > WARN_SLOW_VALID)
                 logr.warn('Slow tx type:'+tx.type+' validation took: '+timeDiff.toFixed(3)+'ms')
             else
@@ -84,12 +94,12 @@ module.exports = {
     },
     execute: (tx, ts, cb) => {
         // logr.debug('tx:'+tx.type+' execution begins')
-        var startTime = performance.now()
+        let startTime = performance.now()
         if (!transactions[tx.type]) {
             cb(false); return
         }
         transactions[tx.type].execute(tx, ts, function(isValid, dist, burn) {
-            var timeDiff = performance.now()-startTime
+            let timeDiff = performance.now()-startTime
             
             if (timeDiff > WARN_SLOW_EXEC)
                 logr.warn('Slow tx type:'+tx.type+' execution took: '+timeDiff.toFixed(3)+'ms')

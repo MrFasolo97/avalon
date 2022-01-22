@@ -1,52 +1,36 @@
+const GrowInt = require('growint')
+
 module.exports = {
-    fields: ['name', 'pub'],
+    fields: ['name', 'pub', 'bw'],
     validate: (tx, ts, legitUser, cb) => {
-        if (!validate.string(tx.data.name, config.accountMaxLength, config.accountMinLength, config.allowedUsernameChars, config.allowedUsernameCharsOnlyMiddle)) {
-            cb(false, 'invalid tx data.name'); return
-        }
-        if (!validate.publicKey(tx.data.pub, config.accountMaxLength)) {
-            cb(false, 'invalid tx data.pub'); return
-        }
+        if (!validate.integer(tx.data.bw,false,false))
+            return cb(false,'bw must be a valid positive integer')
 
-        let lowerUser = tx.data.name.toLowerCase()
-
-        for (let i = 0; i < lowerUser.length; i++) {
-            const c = lowerUser[i]
-            // allowed username chars
-            if (config.allowedUsernameChars.indexOf(c) === -1) 
-                if (config.allowedUsernameCharsOnlyMiddle.indexOf(c) === -1) {
-                    cb(false, 'invalid tx data.name char '+c); return
-                } else if (i === 0 || i === lowerUser.length-1) {
-                    cb(false, 'invalid tx data.name char '+c+' can only be in the middle'); return
-                }
+        require('./newAccount').validate(tx,ts,legitUser,(valid,error) => {
+            if (!valid)
+                return cb(false,error)
+            cache.findOne('accounts', {name: tx.sender}, function(err, account) {
+                if (err) throw err
+                let bwBefore = new GrowInt(account.bw, {growth:Math.max(account.baseBwGrowth || 0, account.balance)/(config.bwGrowth)}).grow(ts)
+                if (bwBefore.v < tx.data.amount)
+                    cb(false, 'invalid tx not enough bw')
+                else
+                    cb(true)
+            })
             
-        }
-
-        cache.findOne('accounts', {name: lowerUser}, function(err, account) {
-            if (err) throw err
-            if (account)
-                cb(false, 'invalid tx data.name already exists')
-            else
-                cache.findOne('accounts', {name: tx.sender}, function(err, account) {
-                    if (err) throw err
-                    if (account.balance < eco.accountPrice(lowerUser))
-                        cb(false, 'invalid tx not enough balance')
-                    else
-                        cb(true)
-                })
         })
     },
     execute: (tx, ts, cb) => {
-        let newAccBw = {v:0,t:0}
+        // same as NEW_ACCOUNT but with starting tx.data.bw bytes
+        // bandwidth debited from account creator in collectGrowInts() method in transaction.js
+        let newAccBw = {v:tx.data.bw,t:ts}
         let newAccVt = {v:0,t:0}
         let baseBwGrowth = 0
         if (!config.masterNoPreloadAcc || tx.sender !== config.masterName || config.masterPaysForUsernames) {
             if (config.preloadVt)
                 newAccVt = {v:eco.accountPrice(tx.data.name)*config.vtPerBurn*config.preloadVt/100,t:ts}
-            if (config.preloadBwGrowth) {
-                newAccBw = {v:0,t:ts}
+            if (config.preloadBwGrowth)
                 baseBwGrowth = Math.floor(eco.accountPrice(tx.data.name)/config.preloadBwGrowth)
-            }
         }
         cache.insertOne('accounts', {
             name: tx.data.name.toLowerCase(),

@@ -5,11 +5,13 @@ var cache = {
     copy: {
         accounts: {},
         contents: {},
-        distributed: {}
+        distributed: {},
+        proposals: {},
     },
     accounts: {},
     contents: {},
     distributed: {},
+    proposals: {},
     changes: [],
     inserts: [],
     rebuild: {
@@ -27,9 +29,12 @@ var cache = {
             cache.contents[key] = cloneDeep(cache.copy.contents[key])
         for (const key in cache.copy.distributed)
             cache.distributed[key] = cloneDeep(cache.copy.distributed[key])
+        for (const key in cache.copy.proposals)
+            cache.distributed[key] = cloneDeep(cache.copy.proposals[key])
         cache.copy.accounts = {}
         cache.copy.contents = {}
         cache.copy.distributed = {}
+        cache.copy.proposals= {}
         cache.changes = []
 
         // and discarding new inserts
@@ -298,7 +303,8 @@ var cache = {
         switch (collection) {
         case 'accounts':
             return 'name'
-        
+        case 'proposals':
+            return 'title'
         default:
             return '_id'
         }

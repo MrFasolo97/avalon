@@ -71,13 +71,13 @@ let config = {
             // masterFee = 19 => <5% fee
             masterFee: 9,
             // the init account username
-            masterName: 'dtube',
+            masterName: 'fasolo97-testnet',
             // if false master can create accounts with usernames without burning tokens
             masterPaysForUsernames: false,
             // the master account public original key (irrelevant if using genesis)
-            masterPub: 'dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz',
+            masterPub: 'vZ7v5bGKi7LMY8yecMjZyUoUEmDZqdYq4573GUZA3iT9',
             // the master account public leader key  (irrelevant if using genesis)
-            masterPubLeader: 'dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz',
+            masterPubLeader: '27EMwL2xYse4giLDmYVjNijnjxqvs8Jh8CTpx57kWEdgC',
             // the maximum time drift in ms before a block is invalid
             maxDrift: 200,
             // the maximum number of transactions in a single block

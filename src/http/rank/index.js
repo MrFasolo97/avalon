@@ -56,12 +56,14 @@ module.exports = {
                 else {
                     for (let leader = 0; leader < r.length; leader++) {
                         delete r[leader].hasVote
-                        r[leader].produced = leaderStats.leaders[r[leader].name].produced
-                        r[leader].missed = leaderStats.leaders[r[leader].name].missed
-                        r[leader].voters = leaderStats.leaders[r[leader].name].voters
-                        r[leader].last = leaderStats.leaders[r[leader].name].last
-                        if (leaderStats.leaders[r[leader].name].sinceTs) r[leader].sinceTs = leaderStats.leaders[r[leader].name].sinceTs
-                        if (leaderStats.leaders[r[leader].name].sinceBlock) r[leader].sinceBlock = leaderStats.leaders[r[leader].name].sinceBlock
+                        if (leaderStats.leaders[r[leader].name]) {
+                            r[leader].produced = leaderStats.leaders[r[leader].name].produced
+                            r[leader].missed = leaderStats.leaders[r[leader].name].missed
+                            r[leader].voters = leaderStats.leaders[r[leader].name].voters
+                            r[leader].last = leaderStats.leaders[r[leader].name].last
+                            if (leaderStats.leaders[r[leader].name].sinceTs) r[leader].sinceTs = leaderStats.leaders[r[leader].name].sinceTs
+                            if (leaderStats.leaders[r[leader].name].sinceBlock) r[leader].sinceBlock = leaderStats.leaders[r[leader].name].sinceBlock
+                        }
                     }
                     res.send(r)
                 }

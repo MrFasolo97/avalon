@@ -38,8 +38,30 @@ let blocks = {
 
         // Open blocks.index file
         blocks.fdIndex = fs.openSync(indexPath,'a+')
-        blocks.height = (fs.statSync(indexPath).size / 8) - 1
+
+        let indexSize = fs.statSync(indexPath).size
+        blocks.height = (indexSize / 8) - 1
         blocks.isOpen = true
+
+        // Determine if resumption of index creation is required
+        let resumeIndex = false
+        if (indexSize > 0) {
+            assert(indexSize % 8 === 0, 'Size of index file should be in multiple of 8')
+            let docPosition = BigInt(0)
+            let docSizeBuf = Buffer.alloc(4)
+            let docIndexBuf = Buffer.alloc(8)
+            fs.readSync(blocks.fdIndex,docIndexBuf,{offset: 0, position: indexSize-8, length: 8})
+            docPosition = BigInt(Number(BigInt(docIndexBuf.readUInt32LE(0)) << 8n) + docIndexBuf.readUInt32LE(4))
+            assert(docPosition < blocks.bsonSize, 'Latest indexed position greater than or equal to blocks.bson size')
+            fs.readSync(blocks.fd,docSizeBuf,{offset: 0, position: docPosition, length: 4})
+            let docSize = BigInt(docSizeBuf.readInt32LE(0))
+            docPosition += docSize
+            if (docPosition < blocks.bsonSize) {
+                resumeIndex = true
+                logr.info('Resuming index creation from block',blocks.height)
+                blocks.reconstructIndex(docSizeBuf,docPosition,blocks.height+1)
+            }
+        }
 
         // Reconstruct index file if empty
         if (blocks.bsonSize > 0n && blocks.height === -1)
@@ -78,15 +100,15 @@ let blocks = {
         if (!fs.existsSync(indexPath))
             fs.closeSync(fs.openSync(indexPath,'w'))
     },
-    reconstructIndex: () => {
+    reconstructIndex: (currentDocSizeBuf, currentDocPosition, currentBlockHeight) => {
         assert(blocks.isOpen,blocks.notOpenError)
         logr.info('Reconstructing blocks BSON index file...')
 
         let startTime = new Date().getTime()
         let indexBuf = Buffer.alloc(8)
-        let docSizeBuf = Buffer.alloc(4)
-        let docPosition = BigInt(0)
-        let blockHeight = 0
+        let docSizeBuf = currentDocSizeBuf || Buffer.alloc(4)
+        let docPosition = currentDocPosition || BigInt(0)
+        let blockHeight = currentBlockHeight || 0
         while (docPosition < blocks.bsonSize) {
             fs.readSync(blocks.fd,docSizeBuf,{offset: 0, position: Number(docPosition), length: 4})
             indexBuf.writeUInt32LE(Number(docPosition >> 8n), 0)

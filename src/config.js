@@ -1,4 +1,4 @@
-var config = {
+let config = {
     history: {
         0: {
             // this is the block 0 configuration for mainnet
@@ -17,6 +17,8 @@ var config = {
             b58Alphabet: '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz',
             // the block #0 genesis timestamp
             block0ts: 1601477849000,
+            // the block hash serialization revision
+            blockHashSerialization: 1,
             // the block time in ms
             blockTime: 3000,
             // the number of ms needed for 0.01 DTC to generate 1 byte of bw
@@ -27,6 +29,8 @@ var config = {
             consensusRounds: 2,
             // base rentability of votes
             ecoBaseRent: 0.50,
+            // downvote rentability factor
+            ecoDvRentFactor: 1,
             // the number of blocks from the past taken into consideration for econonomics
             ecoBlocks: 9600, // 8 hours
             // the precision of the claimable amounts
@@ -94,14 +98,10 @@ var config = {
             originHash: 'da5fe18d0844f1f97bf5a94e7780dec18b4ab015e32383ede77158e059bacbb2',
             // the default number of random bytes to use for new key generation
             randomBytesLength: 32,
-            // the minimum hourly reward pool (including leader rewards)
-            rewardPoolMin: 1,
-            // the multiplier for the reward pool, modifying it is a bad practise
-            rewardPoolMult: 5, // 0.05 DTC / user / cycle => 1.05 DTC / user / week
             // the maximum share of the reward pool a single distribution can generate
             rewardPoolMaxShare: 0.1,
-            // the estimated number of active users on the network
-            rewardPoolUsers: 30000,
+            // theoretical max reward pool in a cycle including leader rewards
+            rewardPoolAmount: 150001,
             // the maximum length of tags (on votes)
             tagMaxLength: 25,
             tagMaxPerContent: 5,
@@ -132,7 +132,10 @@ var config = {
             txLimits: {
                 14: 2,
                 15: 2,
-                19: 0
+                19: 0,
+                23: 1,
+                24: 1,
+                28: 1
             }
         },
         4860000: {
@@ -148,16 +151,71 @@ var config = {
             leaders: 15
         },
         8595000: {
-            hotfix2: true
+            masterNoPreloadAcc: true
+        },
+        17150000: {
+            accountAuthEnabled: true,
+            blockHashSerialization: 2,
+            burnAccountIsBlackhole: true,
+
+            // playlists
+            playlistEnabled: true,
+            playlistLinkMin: 3,
+            playlistLinkMax: 50,
+            playlistContentLinkMin: 1,
+            playlistContentLinkMax: 101,
+            playlistSequenceMax: 1000,
+            playlistSequenceIdMax: 10000,
+
+            // avalon dao
+            daoEnabled: true,
+            daoLeaderSnapshotBlocks: 30,
+            daoMembers: [],
+            daoVotingPeriodSeconds: 604800,
+            daoVotingThreshold: 70000000,
+            daoVotingLeaderBonus: 10000,
+            chainUpdateFee: 30000,
+            chainUpdateMaxParams: 20,
+            chainUpdateGracePeriodSeconds: 86400,
+            fundRequestBaseFee: 30000,
+            fundRequestSubFee: 1,
+            fundRequestSubMult: 1000,
+            fundRequestSubStart: 100000,
+            fundRequestContribPeriodSeconds: 1209600,
+            fundRequestDeadlineSeconds: 7776000,
+            fundRequestDeadlineExtSeconds: 7776000,
+            fundRequestReviewPeriodSeconds: 2592000,
+
+            // master dao
+            masterDao: true,
+            masterDaoTxs: [0,4,5,6,10,11,12,13,14,15,17,19,20,21,23,24,25,26,27,28,29,30,32],
+            masterDaoTxExp: 259200000,
+
+            // block size increase
+            maxTxPerBlock: 200,
+
+            // maximum tx expiration allowed (block ts + 1 hour)
+            txExpirationMax: 3600000,
+
+            // update tx type restrictions
+            txLimits: {
+                14: 2,
+                15: 2,
+                23: 0,
+                24: 0,
+                28: 0
+            }
         }
     },
     read: (blockNum) => {
-        var finalConfig = {}
+        let finalConfig = {}
+        let latestHf = 0
         for (const key in config.history) 
             if (blockNum >= key) {
                 if (blockNum === parseInt(key) && blockNum !== 0)
                     logr.info('Hard Fork #'+key)
                 Object.assign(finalConfig, config.history[key])
+                latestHf = parseInt(key)
             }
             else {
                 if (config.history[key].ecoBlocks > finalConfig.ecoBlocks
@@ -166,7 +224,12 @@ var config = {
                 
                 break
             }
-            
+        if (typeof cache !== 'undefined' && cache.state && cache.state[1]) {
+            let govConfig = cache.state[1]
+            for (let k in govConfig)
+                if (k !== '_id' && govConfig[k].effectiveBlock >= latestHf)
+                    finalConfig[k] = govConfig[k].value
+        }
         
         return finalConfig
     }

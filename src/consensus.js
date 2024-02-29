@@ -1,6 +1,6 @@
-var secp256k1 = require('secp256k1')
-var CryptoJS = require('crypto-js')
-var bs58 = require('base-x')(config.b58Alphabet)
+const secp256k1 = require('secp256k1')
+const CryptoJS = require('crypto-js')
+const bs58 = require('base-x')(config.b58Alphabet)
 const cloneDeep = require('clone-deep')
 const consensus_need = 2
 const consensus_total = 3
@@ -8,7 +8,7 @@ const consensus_threshold = consensus_need/consensus_total
 
 // all p2p.sockets referenced here are verified nodes with a node_status
 
-var consensus = {
+let consensus = {
     observer: false,
     validating: [],
     processed: [],
@@ -16,7 +16,7 @@ var consensus = {
     finalizing: false,
     possBlocks: [],
     getActiveLeaderKey: (name) => {
-        var shuffle = chain.schedule.shuffle
+        let shuffle = chain.schedule.shuffle
         for (let i = 0; i < shuffle.length; i++)
             if (shuffle[i].name === name)
                 return shuffle[i].pub_leader
@@ -25,7 +25,7 @@ var consensus = {
     isActive: () => {
         if (consensus.observer)
             return false
-        var thPub = consensus.getActiveLeaderKey(process.env.NODE_OWNER)
+        let thPub = consensus.getActiveLeaderKey(process.env.NODE_OWNER)
         if (!thPub) {
             logr.info(process.env.NODE_OWNER+' is not elected, defaulting to observer')
             consensus.observer = true
@@ -42,9 +42,9 @@ var consensus = {
         // the real active leaders are those who can mine or backup this block
         // i.e. a new leader only enters consensus on the block he gets scheduled for
         // and out of consensus 2*config.leaders blocks after his last scheduled block
-        var blockNum = chain.getLatestBlock()._id+1
-        var actives = []
-        var currentLeader = chain.schedule.shuffle[(blockNum-1)%config.leaders].name
+        let blockNum = chain.getLatestBlock()._id+1
+        let actives = []
+        let currentLeader = chain.schedule.shuffle[(blockNum-1)%config.leaders].name
         if (consensus.getActiveLeaderKey(currentLeader))
             actives.push(currentLeader)
 
@@ -58,12 +58,34 @@ var consensus = {
         return actives
     },
     tryNextStep: () => {
-        var consensus_size = consensus.activeLeaders().length
-        var threshold = consensus_size * consensus_threshold
+        let consensus_size = consensus.activeLeaders().length
+        let threshold = consensus_size * consensus_threshold
 
         // if we are observing, we need +1 to pass consensus as we want to manage our own rounds
         if (!consensus.isActive())
             threshold += 1
+
+        // identify block collisions between blocks of same _id produced by:
+        // 1. only one leader (double production)
+        // 2. more than one leader (latency issues between leaders)
+        // resolution: apply the earliest valid block, or in case of same timestamp the lowest hash
+        // todo: add leader slashing for double production and other possible malicious behaviour
+        let possBlocksById = {}
+        if (consensus.possBlocks.length > 1) {
+            for (let i in consensus.possBlocks) {
+                if (possBlocksById[consensus.possBlocks[i].block._id])
+                    possBlocksById[consensus.possBlocks[i].block._id].push(consensus.possBlocks[i])
+                else
+                    possBlocksById[consensus.possBlocks[i].block._id] = [consensus.possBlocks[i]]
+            }
+            consensus.possBlocks.sort((a,b) => {
+                // valid blocks with different _id must have a different timestamp
+                if (a.block.timestamp !== b.block.timestamp)
+                    return a.block.timestamp - b.block.timestamp
+                else
+                    return a.block.hash < b.block.hash ? -1 : 1
+            })
+        }
 
         for (let i = 0; i < consensus.possBlocks.length; i++) {
             const possBlock = consensus.possBlocks[i]
@@ -75,12 +97,23 @@ var consensus = {
             && possBlock[0] && possBlock[0].indexOf(process.env.NODE_OWNER) !== -1) {
                 // block becomes valid, we can move forward !
                 consensus.finalizing = true
-                logr.cons('block '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,4)+' got finalized')
+
+                // log which block got applied if collision exists
+                if (possBlocksById[possBlock.block._id] && possBlocksById[possBlock.block._id].length > 1) {
+                    let collisions = []
+                    for (let j in possBlocksById[possBlock.block._id])
+                        collisions.push([possBlocksById[possBlock.block._id][j].block.miner,possBlocksById[possBlock.block._id][j].block.timestamp])
+                    logr.info('Block collision detected at height '+possBlock.block._id+', the leaders are:',collisions)
+                    logr.cons('Poss blocks',possBlocksById[possBlock.block._id])
+                    logr.info('Applying block '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,4)+' by '+possBlock.block.miner+' with timestamp '+possBlock.block.timestamp)
+                } else
+                    logr.cons('block '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,4)+' got finalized')
+
                 chain.validateAndAddBlock(possBlock.block, false, function(err) {
                     if (err) throw err
 
                     // clean up old possible blocks
-                    var newPossBlocks = []
+                    let newPossBlocks = []
                     for (let y = 0; y < consensus.possBlocks.length; y++) 
                         if (possBlock.block._id < consensus.possBlocks[y].block._id)
                             newPossBlocks.push(consensus.possBlocks[y])
@@ -132,7 +165,7 @@ var consensus = {
             consensus.validating.push(block.hash)
 
             // its a new possible block, set up the empty possible block
-            var possBlock = {
+            let possBlock = {
                 block:block
             }
             for (let r = 0; r < config.consensusRounds; r++)
@@ -191,12 +224,12 @@ var consensus = {
         if (consensus.isActive()) {
             // signing and broadcast to our peers
             // only if we are an active leader
-            var onlyBlockHash = {
+            let onlyBlockHash = {
                 hash: block.hash
             }
             if (block.miner === process.env.NODE_OWNER && round === 0)
                 onlyBlockHash = block
-            var signed = consensus.signMessage({t:6, d:{r:round, b: onlyBlockHash, ts: new Date().getTime()}})
+            let signed = consensus.signMessage({t:6, d:{r:round, b: onlyBlockHash, ts: new Date().getTime()}})
             p2p.broadcast(signed)
         }
 
@@ -204,9 +237,9 @@ var consensus = {
         consensus.tryNextStep()
     },
     remoteRoundConfirm: (message) => {
-        var block = message.d.b
-        var round = message.d.r
-        var leader = message.s.n
+        let block = message.d.b
+        let round = message.d.r
+        let leader = message.s.n
         
         for (let i = 0; i < consensus.possBlocks.length; i++) 
             if (block.hash === consensus.possBlocks[i].block.hash) {
@@ -224,8 +257,8 @@ var consensus = {
             }       
     },
     signMessage: (message) => {
-        var hash = CryptoJS.SHA256(JSON.stringify(message)).toString()
-        var signature = secp256k1.ecdsaSign(Buffer.from(hash, 'hex'), bs58.decode(process.env.NODE_OWNER_PRIV))
+        let hash = CryptoJS.SHA256(JSON.stringify(message)).toString()
+        let signature = secp256k1.ecdsaSign(Buffer.from(hash, 'hex'), bs58.decode(process.env.NODE_OWNER_PRIV))
         signature = bs58.encode(signature.signature)
         message.s = {
             n: process.env.NODE_OWNER,
@@ -238,12 +271,12 @@ var consensus = {
             cb(false)
             return
         }
-        var sign = message.s.s
-        var name = message.s.n
-        var tmpMess = cloneDeep(message)
+        let sign = message.s.s
+        let name = message.s.n
+        let tmpMess = cloneDeep(message)
         delete tmpMess.s
-        var hash = CryptoJS.SHA256(JSON.stringify(tmpMess)).toString()
-        var pub = consensus.getActiveLeaderKey(name)
+        let hash = CryptoJS.SHA256(JSON.stringify(tmpMess)).toString()
+        let pub = consensus.getActiveLeaderKey(name)
         if (pub && secp256k1.ecdsaVerify(
             bs58.decode(sign),
             Buffer.from(hash, 'hex'),

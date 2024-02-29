@@ -38,13 +38,13 @@ module.exports = {
         cache.findOne('contents', {_id: tx.data.author+'/'+tx.data.link}, function(err, content) {
             for (let i = 0; i < content.votes.length; i++)
                 if (content.votes[i].u === tx.sender) {
-                    var reward = Math.floor(content.votes[i].claimable)
+                    let reward = Math.floor(content.votes[i].claimable)
                     content.votes[i].claimed = ts
                     cache.updateOne('contents', {_id: tx.data.author+'/'+tx.data.link}, {
                         $set: {votes: content.votes}
                     }, function() {
                         cache.updateOne('accounts', {name: tx.sender}, {
-                            $inc: {balance: reward}
+                            $inc: {balance: reward, claimedReward: reward}
                         }, function() {
                             cache.insertOne('distributed', {
                                 name: tx.sender,

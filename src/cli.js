@@ -1,12 +1,12 @@
-var config = require('./config.js').read(0)
-var TransactionType = require('./transactions').Types
-var cmds = require('./clicmds.js')
-var program = require('commander')
+let config = require('./config.js').read(0)
+const TransactionType = require('./transactions').Types
+const cmds = require('./clicmds.js')
+const program = require('commander')
 const { randomBytes } = require('crypto')
 const secp256k1 = require('secp256k1')
 const bs58 = require('base-x')(config.b58Alphabet)
-var fetch = require('node-fetch')
-var fs = require('fs')
+const fetch = require('node-fetch-commonjs')
+const fs = require('fs')
 const defaultPort = 3001
 
 program
@@ -32,6 +32,67 @@ program.command('account <pub_key> <new_user>')
         writeLine('Examples:')
         writeLine('  $ account d2EdJPNgFBwd1y9vhMzxw6vELRneC1gSHVEjguTG74Ce cool-name -F key.json -M alice')
         writeLine('  $ account fR3e4CcvMRuv8yaGtoQ6t6j1hxfyocqhsKHi2qP9mb1E fr3e4ccvmruv8yagtoq6t6j1hxfyocqhskhi2qp9mb1e -F key.json -M alice')
+    })
+
+program.command('account-bw <pub_key> <new_user> <bw>')
+    .description('create a new account with bandwidth from account creator')
+    .action(function(pubKey, newUser, bw) {
+        verifyAndSendTx('createAccountWithBw', pubKey, newUser, bw)
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Extra Info:')
+        writeLine('  Account creation will burn coins depending on the chain config')
+        writeLine('  and will transfer <bw> bytes from the account creator to the new account.')
+        writeLine('')
+        writeLine('Examples:')
+        writeLine('  $ account d2EdJPNgFBwd1y9vhMzxw6vELRneC1gSHVEjguTG74Ce cool-name 30000 -F key.json -M alice')
+    })
+
+program.command('account-authorize <user> <id> <allowed_txs> <weight>')
+    .description('authorize an account auth with custom perms and weight to transact using their custom key id <id>')
+    .action(function(user, id, allowedTxs, weight) {
+        verifyAndSendTx('accountAuthorize', user, id, allowedTxs, weight)
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Transaction Types:')
+        for (const key in TransactionType)
+            writeLine('  '+TransactionType[key]+': '+key)
+        writeLine('')
+        writeLine('')
+        writeLine('Examples:')
+        writeLine('  $ account-authorize bob posting [4,5,6,7,8] 1 -F key.json -M alice')
+        writeLine('  $ account-authorize bob finance [3] 2 -F key.json -M alice')
+    })
+
+program.command('account-revoke <user> <id>')
+    .description('revoke an account auth by their custom key id <id>')
+    .action(function(user, id) {
+        verifyAndSendTx('accountRevoke', user, id)
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Arguments:')
+        writeLine('  <user>: authorized username')        
+        writeLine('  <id>: custom key id of the authorized user')
+        writeLine('')
+        writeLine('Examples:')
+        writeLine('  $ account-revoke bob posting -F key.json -M alice')
+        writeLine('  $ account-revoke bob finance -F key.json -M alice')
+    })
+
+program.command('chainupdate-create <title> <description> <url> <changes>')
+    .description('create a new chain update proposal')
+    .action(function(title, description, url, changes) {
+        verifyAndSendTx('chainUpdateCreate', title, description, url, changes)
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Arguments:')
+        writeLine('  <title>: proposal title')
+        writeLine('  <description>: proposal description')
+        writeLine('  <url>: proposal reference url')
+        writeLine('  <changes>: array of 2-element key-value arrays of proposed parameter changes')
+        writeLine('')
+        writeLine('Examples:')
+        writeLine('  $ chainupdate-create \'An example chain update title\' \'Some description to describe it\' \'https://d.tube/#!/v/alice/chain-update-proposal\' [["vtPerBurn",100],["rewardPoolAmount",100000]] -F key.json -M alice')
     })
 
 program.command('claim <author> <link>')
@@ -67,6 +128,21 @@ program.command('comment <link> <pa> <pp> <json> <vt> <tag>')
         writeLine('  $ comment reply-to-bob bobs-post bob \'{"body": "Hello Bob"}\' 1 my-tag -F key.json -M alice')
     })
 
+program.command('comment-edit <link> <json>')
+    .description('edit the JSON metadata of a content')
+    .action(function(link, json) {
+        verifyAndSendTx('commentEdit', link, json)
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Arguments:')
+        writeLine('  <link>: content identifier')
+        writeLine('  <json>: the edited json object')
+        writeLine('')
+        writeLine('Examples:')
+        writeLine('  $ comment-edit root-comment \'{"body": "Hello World"}\' -F key.json -M alice')
+        writeLine('  $ comment-edit reply-to-bob \'{"body": "Hello Bob"}\' -F key.json -M alice')
+    })
+
 program.command('enable-node <pub>')
     .description('enable a node for producing blocks')
     .action(function(pub) {
@@ -99,16 +175,75 @@ program.command('follow <target>')
         writeLine('  $ follow bob -F key.json -M alice')
     })
 
+program.command('fundrequest-create <title> <description> <url> <requested> <receiver>')
+    .description('create a new funding request')
+    .action(function(title, description, url, requested, receiver) {
+        verifyAndSendTx('fundRequestCreate', title, description, url, requested, receiver)
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Arguments:')
+        writeLine('  <title>: proposal title')
+        writeLine('  <description>: proposal description')
+        writeLine('  <url>: proposal reference url')
+        writeLine('  <requested>: requested amount for this fund request')
+        writeLine('  <receiver>: beneficiary of the fund request')
+        writeLine('')
+        writeLine('Examples:')
+        writeLine('  $ fundrequest-create \'An example proposal title\' \'Some description to describe it\' \'https://d.tube/#!/v/alice/proposal-video\' 10000 alice -F key.json -M alice')
+    })
+
+program.command('fundrequest-contrib <id> <amount>')
+    .description('contribute to a funding request')
+    .action(function(id, amount) {
+        verifyAndSendTx('fundRequestContrib', id, amount)
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Arguments:')
+        writeLine('  <id>: id of the fund request proposal')
+        writeLine('  <amount>: amount to contribute')
+        writeLine('')
+        writeLine('Examples:')
+        writeLine('  $ fundrequest-contrib 1 50000 -F key.json -M john')
+    })
+
+program.command('fundrequest-work <id> <work>')
+    .description('submit work details to a fund request for review')
+    .action(function(id, work) {
+        verifyAndSendTx('fundRequestWork', id, work)
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Arguments:')
+        writeLine('  <id>: id of the fund request proposal')
+        writeLine('  <work>: json work details')
+        writeLine('')
+        writeLine('Examples:')
+        writeLine('  $ fundrequest-work 1 \'{"work":"this is some work for a proposal, more details in a url."}\' -F key.json -M alice')
+    })
+
+program.command('fundrequest-work-review <id> <approve> <memo>')
+    .alias('fundrequest-review')
+    .description('submit review details of work related to fund request')
+    .action(function(id, approve, memo) {
+        verifyAndSendTx('fundRequestWorkReview', id, approve, memo)
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Arguments:')
+        writeLine('  <id>: id of the fund request proposal')
+        writeLine('  <approve>: boolean value to approve or disapprove work')
+        writeLine('  <memo>: feedback for work done')
+        writeLine('')
+        writeLine('Examples:')
+        writeLine('  $ fundrequest-work-review 1 true \'some feedback here\' -F key.json -M alice')
+    })
+
 program.command('keypair')
     .description('generate a new keypair')
     .alias('key')
     .option('-H, --has [text]', 'generated public key will contain the specified text')
     .action(function(options) {
-        var has = (options.has || '')
+        let has = (options.has || '')
         has = has.toLowerCase()
-        var priv
-        var pub
-        var pub58
+        let priv, pub, pub58
         do {
             priv = randomBytes(config.randomBytesLength)
             pub = secp256k1.publicKeyCreate(priv)
@@ -170,6 +305,34 @@ program.command('limit-vt')
         writeLine('Examples:')
         writeLine('  $ limit-vt 1000 -F key.json -M alice')
         writeLine('  $ limit-vt -1 -F key.json -M alice')
+    })
+
+program.command('md-queue <txtype> <payload>')
+    .description('queue a transaction in master dao')
+    .action(function(txtype, payload) {
+        verifyAndSendTx('mdQueue', txtype, payload)
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Arguments:')
+        writeLine('  <txtype>: the transaction type to be queued')
+        writeLine('  <payload>: the payload of the new transaction to be queued')
+        writeLine('')
+        writeLine('Examples:')
+        writeLine('  $ mdqueue 6 \'{"json":{"foo":"bar"}}\' -F key.json -M bob')
+        writeLine('  $ mdqueue 32 \'{"id":2,"amount":10000}\' -F key.json -M john')
+    })
+
+program.command('md-sign <id>')
+    .description('approve a queued transaction in master dao')
+    .action(function(id) {
+        verifyAndSendTx('mdSign', id)
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Arguments:')
+        writeLine('  <id>: identifier of the queued transaction')
+        writeLine('')
+        writeLine('Examples:')
+        writeLine('  $ mdqueue 1 -F key.json -M alice')
     })
 
 program.command('new-key <id> <pub> <allowed_txs>')
@@ -236,6 +399,49 @@ program.command('password-weight <weight>')
         writeLine('  $ password-weight 1 -F key.json -M alice')
     })
 
+program.command('playlist-json <link> <json>')
+    .description('set json metadata of a playlist, creating one if it doesn\'t exist already')
+    .action(function(link, json) {
+        verifyAndSendTx('playlistJson', link, json)
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Arguments:')
+        writeLine('  <link>: the link of the playlist')
+        writeLine('  <json>: the new json metadata of the playlist')
+        writeLine('')
+        writeLine('Example:')
+        writeLine('  $ playlist-json myplaylist \'{"title": "My awesome video collection"}\' -F key.json -M alice')
+    })
+
+program.command('playlist-push <link> <seq>')
+    .description('append or modify a playlist by its corresponding sequence id in the playlist')
+    .action(function(link, seq) {
+        verifyAndSendTx('playlistPush', link, seq)
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Arguments:')
+        writeLine('  <link>: the link of the playlist')
+        writeLine('  <seq>: the json of the sequences to be added or modified, where key is the sequence id (integer)')
+        writeLine('    and its value is the content identifier (string in format of \'author/link\')')
+        writeLine('')
+        writeLine('Example:')
+        writeLine('  $ playlist-push myplaylist \'{"100": "alice/ep-1","200": "alice/ep-2","300": "alice/ep-3"}\' -F key.json -M alice')
+    })
+
+program.command('playlist-pop <link> <seq>')
+    .description('delete a content in a playlist by its corresponding sequence id')
+    .action(function(link, seq) {
+        verifyAndSendTx('playlistPop', link, seq)
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Arguments:')
+        writeLine('  <link>: the link of the playlist')
+        writeLine('  <seq>: the array of sequence ids to be removed from the playlist')
+        writeLine('')
+        writeLine('Example:')
+        writeLine('  $ playlist-pop myplaylist \'[100,200]\' -F key.json -M alice')
+    })
+
 program.command('profile <json>')
     .alias('user-json')
     .description('modify an account profile')
@@ -267,6 +473,40 @@ program.command('promote <link> <pa> <pp> <json> <vt> <tag> <burn>')
         writeLine('')
         writeLine('Example:')
         writeLine('  $ promote big-video \'\' \'\' \'{"title": "Check this out"}\' 777 my-tag 10 -F key.json -M alice')
+    })
+
+program.command('proposal-vote <id> <amount>')
+    .alias('dao-vote')
+    .description('vote for a dao proposal')
+    .action(function(id, amount) {
+        verifyAndSendTx('proposalVote', id, amount)
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Arguments:')
+        writeLine('  <id>: the identifier of the dao proposal to vote on')        
+        writeLine('  <amount>: voting weight for the vote. <amount> tokens will be locked until voting period ends.')
+        writeLine('')
+        writeLine('Examples:')
+        writeLine('  $ dao-vote 2 5000000 -F key.json -M bob')
+        writeLine('  $ proposal-vote 3 2000000 -F key.json -M john')
+    })
+
+program.command('proposal-edit <id> <title> <description> <url>')
+    .alias('dao-edit')
+    .description('edit metadata of a dao proposal')
+    .action(function(id, title, description, url) {
+        verifyAndSendTx('proposalEdit', id, title, description, url)
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Arguments:')
+        writeLine('  <id>: the identifier of the dao proposal to edit metadata of')        
+        writeLine('  <title> updated title of proposal')
+        writeLine('  <description> updated description of proposal')
+        writeLine('  <url> updated url of proposal')
+        writeLine('')
+        writeLine('Examples:')
+        writeLine('  $ dao-vote 2 \'Updated proposal title\' \'Edited escription with some more details\' \'https://d.tube/#!/v/bob/updated-proposal-video\' -F key.json -M bob')
+        writeLine('  $ proposal-vote 3 \'Updated proposal title\' \'Edited escription with some more details\' \'https://d.tube/#!/v/john/work-update\' -F key.json -M john')
     })
 
 program.command('public')
@@ -341,7 +581,7 @@ program.command('transfer <receiver> <amount>')
     .option('--memo [text]', 'add a short message to the transfer')    
     .description('transfer coins')
     .action(function(receiver, amount, options) {
-        var memo = ''
+        let memo = ''
         if (options && options.memo) memo = options.memo
         verifyAndSendTx('transfer', receiver, amount, memo)
     }).on('--help', function(){
@@ -382,6 +622,23 @@ program.command('unfollow <target>')
         writeLine('')
         writeLine('Example:')
         writeLine('  $ unfollow bob -F key.json -M alice')
+    })
+
+program.command('unset-signature-threshold <types>')
+    .alias('unset-sig-threshold')
+    .description('unset signature thresholds for transaction types')
+    .action(function(thresholds) {
+        verifyAndSendTx('unsetSignatureThreshold', thresholds)
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Arguments:')
+        writeLine('  <types>: Array of tx types to unset signature threshold of, falling back to default threshold set using SET_SIG_THRESHOLD or 1.')
+        writeLine('')
+        writeLine('WARNING: Multi-signature setup is for advanced users only.')
+        writeLine('  Please choose the thresholds carefully to prevent being locked out of your account due to insufficient key weight to meet the new signature threshold!')
+        writeLine('')
+        writeLine('Example:')
+        writeLine('  $ unset-signature-threshold [1,3,4] -F key.json -M alice')
     })
 
 program.command('unvote-leader <leader>')
@@ -439,10 +696,10 @@ function verifyAndSendTx(txType, ...args) {
 }
 
 function sendTx(tx) {
-    var port = process.env.API_PORT || defaultPort
-    var ip = process.env.API_IP || '[::1]'
-    var protocol = process.env.API_PROTOCOL || 'http'
-    var url = protocol+'://'+ip+':'+port+'/transact'
+    let port = process.env.API_PORT || defaultPort
+    let ip = process.env.API_IP || '[::1]'
+    let protocol = process.env.API_PROTOCOL || 'http'
+    let url = protocol+'://'+ip+':'+port+'/transact'
     if (program.api)
         url = program.api+'/transact'
     if (program.wait)
@@ -466,7 +723,7 @@ function sendTx(tx) {
     })
     if (program.spam && program.spam > 0)
         setTimeout(function(){
-            var newTx = JSON.stringify(tx)
+            let newTx = JSON.stringify(tx)
             sendTx(cmds.sign(program.key, program.me, newTx))
         }, program.spam)
 }
@@ -506,7 +763,7 @@ function verifyKeyAndUser(cb) {
 
 function readKeyFromFile() {
     if (program.file) {
-        var file = fs.readFileSync(program.file, 'utf8')
+        let file = fs.readFileSync(program.file, 'utf8')
         try {
             program.key = JSON.parse(file).priv
         } catch (error) {

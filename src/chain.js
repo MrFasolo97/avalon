@@ -527,7 +527,7 @@ let chain = {
 
         // check if miner is normal scheduled one
         let minerPriority = 0
-        if (newBlock._id >= 1) {
+        if (chain.schedule.shuffle[(newBlock._id-1)%config.leaders] != null) {
             if (chain.schedule.shuffle[(newBlock._id-1)%config.leaders].name === newBlock.miner)
                 minerPriority = 1
         // allow miners of n blocks away

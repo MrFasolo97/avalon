@@ -1,4 +1,5 @@
 const http_port = process.env.HTTP_PORT || 3001
+const http_host = process.env.HTTP_HOST || "0.0.0.0"
 const express = require('express')
 const cors = require('cors')
 const bodyParser = require('body-parser')
@@ -22,7 +23,7 @@ let http = {
                 logr.error('Failed to load API endpoint /'+endpoints[i])
             }
             
-        app.listen(http_port, () => logr.info('Listening http on port: ' + http_port))
+        app.listen(http_port, http_host, () => logr.info('Listening http on port: ' + http_port))
     }
 }
 

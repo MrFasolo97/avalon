@@ -47,5 +47,4 @@ setx NODE_OWNER_PUB "dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz"
 setx NODE_OWNER_PRIV "34EpMEDFJwKbxaF7FhhLyEe3AhpM4dwHMLVfs4JyRto5"
 
 ::src path
-cd "C:\Users\Username\Desktop\avalon\src"
-start cmd /K node --stack-size=65500 main
+node --stack-size=65500 src/main

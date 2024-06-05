@@ -1,5 +1,7 @@
 const sharp = require('sharp')
 const fetch = require('node-fetch-commonjs')
+logr = require('../../logger.js')
+
 const QUALITY = 95
 const AVATAR_WIDTH = {
     small: 64,
@@ -138,6 +140,7 @@ async function fetchAndRespondImage(imageUrl,res,width,height,cacher) {
         imageResponse(res,img)
         cacher(img.toJSON())
     } catch (e) {
+        logr.debug(e);
         res.status(500).send({error: 'errored while retrieving avatar'})
     }
 }

@@ -106,7 +106,7 @@ PBFT.prototype.requestViewChange = function(p2p) {
     const viewChangeMsg = {
         type: 'ViewChange',
         nodeId: this.nodeId,
-        view: this.pbft.currentView + 1,
+        view: this.currentView + 1,
         timestamp: Date.now()
     }
     this.startTimeout()

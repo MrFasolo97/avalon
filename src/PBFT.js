@@ -130,7 +130,7 @@ PBFT.prototype.startTimeout = function(p2p) {
 
 PBFT.prototype.clearTimeout = function() {
     if (this.timeout) {
-        this.clearTimeout(this.timeout)
+        clearTimeout(this.timeout)
         this.timeout = null
     }
 }

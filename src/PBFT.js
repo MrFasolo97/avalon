@@ -124,14 +124,14 @@ PBFT.prototype.requestViewChange = function(p2p) {
 }
 
 PBFT.prototype.addNewPeer = function(nodeId, address) {
-    p2p.pbft.push(nodeId)
+    p2p.pbft.peers.push(nodeId)
     p2p.broadcast({ t: 'AddPeer', d: {nodeId: nodeId, address: address }})
 }
 
 PBFT.prototype.handleAddPeer = function(msg) {
     const newNodeId = msg.nodeId
     if (!p2p.pbft.peers.includes(newNodeId))
-        p2p.pbft.push(newNodeId)
+        p2p.pbft.peers.push(newNodeId)
 }
 
 

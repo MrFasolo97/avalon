@@ -1,3 +1,4 @@
+const logger = require('./logger.js')
 const p2p = require('./p2p.js')
 
 class PBFT {
@@ -7,6 +8,7 @@ class PBFT {
         this.state = 'Idle' // Current state
         this.messageLog = [] // Log of messages
         this.currentView = 0 // Current view number
+        this.viewChangeMsgs = [] 
         this.prePrepareMsgs = {} // Store pre-prepare messages
         this.prepareMsgs = {} // Store prepare messages
         this.commitMsgs = {} // Store commit messages
@@ -105,6 +107,7 @@ PBFT.prototype.requestViewChange = function() {
         view: this.pbft.currentView + 1,
         timestamp: Date.now()
     }
+    this.startTimeout()
     this.sendToAllPeers(viewChangeMsg)
 }
 
@@ -115,6 +118,7 @@ PBFT.prototype.quorumSize = function () {
 PBFT.prototype.startTimeout = function() {
     this.clearTimeout() // Clear any existing timeout
     this.timeout = setTimeout(() => {
+        logger.warn('BFT timeout, changing view! view # '+this.currentView)
         this.requestViewChange()
     }, 10000) // 10 seconds timeout for this example
 }

@@ -334,7 +334,7 @@ let p2p = {
                         let isValidSignature = secp256k1.ecdsaVerify(
                             bs58.decode(message.d.sign),
                             Buffer.from(challengeHash2, 'hex'),
-                            pubKey)
+                            bs58.decode(pubKey))
                         if (!isValidSignature) 
                             logr.warn('Wrong LEADER_NAME signature.')
                         else if (p2p.pbft.peers.indexOf(message.d.username) === -1 && isValidSignature === true) {

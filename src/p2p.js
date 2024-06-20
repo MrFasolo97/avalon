@@ -172,6 +172,15 @@ let p2p = {
                 random: random
             }
         })
+        setTimeout(() => {
+            p2p.sendJSON(ws, {
+                t: MessageType.VERIFY_LEADER_NAME,
+                d: {
+                    nodeId: p2p.nodeId.pub,
+                    random: randomBytes(config.randomBytesLength).toString('hex')
+                }
+            })
+        }, 3000)
     },
     messageHandler: (ws) => {
         ws.on('message', (data) => {
@@ -251,13 +260,6 @@ let p2p = {
                             logr.warn('Wrong NODE_STATUS signature, disconnecting')
                             ws.close()
                         }
-                        p2p.sendJSON(ws, {
-                            t: MessageType.VERIFY_LEADER_NAME,
-                            d: {
-                                nodeId: p2p.nodeId.pub,
-                                random: randomBytes(config.randomBytesLength).toString('hex')
-                            }
-                        })
                         for (let i = 0; i < p2p.sockets.length; i++)
                             if (i !== p2p.sockets.indexOf(ws)
                             && p2p.sockets[i].node_status
@@ -273,7 +275,6 @@ let p2p = {
                         logr.error('Error during NODE_STATUS verification', error)
                     }
                 }
-                
                 break
 
             case MessageType.QUERY_BLOCK:
@@ -298,7 +299,7 @@ let p2p = {
                 let priv = process.env.NODE_OWNER_PRIV
                 let name2 = process.env.NODE_OWNER
                 let signData = secp256k1.ecdsaSign(Buffer.from(message.d.random, 'hex'), bs58.decode(priv))
-                let sign2 = bs58.encode(signData.signature)
+                sign = bs58.encode(signData.signature)
 
                 let d2 = {
                     origin_block: config.originHash,
@@ -307,7 +308,7 @@ let p2p = {
                     previous_block_hash: chain.getLatestBlock().phash,
                     nodeId: p2p.nodeId.pub,
                     version: version,
-                    sign: sign2,
+                    sign: sign,
                     username: name2,
                 }
                 if (priv === '' || priv === null) {
@@ -329,7 +330,7 @@ let p2p = {
                     if (pubKey) {
                         let isValidSignature = secp256k1.ecdsaVerify(
                             bs58.decode(message.d.sign),
-                            Buffer.from(message.d.random, 'hex'),
+                            Buffer.from(message.d.challengeHash, 'hex'),
                             pubKey)
                         if (!isValidSignature) 
                             logr.warn('Wrong LEADER_NAME signature.')

@@ -103,10 +103,13 @@ PBFT.prototype.handleViewChange = function (msg) {
 }
 
 PBFT.prototype.requestViewChange = function(p2p) {
+    this.currentView++
+    this.viewChangeMsgs = []
+    this.state = 'Idle'
     const viewChangeMsg = {
         type: 'ViewChange',
         nodeId: this.nodeId,
-        view: this.currentView + 1,
+        view: this.currentView,
         timestamp: Date.now()
     }
     this.startTimeout()

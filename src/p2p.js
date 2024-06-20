@@ -293,6 +293,7 @@ let p2p = {
                 let signData = secp256k1.ecdsaSign(Buffer.from(message.d.random, 'hex'), bs58.decode(priv))
                 let sign2 = bs58.encode(signData.signature)
                 let challengeHash = randomBytes(config.randomBytesLength)
+                sign2 = bs58.encode(sign2.signature)
                 
                 p2p.sockets[p2p.sockets.indexOf(ws)].challengeLeaderHash = challengeHash
 

@@ -130,7 +130,7 @@ let p2p = {
     connect: (newPeers,isInit = false) => {
         newPeers.forEach((peer) => {
             let ws = new WebSocket(peer)
-            ws.on('open', () => p2p.handshake(ws,isLeader))
+            ws.on('open', () => p2p.handshake(ws))
             ws.on('error', () => {
                 logr[isInit ? 'warn' : 'debug']('peer connection failed', peer)
             })

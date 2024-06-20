@@ -292,6 +292,9 @@ let p2p = {
                 let name2 = process.env.NODE_OWNER
                 let signData = secp256k1.ecdsaSign(Buffer.from(message.d.random, 'hex'), bs58.decode(priv))
                 let sign2 = bs58.encode(signData.signature)
+                let challengeHash = randomBytes(config.randomBytes)
+                
+                p2p.sockets[p2p.sockets.indexOf(ws)].challengeLeaderHash = challengeHash
 
                 let d2 = {
                     origin_block: config.originHash,
@@ -302,6 +305,7 @@ let p2p = {
                     version: version,
                     sign: sign2,
                     username: name2,
+                    random: challengeHash,
                 }
                 if (priv === '' || priv === null) {
                     d2.sign = ''
@@ -317,6 +321,9 @@ let p2p = {
                 && typeof message.d.random !== 'string'
                 && typeof message.d.username !== 'string')
                     return
+                let challengeHash2 = p2p.sockets[p2p.sockets.indexOf(ws)].challengeLeaderHash
+                if (!challengeHash2)
+                    return
                 if (message.d.username !== '') {
                     for (let leader in cache.leaders)
                         if (leader === message.d.username) {
@@ -326,7 +333,7 @@ let p2p = {
                     if (pubKey) {
                         let isValidSignature = secp256k1.ecdsaVerify(
                             bs58.decode(message.d.sign),
-                            Buffer.from(message.d.random, 'hex'),
+                            Buffer.from(challengeHash2, 'hex'),
                             pubKey)
                         if (!isValidSignature) 
                             logr.warn('Wrong LEADER_NAME signature.')

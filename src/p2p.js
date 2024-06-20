@@ -48,7 +48,7 @@ let p2p = {
     init: () => {
         p2p.generateNodeId()
         cache.warmupLeaders()
-        p2p.pbft = new PBFT(process.env.NODE_OWNER, [])
+        p2p.pbft = new PBFT(process.env.NODE_OWNER, [process.env.NODE_OWNER])
         let server = new WebSocket.Server({host:p2p_host, port: p2p_port})
         server.on('connection', ws => p2p.handshake(ws))
         logr.info('Listening websocket p2p port on: ' + p2p_port)
@@ -95,7 +95,7 @@ let p2p = {
                 }
                 if (!isConnected) {
                     logr[isInit ? 'info' : 'debug']('Trying to connect to '+leaders[i].name+' '+leaders[i].ws)
-                    p2p.connect([leaders[i].ws],isInit,true)
+                    p2p.connect([leaders[i].ws],isInit)
                 }
             }
         }
@@ -127,7 +127,7 @@ let p2p = {
         p2p.connect(toConnect)
         setTimeout(p2p.keepAlive,keep_alive_interval)
     },
-    connect: (newPeers,isInit = false,isLeader = false) => {
+    connect: (newPeers,isInit = false) => {
         newPeers.forEach((peer) => {
             let ws = new WebSocket(peer)
             ws.on('open', () => p2p.handshake(ws,isLeader))
@@ -336,7 +336,7 @@ let p2p = {
                             logr.warn('Wrong LEADER_NAME signature.')
                             logr.debug(JSON.stringify(message))
                             logr.debug(challengeHash2 + '=>' + message.d.random)
-                        } else if (p2p.pbft.peers.indexOf(message.d.username) === -1 && isValidSignature === true) {
+                        } else if (!p2p.pbft.peers.includes(message.d.username) && isValidSignature === true) {
                             logr.debug('Got correct LEADER_NAME signature.')
                             p2p.pbft.prototype.addPeer(message.d.username)
                         }

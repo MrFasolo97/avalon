@@ -1,8 +1,9 @@
 const logger = require('./logger.js')
 
 class PBFT {
-    constructor(nodeId, peers) {
-        this.nodeId = nodeId // Unique ID for this node
+    constructor(nodeId, peerId, peers) {
+        this.nodeId = nodeId // Unique ID for this node (aka mining leader username)
+        this.peerId = peerId // aka p2p.nodeId.pub, changes at each new run.
         this.peers = peers // List of peer node IDs
         this.state = 'Idle' // Current state
         this.messageLog = [] // Log of messages
@@ -22,6 +23,12 @@ PBFT.prototype.startConsensus = function (transaction, p2p) {
         p2p.broadcast(prePrepareMsg)
         this.state = 'Pre-Prepare'
         this.startTimeout(p2p)
+    } else {
+        // Send the transaction to the primary
+        const primaryNode = this.pbft.peers[this.pbft.currentView % this.peers.length]
+        const primarySocket = p2p.sockets.find(socket => socket.leader_name === primaryNode)
+        if (primarySocket)
+            primarySocket.send(JSON.stringify({ type: 'NewTransaction', transaction }))
     }
 }
   
@@ -116,6 +123,18 @@ PBFT.prototype.requestViewChange = function(p2p) {
     p2p.broadcast(viewChangeMsg)
 }
 
+PBFT.prototype.addNewPeer = function(nodeId, address) {
+    this.peers.push(nodeId)
+    this.sendToAllPeers({ type: 'AddPeer', nodeId: nodeId, address: address })
+}
+
+PBFT.prototype.handleAddPeer = function(msg) {
+    const newNodeId = msg.nodeId
+    if (!this.peers.includes(newNodeId))
+        this.peers.push(newNodeId)
+}
+
+
 PBFT.prototype.quorumSize = function () {
     return Math.floor(this.peers.length / 3) * 2 + 1
 }
@@ -134,12 +153,6 @@ PBFT.prototype.clearTimeout = function() {
         this.timeout = null
     }
 }
-
-
-PBFT.prototype.addPeer = function(peer) {
-    this.peers.push(peer)
-}
-
 
 PBFT.prototype.isPrimary = function () {
     return this.nodeId === this.peers[(this.currentView % this.peers.length)]

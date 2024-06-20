@@ -35,6 +35,7 @@ const MessageType = {
     BFT_PREPARE: 'Prepare',
     BFT_COMMIT: 'Commit',
     BFT_VIEWCHANGE: 'ViewChange',
+    BFT_ADDPEER: 'AddPeer',
 }
 
 let p2p = {
@@ -48,7 +49,7 @@ let p2p = {
     init: () => {
         p2p.generateNodeId()
         cache.warmupLeaders()
-        p2p.pbft = new PBFT(process.env.NODE_OWNER, [process.env.NODE_OWNER])
+        p2p.pbft = new PBFT(process.env.NODE_OWNER, p2p.nodeId.pub, [process.env.NODE_OWNER])
         let server = new WebSocket.Server({host:p2p_host, port: p2p_port})
         server.on('connection', ws => p2p.handshake(ws))
         logr.info('Listening websocket p2p port on: ' + p2p_port)
@@ -182,15 +183,17 @@ let p2p = {
             } catch(e) {
                 logr.warn('P2P received non-JSON, doing nothing ;)')
             }
-            if (message.type && message.type in ['PrePrepare', 'Prepare', 'Commit', 'ViewChange']) {
+            if (message.type && message.type in ['PrePrepare', 'Prepare', 'Commit', 'ViewChange', 'AddPeer']) {
                 if (message.type === MessageType.BFT_PREPREPARE)
                     p2p.pbft.prototype.handlePrePrepare(message, p2p)
-                else if (message.type === MessageType.BFT_PREPARE, p2p)
+                else if (message.type === MessageType.BFT_PREPARE)
                     p2p.pbft.prototype.handlePrePrepare(message, p2p)
-                else if(message.type === MessageType.BFT_COMMIT, p2p)
+                else if(message.type === MessageType.BFT_COMMIT)
                     p2p.pbft.prototype.handleCommit(message, p2p)
-                else if(message.type === MessageType.BFT_VIEWCHANGE, p2p) 
+                else if(message.type === MessageType.BFT_VIEWCHANGE) 
                     p2p.pbft.prototype.handleViewChange(message)
+                else if(message.type === MessageType.BFT_ADDPEER) 
+                    p2p.pbft.prototype.handleAddPeer(message)
                 return
             }
             if (!message || typeof message.t === 'undefined') return
@@ -225,7 +228,8 @@ let p2p = {
                     previous_block_hash: chain.getLatestBlock().phash,
                     nodeId: p2p.nodeId.pub,
                     version: version,
-                    sign: sign
+                    sign: sign,
+                    currentView: p2p.pbft.currentView,
                 }
                 p2p.sendJSON(ws, {t: MessageType.NODE_STATUS, d:d})
                 break
@@ -259,7 +263,8 @@ let p2p = {
                                 logr.debug('Peer disconnected because duplicate connections')
                                 p2p.sockets[i].close()
                             }
-    
+                        if (p2p.pbft.currentView < message.d.currentView)
+                            p2p.pbft.currentView = message.d.currentView
                         clearInterval(p2p.sockets[p2p.sockets.indexOf(ws)].pendingDisconnect)
                         delete message.d.sign
                         p2p.sockets[p2p.sockets.indexOf(ws)].node_status = message.d
@@ -338,7 +343,8 @@ let p2p = {
                             logr.debug(challengeHash2 + '=>' + message.d.random)
                         } else if (!p2p.pbft.peers.includes(message.d.username) && isValidSignature === true) {
                             logr.debug('Got correct LEADER_NAME signature.')
-                            p2p.pbft.prototype.addPeer(message.d.username)
+                            p2p.sockets[p2p.sockets.indexOf(ws)].leader_name = message.d.username
+                            p2p.pbft.prototype.addNewPeer(message.d.username, ws.url || ws._socket.remoteAddress+':'+ws._socket.remotePort)
                         }
                     } else
                         logr.debug('Public key for leader '+message.d.username+' not found!')

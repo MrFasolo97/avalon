@@ -19,6 +19,7 @@ const bs58 = require('base-x')(config.b58Alphabet)
 const blocks = require('./blocks')
 const dao = require('./dao')
 const daoMaster = require('./daoMaster')
+const PBFT = require('./PBFT.js')
 
 const MessageType = {
     QUERY_NODE_STATUS: 0,
@@ -27,7 +28,11 @@ const MessageType = {
     BLOCK: 3,
     NEW_BLOCK: 4,
     NEW_TX: 5,
-    BLOCK_CONF_ROUND: 6
+    BLOCK_CONF_ROUND: 6,
+    BFT_PREPREPARE: 'PrePrepare',
+    BFT_PREPARE: 'Prepare',
+    BFT_COMMIT: 'Commit',
+    BFT_VIEWCHANGE: 'ViewChange',
 }
 
 let p2p = {
@@ -37,7 +42,9 @@ let p2p = {
     recovering: false,
     recoverAttempt: 0,
     nodeId: null,
+    pbft: null,
     init: () => {
+        this.pbft = new PBFT(this.nodeId, process.env.PEERS ? process.env.PEERS.split(',') : [])
         p2p.generateNodeId()
         let server = new WebSocket.Server({host:p2p_host, port: p2p_port})
         server.on('connection', ws => p2p.handshake(ws))
@@ -165,6 +172,9 @@ let p2p = {
             }
         })
     },
+    appendBlock: (block) => {
+
+    },
     messageHandler: (ws) => {
         ws.on('message', (data) => {
             let message
@@ -172,6 +182,17 @@ let p2p = {
                 message = JSON.parse(data)
             } catch(e) {
                 logr.warn('P2P received non-JSON, doing nothing ;)')
+            }
+            if (message.type && message.type in ['PrePrepare', 'Prepare', 'Commit', 'ViewChange']) {
+                if (message.type === MessageType.BFT_PREPREPARE)
+                    this.pbft.prototype.handlePrePrepare(message)
+                else if (message.type === MessageType.BFT_PREPARE)
+                    this.pbft.prototype.handlePrePrepare(message)
+                else if(message.type === MessageType.BFT_COMMIT)
+                    this.pbft.prototype.handleCommit(message)
+                else if(message.type === MessageType.BFT_VIEWCHANGE) 
+                    this.pbft.prototype.handeViewChange(message)
+                return
             }
             if (!message || typeof message.t === 'undefined') return
             if (!message.d) return
@@ -293,7 +314,6 @@ let p2p = {
                 // and we forward the message to consensus if we are not replaying
                 if (!message.d) return
                 let block = message.d
-
                 let socket = p2p.sockets[p2p.sockets.indexOf(ws)]
                 if (!socket || !socket.node_status) return
                 p2p.sockets[p2p.sockets.indexOf(ws)].node_status.head_block = block._id
@@ -367,6 +387,7 @@ let p2p = {
 
                     // always try to precommit in case its the first time we see it
                     consensus.round(0, message.d.b, function(validationStep) {
+                        /*
                         if (validationStep === -1) {
                             // logr.trace('Ignored BLOCK_CONF_ROUND')
                         } else if (validationStep === 0) {
@@ -376,6 +397,8 @@ let p2p = {
                         } else
                             // process the message inside the consensus
                             consensus.remoteRoundConfirm(message)
+                            */
+                        this.pbft.startConsensus(message)
                     })
                 })
                 break
@@ -453,7 +476,7 @@ let p2p = {
     },
     broadcast: (d) => p2p.sockets.forEach(ws => p2p.sendJSON(ws, d)),
     broadcastBlock: (block) => {
-        p2p.broadcast({t:4,d:block})
+        p2p.broadcast({t:MessageType.NEW_BLOCK,d:block})
     },
     addRecursive: (block) => {
         chain.validateAndAddBlock(block, true, function(err, newBlock) {

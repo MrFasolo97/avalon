@@ -131,8 +131,13 @@ PBFT.prototype.clearTimeout = function() {
 }
 
 
+PBFT.prototype.addPeer = function(peer) {
+    this.peers.push(peer)
+}
+
+
 PBFT.prototype.isPrimary = function () {
-    return this.nodeId === (this.currentView % this.peers.length)
+    return this.nodeId === this.peers[(this.currentView % this.peers.length)]
 }
 
 module.exports = PBFT

@@ -29,6 +29,8 @@ const MessageType = {
     NEW_BLOCK: 4,
     NEW_TX: 5,
     BLOCK_CONF_ROUND: 6,
+    VERIFY_LEADER_NAME: 7,
+    REPLY_LEADER_NAME: 8,
     BFT_PREPREPARE: 'PrePrepare',
     BFT_PREPARE: 'Prepare',
     BFT_COMMIT: 'Commit',
@@ -45,7 +47,7 @@ let p2p = {
     pbft: null,
     init: () => {
         p2p.generateNodeId()
-        p2p.pbft = new PBFT(p2p.nodeId, process.env.PEERS ? process.env.PEERS.split(',') : [])
+        p2p.pbft = new PBFT(process.env.NODE_OWNER, [])
         let server = new WebSocket.Server({host:p2p_host, port: p2p_port})
         server.on('connection', ws => p2p.handshake(ws))
         logr.info('Listening websocket p2p port on: ' + p2p_port)
@@ -71,7 +73,6 @@ let p2p = {
                 logr.debug('We already have maximum peers: '+p2p.sockets.length+'/'+max_peers)
                 break
             }
-                
             if (leaders[i].ws) {
                 let excluded = (process.env.DISCOVERY_EXCLUDE ? process.env.DISCOVERY_EXCLUDE.split(',') : [])
                 if (excluded.indexOf(leaders[i].name) > -1)
@@ -93,7 +94,7 @@ let p2p = {
                 }
                 if (!isConnected) {
                     logr[isInit ? 'info' : 'debug']('Trying to connect to '+leaders[i].name+' '+leaders[i].ws)
-                    p2p.connect([leaders[i].ws],isInit)
+                    p2p.connect([leaders[i].ws],isInit,true)
                 }
             }
         }
@@ -125,10 +126,10 @@ let p2p = {
         p2p.connect(toConnect)
         setTimeout(p2p.keepAlive,keep_alive_interval)
     },
-    connect: (newPeers,isInit = false) => {
+    connect: (newPeers,isInit = false,isLeader = false) => {
         newPeers.forEach((peer) => {
             let ws = new WebSocket(peer)
-            ws.on('open', () => p2p.handshake(ws))
+            ws.on('open', () => p2p.handshake(ws,isLeader))
             ws.on('error', () => {
                 logr[isInit ? 'warn' : 'debug']('peer connection failed', peer)
             })
@@ -188,7 +189,7 @@ let p2p = {
                 else if(message.type === MessageType.BFT_COMMIT)
                     p2p.pbft.prototype.handleCommit(message)
                 else if(message.type === MessageType.BFT_VIEWCHANGE) 
-                    p2p.pbft.prototype.handeViewChange(message)
+                    p2p.pbft.prototype.handleViewChange(message)
                 return
             }
             if (!message || typeof message.t === 'undefined') return
@@ -287,7 +288,47 @@ let p2p = {
                             p2p.sendJSON(ws, {t:MessageType.BLOCK, d:block})
                     })
                 break
+            case MessageType.VERIFY_LEADER_NAME:
+                let name = message.d.username
+                let pubKey = null
+                for (let leader in cache.leaders)
+                    if (cache.leaders[leader].name === name) {
+                        pubKey = cache.leaders[leader].pub_leader
+                        break
+                    }
+                if (pubKey) {
+                    let isValidSignature = secp256k1.ecdsaVerify(
+                        bs58.decode(message.d.sign),
+                        Buffer.from(message.d.challengeHash, 'hex'),
+                        pubKey)
+                    if (!isValidSignature) 
+                        logr.warn('Wrong LEADER_NAME signature.')
+                    else if (p2p.pbft.peers.indexOf(message.d.leader) === -1 && isValidSignature === true) {
+                        logr.debug('Got correct LEADER_NAME signature.')
+                        p2p.pbft.prototype.addPeer(message.d.leader)
+                    }
+                }
+                break
+            case MessageType.REPLY_LEADER_NAME:
+                let priv = process.env.NODE_OWNER_PRIV
+                let name2 = process.env.NODE_OWNER
+                if (priv === '' || priv === null)
+                    return
+                let signData = secp256k1.ecdsaSign(Buffer.from(message.d.challengeHash, 'hex'), bs58.decode(priv))
+                sign = bs58.encode(signData.signature)
 
+                let d2 = {
+                    origin_block: config.originHash,
+                    head_block: chain.getLatestBlock()._id,
+                    head_block_hash: chain.getLatestBlock().hash,
+                    previous_block_hash: chain.getLatestBlock().phash,
+                    nodeId: p2p.nodeId.pub,
+                    version: version,
+                    sign: sign,
+                    username: name2,
+                }
+                p2p.sendJSON(ws, {t: MessageType.VERIFY_LEADER_NAME, d:d2})
+                break
             case MessageType.BLOCK:
                 // a peer sends us a block we requested with QUERY_BLOCK
                 if (!message.d._id || !p2p.recoveringBlocks.includes(message.d._id)) return

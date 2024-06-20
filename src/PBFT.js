@@ -25,7 +25,7 @@ PBFT.prototype.startConsensus = function (transaction, p2p) {
         this.startTimeout(p2p)
     } else {
         // Send the transaction to the primary
-        const primaryNode = this.pbft.peers[this.pbft.currentView % this.peers.length]
+        const primaryNode = this.peers[this.currentView % this.peers.length]
         const primarySocket = p2p.sockets.find(socket => socket.leader_name === primaryNode)
         if (primarySocket)
             primarySocket.send(JSON.stringify({ type: 'NewTransaction', transaction }))

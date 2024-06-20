@@ -329,8 +329,10 @@ let p2p = {
                             logr.debug('Got correct LEADER_NAME signature.')
                             p2p.pbft.prototype.addPeer(message.d.username)
                         }
-                    }
-                }
+                    } else
+                        logr.debug('Public key for leader '+name+' not found!')
+                } else
+                    logr.trace('Leader name not defined!')
                 break
             case MessageType.BLOCK:
                 // a peer sends us a block we requested with QUERY_BLOCK

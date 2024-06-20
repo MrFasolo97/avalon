@@ -311,18 +311,22 @@ let p2p = {
                 p2p.sendJSON(ws, {t: MessageType.REPLY_LEADER_NAME, d:d2})
                 break
             case MessageType.REPLY_LEADER_NAME:
-                let name = message.d.username
                 let pubKey = null
-                if (name !== '') {
+                if (typeof message.d !== 'object'
+                && typeof message.d.nodeId !== 'string'
+                && typeof message.d.random !== 'string'
+                && typeof message.d.username !== 'string')
+                    return
+                if (message.d.username !== '') {
                     for (let leader in cache.leaders)
-                        if (leader === name) {
+                        if (leader === message.d.username) {
                             pubKey = cache.accounts[leader].pub_leader
                             break
                         }
                     if (pubKey) {
                         let isValidSignature = secp256k1.ecdsaVerify(
                             bs58.decode(message.d.sign),
-                            Buffer.from(message.d.challengeHash, 'hex'),
+                            Buffer.from(message.d.random, 'hex'),
                             pubKey)
                         if (!isValidSignature) 
                             logr.warn('Wrong LEADER_NAME signature.')
@@ -331,7 +335,7 @@ let p2p = {
                             p2p.pbft.prototype.addPeer(message.d.username)
                         }
                     } else
-                        logr.debug('Public key for leader '+name+' not found!')
+                        logr.debug('Public key for leader '+message.d.username+' not found!')
                 } else
                     logr.trace('Leader name not defined!')
                 break

@@ -297,7 +297,7 @@ let p2p = {
             case MessageType.VERIFY_LEADER_NAME:
                 let priv = process.env.NODE_OWNER_PRIV
                 let name2 = process.env.NODE_OWNER
-                let signData = secp256k1.ecdsaSign(Buffer.from(message.d.challengeHash, 'hex'), bs58.decode(priv))
+                let signData = secp256k1.ecdsaSign(Buffer.from(message.d.random, 'hex'), bs58.decode(priv))
                 sign = bs58.encode(signData.signature)
 
                 let d2 = {
@@ -329,7 +329,7 @@ let p2p = {
                     if (pubKey) {
                         let isValidSignature = secp256k1.ecdsaVerify(
                             bs58.decode(message.d.sign),
-                            Buffer.from(message.d.challengeHash, 'hex'),
+                            Buffer.from(message.d.random, 'hex'),
                             pubKey)
                         if (!isValidSignature) 
                             logr.warn('Wrong LEADER_NAME signature.')

@@ -44,8 +44,8 @@ let p2p = {
     nodeId: null,
     pbft: null,
     init: () => {
-        this.pbft = new PBFT(this.nodeId, process.env.PEERS ? process.env.PEERS.split(',') : [])
         p2p.generateNodeId()
+        p2p.pbft = new PBFT(p2p.nodeId, process.env.PEERS ? process.env.PEERS.split(',') : [])
         let server = new WebSocket.Server({host:p2p_host, port: p2p_port})
         server.on('connection', ws => p2p.handshake(ws))
         logr.info('Listening websocket p2p port on: ' + p2p_port)

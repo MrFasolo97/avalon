@@ -35,7 +35,7 @@ mongo.init(async function(state) {
     // Warmup accounts
     let timeStart = new Date().getTime()
     await cache.warmup('accounts', parseInt(process.env.WARMUP_ACCOUNTS))
-    logr.info(Object.keys(cache.accounts).length+' acccounts loaded in RAM in '+(new Date().getTime()-timeStart)+' ms')
+    logr.info(Object.keys(cache.accounts).length+' accounts loaded in RAM in '+(new Date().getTime()-timeStart)+' ms')
     
     // Warmup contents
     timeStart = new Date().getTime()

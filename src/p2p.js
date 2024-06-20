@@ -172,15 +172,6 @@ let p2p = {
                 random: random
             }
         })
-        setTimeout(() => {
-            p2p.sendJSON(ws, {
-                t: MessageType.VERIFY_LEADER_NAME,
-                d: {
-                    nodeId: p2p.nodeId.pub,
-                    random: randomBytes(config.randomBytesLength).toString('hex')
-                }
-            })
-        }, 3000)
     },
     messageHandler: (ws) => {
         ws.on('message', (data) => {
@@ -452,6 +443,13 @@ let p2p = {
                     })
                 })
                 break
+            }
+        })
+        p2p.sendJSON(ws, {
+            t: MessageType.VERIFY_LEADER_NAME,
+            d: {
+                nodeId: p2p.nodeId.pub,
+                random: randomBytes(config.randomBytesLength).toString('hex')
             }
         })
     },

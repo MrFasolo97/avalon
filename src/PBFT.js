@@ -20,7 +20,7 @@ PBFT.prototype.startConsensus = function (transaction) {
     if (this.isPrimary()) {
         const prePrepareMsg = this.createPrePrepareMsg(transaction)
         this.prePrepareMsgs[prePrepareMsg.view] = prePrepareMsg
-        p2p.sendToAllPeers(prePrepareMsg)
+        p2p.broadcast(prePrepareMsg)
         this.state = 'Pre-Prepare'
         this.startTimeout()
     }
@@ -39,7 +39,7 @@ PBFT.prototype.handlePrePrepare = function (msg) {
     if (this.state === 'Idle' && !this.isPrimary() && msg.view === this.currentView) {
         this.prePrepareMsgs[msg.view] = msg
         const prepareMsg = this.createPrepareMsg(msg)
-        p2p.sendToAllPeers(prepareMsg)
+        p2p.broadcast(prepareMsg)
         this.startTimeout() // Start timeout for pre-prepare phase
         this.state = 'Prepare'
     }
@@ -61,7 +61,7 @@ PBFT.prototype.handlePrepare = function (msg) {
       
         if (this.prepareMsgs[msg.view].length >= this.quorumSize()) {
             const commitMsg = this.createCommitMsg(msg)
-            p2p.sendToAllPeers(commitMsg)
+            p2p.broadcast(commitMsg)
             this.startTimeout() // Start timeout for prepare phase
             this.state = 'Commit'
         }
@@ -110,7 +110,7 @@ PBFT.prototype.requestViewChange = function() {
         timestamp: Date.now()
     }
     this.startTimeout()
-    this.sendToAllPeers(viewChangeMsg)
+    this.broadcast(viewChangeMsg)
 }
 
 PBFT.prototype.quorumSize = function () {

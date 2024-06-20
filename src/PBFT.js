@@ -1,5 +1,4 @@
 const logger = require('./logger.js')
-const p2p = require('./p2p.js')
 
 class PBFT {
     constructor(nodeId, peers) {
@@ -16,7 +15,7 @@ class PBFT {
     }
 }
 
-PBFT.prototype.startConsensus = function (transaction) {
+PBFT.prototype.startConsensus = function (transaction, p2p) {
     if (this.isPrimary()) {
         const prePrepareMsg = this.createPrePrepareMsg(transaction)
         this.prePrepareMsgs[prePrepareMsg.view] = prePrepareMsg
@@ -35,7 +34,7 @@ PBFT.prototype.createPrePrepareMsg = function (transaction) {
     }
 }
   
-PBFT.prototype.handlePrePrepare = function (msg) {
+PBFT.prototype.handlePrePrepare = function (msg, p2p) {
     if (this.state === 'Idle' && !this.isPrimary() && msg.view === this.currentView) {
         this.prePrepareMsgs[msg.view] = msg
         const prepareMsg = this.createPrepareMsg(msg)
@@ -54,7 +53,7 @@ PBFT.prototype.createPrepareMsg = function (prePrepareMsg) {
     }
 }
   
-PBFT.prototype.handlePrepare = function (msg) {
+PBFT.prototype.handlePrepare = function (msg, p2p) {
     if (this.state === 'Pre-Prepare' && msg.view === this.currentView) {
         this.prepareMsgs[msg.view] = this.prepareMsgs[msg.view] || []
         this.prepareMsgs[msg.view].push(msg)
@@ -102,7 +101,8 @@ PBFT.prototype.handleViewChange = function (msg) {
         this.state = 'Idle' // Reset state
     }
 }
-PBFT.prototype.requestViewChange = function() {
+
+PBFT.prototype.requestViewChange = function(p2p) {
     const viewChangeMsg = {
         type: 'ViewChange',
         nodeId: this.nodeId,
@@ -110,7 +110,7 @@ PBFT.prototype.requestViewChange = function() {
         timestamp: Date.now()
     }
     this.startTimeout()
-    this.broadcast(viewChangeMsg)
+    p2p.broadcast(viewChangeMsg)
 }
 
 PBFT.prototype.quorumSize = function () {

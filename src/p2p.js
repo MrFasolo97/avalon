@@ -182,13 +182,13 @@ let p2p = {
             }
             if (message.type && message.type in ['PrePrepare', 'Prepare', 'Commit', 'ViewChange']) {
                 if (message.type === MessageType.BFT_PREPREPARE)
-                    this.pbft.prototype.handlePrePrepare(message)
+                    p2p.pbft.prototype.handlePrePrepare(message)
                 else if (message.type === MessageType.BFT_PREPARE)
-                    this.pbft.prototype.handlePrePrepare(message)
+                    p2p.pbft.prototype.handlePrePrepare(message)
                 else if(message.type === MessageType.BFT_COMMIT)
-                    this.pbft.prototype.handleCommit(message)
+                    p2p.pbft.prototype.handleCommit(message)
                 else if(message.type === MessageType.BFT_VIEWCHANGE) 
-                    this.pbft.prototype.handeViewChange(message)
+                    p2p.pbft.prototype.handeViewChange(message)
                 return
             }
             if (!message || typeof message.t === 'undefined') return
@@ -395,7 +395,7 @@ let p2p = {
                             // process the message inside the consensus
                             consensus.remoteRoundConfirm(message)
                             */
-                        this.pbft.startConsensus(message)
+                        p2p.pbft.startConsensus(message)
                     })
                 })
                 break

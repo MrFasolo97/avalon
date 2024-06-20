@@ -298,7 +298,7 @@ let p2p = {
                 let priv = process.env.NODE_OWNER_PRIV
                 let name2 = process.env.NODE_OWNER
                 let signData = secp256k1.ecdsaSign(Buffer.from(message.d.random, 'hex'), bs58.decode(priv))
-                sign = bs58.encode(signData.signature)
+                let sign2 = bs58.encode(signData.signature)
 
                 let d2 = {
                     origin_block: config.originHash,
@@ -307,7 +307,7 @@ let p2p = {
                     previous_block_hash: chain.getLatestBlock().phash,
                     nodeId: p2p.nodeId.pub,
                     version: version,
-                    sign: sign,
+                    sign: sign2,
                     username: name2,
                 }
                 if (priv === '' || priv === null) {

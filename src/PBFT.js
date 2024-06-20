@@ -131,4 +131,4 @@ PBFT.prototype.isPrimary = function () {
     return this.nodeId === (this.currentView % this.peers.length)
 }
 
-exports = {PBFT}
+module.exports = PBFT

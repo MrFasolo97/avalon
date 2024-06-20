@@ -172,9 +172,6 @@ let p2p = {
             }
         })
     },
-    appendBlock: (block) => {
-
-    },
     messageHandler: (ws) => {
         ws.on('message', (data) => {
             let message

@@ -428,7 +428,6 @@ let p2p = {
 
                     // always try to precommit in case its the first time we see it
                     consensus.round(0, message.d.b, function(validationStep) {
-                        /*
                         if (validationStep === -1) {
                             // logr.trace('Ignored BLOCK_CONF_ROUND')
                         } else if (validationStep === 0) {
@@ -438,8 +437,6 @@ let p2p = {
                         } else
                             // process the message inside the consensus
                             consensus.remoteRoundConfirm(message)
-                            */
-                        p2p.pbft.startConsensus(message)
                     })
                 })
                 break

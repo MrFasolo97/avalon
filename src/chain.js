@@ -149,10 +149,10 @@ let chain = {
                     possBlock[r] = []
 
                 logr.debug('Mined a new block, proposing to consensus')
-
+                
                 possBlock[0].push(process.env.NODE_OWNER)
                 consensus.possBlocks.push(possBlock)
-                consensus.endRound(0, newBlock)
+                p2p.pbft.startConsensus(possBlock)
                 cb(null, newBlock)
             })
         })
@@ -215,7 +215,7 @@ let chain = {
     minerWorker: (block) => {
         if (p2p.recovering) return
         clearTimeout(chain.worker)
-
+        p2p.pbft.startConsensus(block)
         if (chain.schedule.shuffle.length === 0) {
             logr.fatal('All leaders gave up their stake? Chain is over')
             process.exit(1)
@@ -244,6 +244,7 @@ let chain = {
                 return
             }
             chain.worker = setTimeout(function(){
+                p2p.pbft.startConsensus(block)
                 chain.mineBlock(function(error, finalBlock) {
                     if (error)
                         logr.warn('miner worker trying to mine but couldnt', finalBlock)

@@ -21,7 +21,7 @@ PBFT.prototype.startConsensus = function (transaction, p2p) {
         this.prePrepareMsgs[prePrepareMsg.view] = prePrepareMsg
         p2p.broadcast(prePrepareMsg)
         this.state = 'Pre-Prepare'
-        this.startTimeout()
+        this.startTimeout(p2p)
     }
 }
   
@@ -39,7 +39,7 @@ PBFT.prototype.handlePrePrepare = function (msg, p2p) {
         this.prePrepareMsgs[msg.view] = msg
         const prepareMsg = this.createPrepareMsg(msg)
         p2p.broadcast(prepareMsg)
-        this.startTimeout() // Start timeout for pre-prepare phase
+        this.startTimeout(p2p) // Start timeout for pre-prepare phase
         this.state = 'Prepare'
     }
 }
@@ -61,7 +61,7 @@ PBFT.prototype.handlePrepare = function (msg, p2p) {
         if (this.prepareMsgs[msg.view].length >= this.quorumSize()) {
             const commitMsg = this.createCommitMsg(msg)
             p2p.broadcast(commitMsg)
-            this.startTimeout() // Start timeout for prepare phase
+            this.startTimeout(p2p) // Start timeout for prepare phase
             this.state = 'Commit'
         }
     }
@@ -103,7 +103,7 @@ PBFT.prototype.handleViewChange = function (msg) {
 }
 
 PBFT.prototype.requestViewChange = function(p2p) {
-    this.currentView++
+    this.currentView = this.currentView+1
     this.viewChangeMsgs = []
     this.state = 'Idle'
     const viewChangeMsg = {
@@ -112,7 +112,7 @@ PBFT.prototype.requestViewChange = function(p2p) {
         view: this.currentView,
         timestamp: Date.now()
     }
-    this.startTimeout()
+    this.startTimeout(p2p)
     p2p.broadcast(viewChangeMsg)
 }
 
@@ -120,11 +120,11 @@ PBFT.prototype.quorumSize = function () {
     return Math.floor(this.peers.length / 3) * 2 + 1
 }
 
-PBFT.prototype.startTimeout = function() {
+PBFT.prototype.startTimeout = function(p2p) {
     this.clearTimeout() // Clear any existing timeout
     this.timeout = setTimeout(() => {
         logger.warn('BFT timeout, changing view! view # '+this.currentView)
-        this.requestViewChange()
+        this.requestViewChange(p2p)
     }, 10000) // 10 seconds timeout for this example
 }
 

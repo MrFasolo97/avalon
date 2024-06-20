@@ -341,7 +341,7 @@ let p2p = {
                             logr.warn('Wrong LEADER_NAME signature.')
                             logr.debug(JSON.stringify(message))
                             logr.debug(challengeHash2 + '=>' + message.d.random)
-                        } else if (!p2p.pbft.peers.includes(message.d.username) && isValidSignature === true) {
+                        } else if (p2p.pbft.peers.indexOf(message.d.username) === -1 && isValidSignature === true) {
                             logr.debug('Got correct LEADER_NAME signature.')
                             p2p.sockets[p2p.sockets.indexOf(ws)].leader_name = message.d.username
                             p2p.pbft.prototype.addNewPeer(message.d.username, ws.url || ws._socket.remoteAddress+':'+ws._socket.remotePort)

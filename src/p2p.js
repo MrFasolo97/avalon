@@ -335,9 +335,10 @@ let p2p = {
                             bs58.decode(message.d.sign),
                             Buffer.from(challengeHash2, 'hex'),
                             bs58.decode(pubKey))
-                        if (!isValidSignature) 
+                        if (!isValidSignature) {
                             logr.warn('Wrong LEADER_NAME signature.')
-                        else if (p2p.pbft.peers.indexOf(message.d.username) === -1 && isValidSignature === true) {
+                            logr.debug(JSON.stringify(message))
+                        } else if (p2p.pbft.peers.indexOf(message.d.username) === -1 && isValidSignature === true) {
                             logr.debug('Got correct LEADER_NAME signature.')
                             p2p.pbft.prototype.addPeer(message.d.username)
                         }

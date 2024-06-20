@@ -315,8 +315,8 @@ let p2p = {
                 let pubKey = null
                 if (name !== '') {
                     for (let leader in cache.leaders)
-                        if (cache.leaders[leader].name === name) {
-                            pubKey = cache.leaders[leader].pub_leader
+                        if (leader === name) {
+                            pubKey = cache.accounts[leader].pub_leader
                             break
                         }
                     if (pubKey) {

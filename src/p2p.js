@@ -251,7 +251,13 @@ let p2p = {
                             logr.warn('Wrong NODE_STATUS signature, disconnecting')
                             ws.close()
                         }
-                        
+                        p2p.sendJSON(ws, {
+                            t: MessageType.VERIFY_LEADER_NAME,
+                            d: {
+                                nodeId: p2p.nodeId.pub,
+                                random: randomBytes(config.randomBytesLength).toString('hex')
+                            }
+                        })
                         for (let i = 0; i < p2p.sockets.length; i++)
                             if (i !== p2p.sockets.indexOf(ws)
                             && p2p.sockets[i].node_status
@@ -289,31 +295,8 @@ let p2p = {
                     })
                 break
             case MessageType.VERIFY_LEADER_NAME:
-                let name = message.d.username
-                let pubKey = null
-                for (let leader in cache.leaders)
-                    if (cache.leaders[leader].name === name) {
-                        pubKey = cache.leaders[leader].pub_leader
-                        break
-                    }
-                if (pubKey) {
-                    let isValidSignature = secp256k1.ecdsaVerify(
-                        bs58.decode(message.d.sign),
-                        Buffer.from(message.d.challengeHash, 'hex'),
-                        pubKey)
-                    if (!isValidSignature) 
-                        logr.warn('Wrong LEADER_NAME signature.')
-                    else if (p2p.pbft.peers.indexOf(message.d.leader) === -1 && isValidSignature === true) {
-                        logr.debug('Got correct LEADER_NAME signature.')
-                        p2p.pbft.prototype.addPeer(message.d.leader)
-                    }
-                }
-                break
-            case MessageType.REPLY_LEADER_NAME:
                 let priv = process.env.NODE_OWNER_PRIV
                 let name2 = process.env.NODE_OWNER
-                if (priv === '' || priv === null)
-                    return
                 let signData = secp256k1.ecdsaSign(Buffer.from(message.d.challengeHash, 'hex'), bs58.decode(priv))
                 sign = bs58.encode(signData.signature)
 
@@ -327,7 +310,35 @@ let p2p = {
                     sign: sign,
                     username: name2,
                 }
-                p2p.sendJSON(ws, {t: MessageType.VERIFY_LEADER_NAME, d:d2})
+                if (priv === '' || priv === null) {
+                    d2.sign = ''
+                    d2.username = ''
+                    p2p.sendJSON(ws, {t: MessageType.REPLY_LEADER_NAME, d:d2})
+                }
+                p2p.sendJSON(ws, {t: MessageType.REPLY_LEADER_NAME, d:d2})
+                break
+            case MessageType.REPLY_LEADER_NAME:
+                let name = message.d.username
+                let pubKey = null
+                if (name !== '') {
+                    for (let leader in cache.leaders)
+                        if (cache.leaders[leader].name === name) {
+                            pubKey = cache.leaders[leader].pub_leader
+                            break
+                        }
+                    if (pubKey) {
+                        let isValidSignature = secp256k1.ecdsaVerify(
+                            bs58.decode(message.d.sign),
+                            Buffer.from(message.d.challengeHash, 'hex'),
+                            pubKey)
+                        if (!isValidSignature) 
+                            logr.warn('Wrong LEADER_NAME signature.')
+                        else if (p2p.pbft.peers.indexOf(message.d.username) === -1 && isValidSignature === true) {
+                            logr.debug('Got correct LEADER_NAME signature.')
+                            p2p.pbft.prototype.addPeer(message.d.username)
+                        }
+                    }
+                }
                 break
             case MessageType.BLOCK:
                 // a peer sends us a block we requested with QUERY_BLOCK

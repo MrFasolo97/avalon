@@ -47,6 +47,7 @@ let p2p = {
     pbft: null,
     init: () => {
         p2p.generateNodeId()
+        cache.warmupLeaders()
         p2p.pbft = new PBFT(process.env.NODE_OWNER, [])
         let server = new WebSocket.Server({host:p2p_host, port: p2p_port})
         server.on('connection', ws => p2p.handshake(ws))

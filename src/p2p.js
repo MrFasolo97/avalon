@@ -298,10 +298,6 @@ let p2p = {
             case MessageType.VERIFY_LEADER_NAME:
                 let priv = process.env.NODE_OWNER_PRIV
                 let name2 = process.env.NODE_OWNER
-                let signData = secp256k1.ecdsaSign(Buffer.from(message.d.random, 'hex'), bs58.decode(priv))
-                let sign2 = bs58.encode(signData.signature)
-                let random = randomBytes(config.randomBytesLength).toString('hex')
-                ws.challengeLeaderHash = random
                 let d2 = {
                     origin_block: config.originHash,
                     head_block: chain.getLatestBlock()._id,
@@ -309,7 +305,6 @@ let p2p = {
                     previous_block_hash: chain.getLatestBlock().phash,
                     nodeId: p2p.nodeId.pub,
                     version: version,
-                    sign: sign2,
                     username: name2,
                     random: random,
                 }
@@ -317,7 +312,13 @@ let p2p = {
                     d2.sign = ''
                     d2.username = ''
                     p2p.sendJSON(ws, {t: MessageType.REPLY_LEADER_NAME, d:d2})
+                    return
                 }
+                let signData = secp256k1.ecdsaSign(Buffer.from(message.d.random, 'hex'), bs58.decode(priv))
+                let sign2 = bs58.encode(signData.signature)
+                let random = randomBytes(config.randomBytesLength).toString('hex')
+                ws.challengeLeaderHash = random
+                d2.sign = sign2
                 p2p.sendJSON(ws, {t: MessageType.REPLY_LEADER_NAME, d:d2})
                 break
             case MessageType.REPLY_LEADER_NAME:

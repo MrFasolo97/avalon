@@ -302,6 +302,8 @@ let p2p = {
                     })
                 break
             case MessageType.VERIFY_LEADER_NAME:
+                if(!message.d || !message.d.random)
+                    return
                 let priv = process.env.NODE_OWNER_PRIV
                 let name2 = process.env.NODE_OWNER
                 let random = randomBytes(config.randomBytesLength).toString('hex')

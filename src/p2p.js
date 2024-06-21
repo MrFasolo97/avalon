@@ -213,8 +213,7 @@ let p2p = {
                     ws.close()
                     return
                 }
-                random = randomBytes(config.randomBytesLength).toString('hex')
-                ws.challengeHash = random
+
                 p2p.sockets[p2p.sockets.indexOf(ws)].node_status = {
                     nodeId: message.d.nodeId
                 }
@@ -255,6 +254,9 @@ let p2p = {
                             bs58.decode(nodeId))
                         if (!isValidSignature) {
                             logr.warn('Wrong NODE_STATUS signature, disconnecting')
+                            logr.trace(JSON.stringify(message))
+                            logr.trace('nodeId='+nodeId)
+                            logr.trace('challengeHash='+challengeHash)
                             ws.close()
                         }
                         for (let i = 0; i < p2p.sockets.length; i++)

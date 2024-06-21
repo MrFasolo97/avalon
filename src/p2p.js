@@ -174,6 +174,12 @@ let p2p = {
                 random: random
             }
         })
+        p2p.sendJSON(ws, {
+            t: MessageType.VERIFY_LEADER_NAME,
+            d: {
+                nodeId: p2p.nodeId.pub
+            }
+        })
     },
     messageHandler: (ws) => {
         ws.on('message', (data) => {
@@ -310,15 +316,11 @@ let p2p = {
                     random: random,
                 }
                 if (priv === '' || priv === null) {
-                    d2.sign = ''
                     d2.username = ''
                     p2p.sendJSON(ws, {t: MessageType.REPLY_LEADER_NAME, d:d2})
                     return
                 }
                 ws.challengeLeaderHash = random
-                let signData = secp256k1.ecdsaSign(Buffer.from(message.d.random, 'hex'), bs58.decode(priv))
-                let sign2 = bs58.encode(signData.signature)
-                d2.sign = sign2
                 p2p.sendJSON(ws, {t: MessageType.REPLY_LEADER_NAME, d:d2})
                 break
             case MessageType.REPLY_LEADER_NAME:
@@ -464,13 +466,6 @@ let p2p = {
                     })
                 })
                 break
-            }
-        })
-        p2p.sendJSON(ws, {
-            t: MessageType.VERIFY_LEADER_NAME,
-            d: {
-                nodeId: p2p.nodeId.pub,
-                random: randomBytes(config.randomBytesLength).toString('hex')
             }
         })
     },

@@ -16,13 +16,13 @@ class PBFT {
     }
 }
 
-PBFT.prototype.startConsensus = function (transaction, p2p) {
+PBFT.prototype.startConsensus = function (transaction) {
     if (this.isPrimary()) {
         const prePrepareMsg = this.createPrePrepareMsg(transaction)
         this.prePrepareMsgs[prePrepareMsg.view] = prePrepareMsg
         p2p.broadcast(prePrepareMsg)
         this.state = 'Pre-Prepare'
-        this.startTimeout(p2p)
+        this.startTimeout()
     } else {
         // Send the transaction to the primary
         const primaryNode = this.peers[this.currentView % this.peers.length]
@@ -41,12 +41,12 @@ PBFT.prototype.createPrePrepareMsg = function (transaction) {
     }
 }
   
-PBFT.prototype.handlePrePrepare = function (msg, p2p) {
+PBFT.prototype.handlePrePrepare = function (msg) {
     if (this.state === 'Idle' && !this.isPrimary() && msg.view === this.currentView) {
         this.prePrepareMsgs[msg.view] = msg
         const prepareMsg = this.createPrepareMsg(msg)
         p2p.broadcast(prepareMsg)
-        this.startTimeout(p2p) // Start timeout for pre-prepare phase
+        this.startTimeout() // Start timeout for pre-prepare phase
         this.state = 'Prepare'
     }
 }
@@ -60,7 +60,7 @@ PBFT.prototype.createPrepareMsg = function (prePrepareMsg) {
     }
 }
   
-PBFT.prototype.handlePrepare = function (msg, p2p) {
+PBFT.prototype.handlePrepare = function (msg) {
     if (this.state === 'Pre-Prepare' && msg.view === this.currentView) {
         this.prepareMsgs[msg.view] = this.prepareMsgs[msg.view] || []
         this.prepareMsgs[msg.view].push(msg)
@@ -68,7 +68,7 @@ PBFT.prototype.handlePrepare = function (msg, p2p) {
         if (this.prepareMsgs[msg.view].length >= this.quorumSize()) {
             const commitMsg = this.createCommitMsg(msg)
             p2p.broadcast(commitMsg)
-            this.startTimeout(p2p) // Start timeout for prepare phase
+            this.startTimeout() // Start timeout for prepare phase
             this.state = 'Commit'
         }
     }
@@ -109,7 +109,7 @@ PBFT.prototype.handleViewChange = function (msg) {
     }
 }
 
-PBFT.prototype.requestViewChange = function(p2p) {
+PBFT.prototype.requestViewChange = function() {
     this.currentView = this.currentView+1
     this.viewChangeMsgs = []
     this.state = 'Idle'
@@ -119,7 +119,7 @@ PBFT.prototype.requestViewChange = function(p2p) {
         view: this.currentView,
         timestamp: Date.now()
     }
-    this.startTimeout(p2p)
+    this.startTimeout()
     p2p.broadcast(viewChangeMsg)
 }
 
@@ -139,11 +139,11 @@ PBFT.prototype.quorumSize = function () {
     return Math.floor(this.peers.length / 3) * 2 + 1
 }
 
-PBFT.prototype.startTimeout = function(p2p) {
+PBFT.prototype.startTimeout = function() {
     this.clearTimeout() // Clear any existing timeout
     this.timeout = setTimeout(() => {
         logger.warn('BFT timeout, changing view! view # '+this.currentView)
-        this.requestViewChange(p2p)
+        this.requestViewChange()
     }, 10000) // 10 seconds timeout for this example
 }
 

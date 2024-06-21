@@ -119,7 +119,6 @@ let chain = {
             if (err) {
                 cb(true, newBlock); return
             }
-
             // at this point transactions in the pool seem all validated
             // BUT with a different ts and without checking for double spend
             // so we will execute transactions in order and revalidate after each execution
@@ -131,8 +130,8 @@ let chain = {
                 newBlock.txs = validTxs
 
                 // always record the failure of others
-                if (p2p.pbft.isPrimary())
-                    newBlock.missedBy = chain.schedule.shuffle[(newBlock._id-1)%config.leaders].name
+                if (!p2p.pbft.isPrimary())
+                    newBlock.missedBy = p2p.pbft.peers[p2p.pbft.currentView % p2p.pbft.peers.length]
 
                 if (distributed) newBlock.dist = distributed
                 if (burned) newBlock.burn = burned
@@ -151,6 +150,7 @@ let chain = {
                 logr.debug('Mined a new block, proposing to consensus')
                 
                 possBlock[0].push(process.env.NODE_OWNER)
+                p2p.pbft.startConsensus(possBlock)
                 consensus.possBlocks.push(possBlock)
                 cb(null, newBlock)
             })
@@ -214,7 +214,6 @@ let chain = {
     minerWorker: (block) => {
         if (p2p.recovering) return
         clearTimeout(chain.worker)
-        p2p.pbft.startConsensus(block)
         if (chain.schedule.shuffle.length === 0) {
             logr.fatal('All leaders gave up their stake? Chain is over')
             process.exit(1)
@@ -246,7 +245,6 @@ let chain = {
                 chain.mineBlock(function(error, finalBlock) {
                     if (error)
                         logr.warn('miner worker trying to mine but couldnt', finalBlock)
-                    p2p.pbft.startConsensus(finalBlock)
                 })
             }, mineInMs)
         }

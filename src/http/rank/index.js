@@ -56,7 +56,7 @@ module.exports = {
                 else {
                     for (let leader = 0; leader < r.length; leader++) {
                         delete r[leader].hasVote
-                        r[leader].produced = leaderStats.leaders[r[leader].name].produced
+                        r[leader].produced = leaderStats.leaders[r[leader].name] ? leaderStats.leaders[r[leader].name].produced : 0
                         r[leader].missed = leaderStats.leaders[r[leader].name].missed
                         r[leader].voters = leaderStats.leaders[r[leader].name].voters
                         r[leader].last = leaderStats.leaders[r[leader].name].last

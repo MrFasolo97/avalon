@@ -131,7 +131,7 @@ let chain = {
                 newBlock.txs = validTxs
 
                 // always record the failure of others
-                if (chain.schedule.shuffle[(newBlock._id-1)%config.leaders].name !== process.env.NODE_OWNER)
+                if (p2p.pbft.isPrimary())
                     newBlock.missedBy = chain.schedule.shuffle[(newBlock._id-1)%config.leaders].name
 
                 if (distributed) newBlock.dist = distributed
@@ -527,7 +527,7 @@ let chain = {
 
         // check if miner is normal scheduled one
         let minerPriority = 0
-        if (p2p.pbft.prototype.isPrimary()) 
+        if (p2p.pbft.isPrimary()) 
             minerPriority = 1
         // allow miners of n blocks away
         // to mine after (n+1)*blockTime as 'backups'

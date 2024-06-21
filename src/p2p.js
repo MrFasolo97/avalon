@@ -301,7 +301,7 @@ let p2p = {
                 let signData = secp256k1.ecdsaSign(Buffer.from(message.d.random, 'hex'), bs58.decode(priv))
                 let sign2 = bs58.encode(signData.signature)
                 let random = randomBytes(config.randomBytesLength).toString('hex')
-                ws.challengeHash = random
+                ws.challengeLeaderHash = random
                 let d2 = {
                     origin_block: config.originHash,
                     head_block: chain.getLatestBlock()._id,

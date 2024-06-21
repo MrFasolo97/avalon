@@ -152,7 +152,6 @@ let chain = {
                 
                 possBlock[0].push(process.env.NODE_OWNER)
                 consensus.possBlocks.push(possBlock)
-                p2p.pbft.startConsensus(newBlock)
                 cb(null, newBlock)
             })
         })
@@ -244,10 +243,10 @@ let chain = {
                 return
             }
             chain.worker = setTimeout(function(){
-                p2p.pbft.startConsensus(block)
                 chain.mineBlock(function(error, finalBlock) {
                     if (error)
                         logr.warn('miner worker trying to mine but couldnt', finalBlock)
+                    p2p.pbft.startConsensus(finalBlock)
                 })
             }, mineInMs)
         }

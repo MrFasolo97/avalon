@@ -320,6 +320,10 @@ let p2p = {
                     p2p.sendJSON(ws, {t: MessageType.REPLY_LEADER_NAME, d:d2})
                     return
                 }
+                
+                let sign2 = secp256k1.ecdsaSign(Buffer.from(message.d.random, 'hex'), bs58.decode(priv))
+                sign2 = bs58.encode(sign2.signature)
+                d2.sign = sign2
                 ws.challengeLeaderHash = random
                 p2p.sendJSON(ws, {t: MessageType.REPLY_LEADER_NAME, d:d2})
                 break

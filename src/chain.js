@@ -527,7 +527,7 @@ let chain = {
 
         // check if miner is normal scheduled one
         let minerPriority = 0
-        if (chain.schedule.shuffle[(newBlock._id-1)%config.leaders] && chain.schedule.shuffle[(newBlock._id-1)%config.leaders].name === newBlock.miner) 
+        if (p2p.pbft.prototype.isPrimary()) 
             minerPriority = 1
         // allow miners of n blocks away
         // to mine after (n+1)*blockTime as 'backups'

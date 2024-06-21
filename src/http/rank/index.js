@@ -60,8 +60,8 @@ module.exports = {
                         r[leader].missed = leaderStats.leaders[r[leader].name] ? r[leader].missed = leaderStats.leaders[r[leader].name].missed : -1
                         r[leader].voters = leaderStats.leaders[r[leader].name] ? r[leader].voters = leaderStats.leaders[r[leader].name].voters : -1
                         r[leader].last = leaderStats.leaders[r[leader].name] ? r[leader].voters = leaderStats.leaders[r[leader].name].last : -1
-                        if (leaderStats.leaders[r[leader].name].sinceTs) r[leader].sinceTs = leaderStats.leaders[r[leader].name].sinceTs; else r[leader].sinceTs = -1
-                        if (leaderStats.leaders[r[leader].name].sinceBlock) r[leader].sinceBlock = leaderStats.leaders[r[leader].name].sinceBlock; else r[leader].sinceBlock = -1
+                        if (leaderStats.leaders[r[leader].name]) r[leader].sinceTs = leaderStats.leaders[r[leader].name].sinceTs; else r[leader].sinceTs = -1
+                        if (leaderStats.leaders[r[leader].name]) r[leader].sinceBlock = leaderStats.leaders[r[leader].name].sinceBlock; else r[leader].sinceBlock = -1
                     }
                     res.send(r)
                 }

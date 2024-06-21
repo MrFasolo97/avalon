@@ -56,12 +56,12 @@ module.exports = {
                 else {
                     for (let leader = 0; leader < r.length; leader++) {
                         delete r[leader].hasVote
-                        r[leader].produced = leaderStats.leaders[r[leader].name] ? leaderStats.leaders[r[leader].name].produced : 0
-                        r[leader].missed = leaderStats.leaders[r[leader].name] ? r[leader].missed = leaderStats.leaders[r[leader].name].missed : 0
-                        r[leader].voters = leaderStats.leaders[r[leader].name].voters
-                        r[leader].last = leaderStats.leaders[r[leader].name].last
-                        if (leaderStats.leaders[r[leader].name].sinceTs) r[leader].sinceTs = leaderStats.leaders[r[leader].name].sinceTs
-                        if (leaderStats.leaders[r[leader].name].sinceBlock) r[leader].sinceBlock = leaderStats.leaders[r[leader].name].sinceBlock
+                        r[leader].produced = leaderStats.leaders[r[leader].name] ? leaderStats.leaders[r[leader].name].produced : -1
+                        r[leader].missed = leaderStats.leaders[r[leader].name] ? r[leader].missed = leaderStats.leaders[r[leader].name].missed : -1
+                        r[leader].voters = leaderStats.leaders[r[leader].name] ? r[leader].voters = leaderStats.leaders[r[leader].name].voters : -1
+                        r[leader].last = leaderStats.leaders[r[leader].name] ? r[leader].voters = leaderStats.leaders[r[leader].name].last : -1
+                        if (leaderStats.leaders[r[leader].name].sinceTs) r[leader].sinceTs = leaderStats.leaders[r[leader].name].sinceTs; else r[leader].sinceTs = -1
+                        if (leaderStats.leaders[r[leader].name].sinceBlock) r[leader].sinceBlock = leaderStats.leaders[r[leader].name].sinceBlock; else r[leader].sinceBlock = -1
                     }
                     res.send(r)
                 }

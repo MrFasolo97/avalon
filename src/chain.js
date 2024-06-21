@@ -152,7 +152,7 @@ let chain = {
                 
                 possBlock[0].push(process.env.NODE_OWNER)
                 consensus.possBlocks.push(possBlock)
-                p2p.pbft.startConsensus(possBlock, p2p)
+                p2p.pbft.startConsensus(newBlock)
                 cb(null, newBlock)
             })
         })

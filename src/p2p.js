@@ -213,7 +213,8 @@ let p2p = {
                     ws.close()
                     return
                 }
-
+                random = randomBytes(config.randomBytesLength).toString('hex')
+                ws.challengeHash = random
                 p2p.sockets[p2p.sockets.indexOf(ws)].node_status = {
                     nodeId: message.d.nodeId
                 }
@@ -228,8 +229,8 @@ let p2p = {
                     previous_block_hash: chain.getLatestBlock().phash,
                     nodeId: p2p.nodeId.pub,
                     version: version,
-                    sign: sign,
                     currentView: p2p.pbft.currentView,
+                    sign: sign,
                 }
                 p2p.sendJSON(ws, {t: MessageType.NODE_STATUS, d:d})
                 break

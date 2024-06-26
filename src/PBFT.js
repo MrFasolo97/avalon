@@ -3,7 +3,7 @@ const logger = require('./logger.js')
 class PBFT {
     constructor(nodeId, peerId, peers) {
         this.nodeId = nodeId // Unique ID for this node
-        this.peers = peers // List of peer node IDs
+        this.peers = peers ? peers : [] // List of peer node IDs
         this.peerId = peerId
         this.state = 'Idle' // Current state
         this.messageLog = [] // Log of messages

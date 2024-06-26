@@ -162,7 +162,7 @@ class PBFT {
     }
 
     addNewPeer(newPeerId, address) {
-        p2p.pbft.push(newPeerId)
+        p2p.pbft.peers.push(newPeerId)
         this.sendToAllPeers({ type: 'AddPeer', peerId: newPeerId, address: address })
     }
   

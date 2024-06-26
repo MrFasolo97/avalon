@@ -191,15 +191,15 @@ let p2p = {
             }
             if (message.type && message.type in ['PrePrepare', 'Prepare', 'Commit', 'ViewChange', 'AddPeer']) {
                 if (message.type === MessageType.BFT_PREPREPARE)
-                    p2p.pbft.prototype.handlePrePrepare(message)
+                    p2p.pbft.handlePrePrepare(message)
                 else if (message.type === MessageType.BFT_PREPARE)
-                    p2p.pbft.prototype.handlePrePrepare(message)
+                    p2p.pbft.handlePrePrepare(message)
                 else if(message.type === MessageType.BFT_COMMIT)
-                    p2p.pbft.prototype.handleCommit(message)
+                    p2p.pbft.handleCommit(message)
                 else if(message.type === MessageType.BFT_VIEWCHANGE) 
-                    p2p.pbft.prototype.handleViewChange(message)
+                    p2p.pbft.handleViewChange(message)
                 else if(message.type === MessageType.BFT_ADDPEER) 
-                    p2p.pbft.prototype.handleAddPeer(message)
+                    p2p.pbft.handleAddPeer(message)
                 return
             }
             if (!message || typeof message.t === 'undefined') return
@@ -277,6 +277,7 @@ let p2p = {
                         clearInterval(p2p.sockets[p2p.sockets.indexOf(ws)].pendingDisconnect)
                         delete message.d.sign
                         p2p.sockets[p2p.sockets.indexOf(ws)].node_status = message.d
+                        p2p.pbft.addNewPeer(nodeId, ws.url || ws._socket.remoteAddress+':'+ws._socket.remotePort)
                     } catch (error) {
                         logr.error('Error during NODE_STATUS verification', error)
                     }
@@ -356,9 +357,7 @@ let p2p = {
                             logr.debug(challengeHash2 + '=>' + message.d.random)
                         } else if (p2p.pbft.peers.indexOf(message.d.username) === -1 && isValidSignature === true) {
                             logr.debug('Got correct LEADER_NAME signature.')
-                            p2p.sockets[p2p.sockets.indexOf(ws)].leader_name = message.d.username
-                            p2p.pbft.prototype.addNewPeer(message.d.username, ws.url || ws._socket.remoteAddress+':'+ws._socket.remotePort)
-                        }
+                            p2p.sockets[p2p.sockets.indexOf(ws)].leader_name = message.d.username                        }
                     } else
                         logr.debug('Public key for leader '+message.d.username+' not found!')
                 } else

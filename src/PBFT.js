@@ -155,6 +155,17 @@ class PBFT {
             }
         }
     }
+
+    handleAddPeer(msg) {
+        this.peers.push(msg.peerId)
+        p2p.connect([msg.address.indexOf('ws://') === -1 ? 'ws://'+msg.address : msg.address])
+    }
+
+    addNewPeer(newPeerId, address) {
+        this.peers.push(newPeerId)
+        this.connectToPeer(newPeerId)
+        this.sendToAllPeers({ type: 'AddPeer', peerId: newPeerId, address: address })
+    }
   
     startTimeout() {
         this.clearTimeout() // Clear any existing timeout

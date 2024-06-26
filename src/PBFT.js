@@ -166,7 +166,7 @@ class PBFT {
 
     addNewPeer(newPeerId) {
         this.peers[this.peers.length] = newPeerId
-        p2p.broadcast({ type: 'AddPeer', peerId: newPeerId, address: address })
+        p2p.broadcast({ type: 'AddPeer', peerId: newPeerId })
     }
   
     startTimeout() {

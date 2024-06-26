@@ -21,6 +21,7 @@ class PBFT {
     }
   
     startConsensus(transaction) {
+        logger.trace('Starting "startConsensus()"')
         if (this.isPrimary()) {
             const prePrepareMsg = this.createPrePrepareMsg(transaction)
             this.prePrepareMsgs[prePrepareMsg.view] = prePrepareMsg
@@ -44,6 +45,7 @@ class PBFT {
     }
   
     handlePrePrepare(msg) {
+        logger.trace('Starting "handlePrePrepare()"')
         if (this.state === 'Idle' && !this.isPrimary() && msg.view === this.currentView) {
             this.prePrepareMsgs[msg.view] = msg
             const prepareMsg = this.createPrepareMsg(msg)
@@ -67,6 +69,7 @@ class PBFT {
     }
   
     handlePrepare(msg) {
+        logger.trace('Starting "handlePrepare()"')
         if (this.state === 'Pre-Prepare' && msg.view === this.currentView) {
             this.prepareMsgs[msg.view] = this.prepareMsgs[msg.view] || []
             this.prepareMsgs[msg.view].push(msg)
@@ -94,6 +97,7 @@ class PBFT {
     }
   
     handleCommit(msg) {
+        logger.trace('Starting "handleCommit()"')
         if (this.state === 'Prepare' && msg.view === this.currentView) {
             this.commitMsgs[msg.view] = this.commitMsgs[msg.view] || []
             this.commitMsgs[msg.view].push(msg)
@@ -117,6 +121,7 @@ class PBFT {
     }
   
     commitTransaction(transaction) {
+        logger.trace('Starting "commitTransaction()"')
         // Add transaction to the blockchain
         logger.debug('Transaction committed:', transaction)
         // Reset state and prepare for the next consensus round

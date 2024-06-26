@@ -590,15 +590,13 @@ let chain = {
                 if (revalidate)
                     transaction.isValid(tx, block.timestamp, function(isValid, error) {
                         if (isValid) 
-                            transaction.execute(tx, block.timestamp, function(executed, distributed, burned) {
+                            transaction.execute(tx, block.timestamp, function(executed) {
                                 if (!executed) {
                                     logr.fatal('Tx execution failure', tx)
                                     process.exit(1)
                                 }
                                 callback(null, {
                                     executed: executed,
-                                    distributed: distributed,
-                                    burned: burned
                                 })
                             })
                         else {
@@ -607,13 +605,11 @@ let chain = {
                         }
                     })
                 else
-                    transaction.execute(tx, block.timestamp, function(executed, distributed, burned) {
+                    transaction.execute(tx, block.timestamp, function(executed) {
                         if (!executed)
                             logr.fatal('Tx execution failure', tx)
                         callback(null, {
                             executed: executed,
-                            distributed: distributed,
-                            burned: burned
                         })
                     })
                 i++

@@ -162,8 +162,8 @@ let transaction = {
             }
 
             // check transaction specifics
-            transaction.isValidTxData(tx, ts, legitUser, function(isValid, error) {
-                cb(isValid, error)
+            transaction.isValidTxData(tx, ts, legitUser, function(error, isValid) {
+                cb(error, isValid)
             })
         })
     },
@@ -262,8 +262,8 @@ let transaction = {
     execute: (tx, ts, cb) => {
         transaction.collectGrowInts(tx, ts, function(success) {
             if (!success) throw 'Error collecting bandwidth'
-            Transaction.execute(tx, ts, function(executed, distributed, burned) {
-                cb(executed, distributed, burned)
+            Transaction.execute(tx, ts, function(executed) {
+                cb(executed)
             })
         })
     },

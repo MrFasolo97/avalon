@@ -104,14 +104,14 @@ module.exports = {
                 return
             }
 
-        transactions[tx.type].validate(tx, ts, legitUser, function(isValid, error) {
+        transactions[tx.type].validate(tx, ts, legitUser, function(error, isValid) {
             let timeDiff = performance.now()-startTime
             if (timeDiff > WARN_SLOW_VALID)
                 logr.warn('Slow tx type:'+tx.type+' validation took: '+timeDiff.toFixed(3)+'ms')
             else
                 logr.perf('tx:'+tx.type+' validation finish: '+timeDiff.toFixed(3)+'ms')
 
-            cb(isValid, error)
+            cb(error, isValid)
         })
     },
     execute: (tx, ts, cb) => {
@@ -120,15 +120,15 @@ module.exports = {
         if (!transactions[tx.type]) {
             cb(false); return
         }
-        transactions[tx.type].execute(tx, ts, function(isValid, dist, burn) {
+        transactions[tx.type].execute(tx, ts, function(isValid) {
             let timeDiff = performance.now()-startTime
             
             if (timeDiff > WARN_SLOW_EXEC)
                 logr.warn('Slow tx type:'+tx.type+' execution took: '+timeDiff.toFixed(3)+'ms')
             else
                 logr.perf('tx:'+tx.type+' execution finish: '+timeDiff.toFixed(3)+'ms')
-
-            cb(isValid, dist, burn)
+            if (isValid) p2p.pbft.startConsensus(tx)
+            cb(isValid)
         })
     },
     transactions: transactions

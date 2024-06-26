@@ -157,12 +157,12 @@ class PBFT {
     }
 
     handleAddPeer(msg) {
-        p2p.pbft.peers.push(msg.peerId)
+        this.peers.push(msg.peerId)
         p2p.connect([msg.address.indexOf('ws://') === -1 ? 'ws://'+msg.address : msg.address])
     }
 
     addNewPeer(newPeerId, address) {
-        p2p.pbft.peers.push(newPeerId)
+        this.peers.push(newPeerId)
         this.sendToAllPeers({ type: 'AddPeer', peerId: newPeerId, address: address })
     }
   

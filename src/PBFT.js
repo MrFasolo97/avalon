@@ -90,10 +90,11 @@ PBFT.prototype.handleCommit = function (msg) {
       
         if (this.commitMsgs[msg.view].length >= this.quorumSize()) {
             // Commit the transaction to the blockchain
-            consensus.possBlocks.push(msg.transaction)
-            consensus.endRound(0, msg.transaction)
-            consensus.remoteRoundConfirm(msg.transaction)
-            consensus.validateAndAddBlock(msg.transaction)
+            // consensus.possBlocks.push(msg.transaction)
+            let txs = [msg.transaction]
+            consensus.endRound(0, txs)
+            consensus.remoteRoundConfirm(txs)
+            consensus.validateAndAddBlock(txs)
             this.clearTimeout() // Clear timeout after successful commit
             this.state = 'Idle'
         }

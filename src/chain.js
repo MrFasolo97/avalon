@@ -130,28 +130,29 @@ let chain = {
                 newBlock.txs = validTxs
 
                 // always record the failure of others
-                if (!p2p.pbft.isPrimary())
-                    newBlock.missedBy = p2p.pbft.peers[p2p.pbft.currentView % p2p.pbft.peers.length]
+                // if (!p2p.pbft.isPrimary())
+                //    newBlock.missedBy = p2p.pbft.peers[p2p.pbft.currentView % p2p.pbft.peers.length]
 
-                if (distributed) newBlock.dist = distributed
-                if (burned) newBlock.burn = burned
+                // if (distributed) newBlock.dist = distributed
+                // if (burned) newBlock.burn = burned
 
                 // hash and sign the block with our private key
-                newBlock = chain.hashAndSignBlock(newBlock)
+                // newBlock = chain.hashAndSignBlock(newBlock)
                 
                 // push the new block to consensus possible blocks
                 // and go straight to end of round 0 to skip re-validating the block
-                let possBlock = {
+                /* let possBlock = {
                     block: newBlock
                 }
                 for (let r = 0; r < config.consensusRounds; r++)
                     possBlock[r] = []
-
+                */
                 logr.debug('Mined a new block, proposing to consensus')
                 
-                possBlock[0].push(process.env.NODE_OWNER)
-                p2p.pbft.startConsensus(possBlock)
-                consensus.possBlocks.push(possBlock)
+                //possBlock[0].push(process.env.NODE_OWNER)
+                for (let tx in validTxs)
+                    p2p.pbft.startConsensus(validTxs[tx])
+                //consensus.possBlocks.push(possBlock)
                 cb(null, newBlock)
             })
         })

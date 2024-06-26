@@ -277,7 +277,7 @@ let p2p = {
                         clearInterval(p2p.sockets[p2p.sockets.indexOf(ws)].pendingDisconnect)
                         delete message.d.sign
                         p2p.sockets[p2p.sockets.indexOf(ws)].node_status = message.d
-                        p2p.pbft.addNewPeer(nodeId, ws.url || ws._socket.remoteAddress+':'+ws._socket.remotePort)
+                        p2p.pbft.addNewPeer(nodeId, ws.url ? ws.url : ws._socket.remoteAddress+':'+ws._socket.remotePort)
                     } catch (error) {
                         logr.error('Error during NODE_STATUS verification', error)
                     }

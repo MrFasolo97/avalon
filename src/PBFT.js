@@ -1,8 +1,7 @@
 const logger = require('./logger.js')
 
 class PBFT {
-    constructor(nodeId, peerId, peers) {
-        this.nodeId = nodeId // Unique ID for this node
+    constructor(peerId, peers) {
         this.peers = peers ? peers : [] // List of peer node IDs
         this.peerId = peerId
         this.state = 'Idle' // Current state
@@ -17,7 +16,7 @@ class PBFT {
     }
   
     isPrimary () {
-        return this.nodeId === this.peers[(this.currentView % this.peers.length)]
+        return this.peerId === this.peers[(this.currentView % this.peers.length)]
     }
   
     startConsensus(transaction) {
@@ -39,7 +38,7 @@ class PBFT {
             type: 'PrePrepare',
             view: this.currentView,
             transaction: transaction,
-            nodeId: this.nodeId,
+            nodeId: this.peerId,
             timestamp: Date.now()
         }
     }
@@ -63,7 +62,7 @@ class PBFT {
             type: 'Prepare',
             view: prePrepareMsg.view,
             transaction: prePrepareMsg.transaction,
-            nodeId: this.nodeId,
+            nodeId: this.peerId,
             timestamp: Date.now()
         }
     }
@@ -91,7 +90,7 @@ class PBFT {
             type: 'Commit',
             view: prepareMsg.view,
             transaction: prepareMsg.transaction,
-            nodeId: this.nodeId,
+            nodeId: this.peerId,
             timestamp: Date.now()
         }
     }
@@ -139,7 +138,7 @@ class PBFT {
         this.state = 'Idle' // Reset state
         this.sendToAllPeers({
             type: 'ViewChange',
-            nodeId: this.nodeId,
+            nodeId: this.peerId,
             view: this.currentView,
             timestamp: Date.now()
         })

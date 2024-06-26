@@ -191,11 +191,11 @@ let p2p = {
             }
             if (message.type && message.type in ['PrePrepare', 'Prepare', 'Commit', 'ViewChange', 'AddPeer']) {
                 if (message.type === MessageType.BFT_PREPREPARE)
-                    p2p.pbft.prototype.handlePrePrepare(message, p2p)
+                    p2p.pbft.prototype.handlePrePrepare(message)
                 else if (message.type === MessageType.BFT_PREPARE)
-                    p2p.pbft.prototype.handlePrePrepare(message, p2p)
+                    p2p.pbft.prototype.handlePrePrepare(message)
                 else if(message.type === MessageType.BFT_COMMIT)
-                    p2p.pbft.prototype.handleCommit(message, p2p)
+                    p2p.pbft.prototype.handleCommit(message)
                 else if(message.type === MessageType.BFT_VIEWCHANGE) 
                     p2p.pbft.prototype.handleViewChange(message)
                 else if(message.type === MessageType.BFT_ADDPEER) 

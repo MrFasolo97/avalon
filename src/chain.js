@@ -221,7 +221,7 @@ let chain = {
 
         let mineInMs = null
         // if we are the next scheduled witness, try to mine in time
-        if (chain.schedule.shuffle[(block._id)%config.leaders].name === process.env.NODE_OWNER)
+        if (p2p.pbft.isPrimary())
             mineInMs = config.blockTime
         // else if the scheduled leaders miss blocks
         // backups witnesses are available after each block time intervals

@@ -24,7 +24,7 @@ class PBFT {
         if (this.isPrimary()) {
             const prePrepareMsg = this.createPrePrepareMsg(transaction)
             this.prePrepareMsgs[prePrepareMsg.view] = prePrepareMsg
-            this.sendToAllPeers(prePrepareMsg)
+            p2p.broadcast(prePrepareMsg)
             this.state = 'Pre-Prepare'
             this.startTimeout() // Start timeout for consensus
         } else {
@@ -163,7 +163,7 @@ class PBFT {
 
     addNewPeer(newPeerId, address) {
         this.peers[this.peers.length] = newPeerId
-        this.sendToAllPeers({ type: 'AddPeer', peerId: newPeerId, address: address })
+        p2p.broadcast({ type: 'AddPeer', peerId: newPeerId, address: address })
     }
   
     startTimeout() {

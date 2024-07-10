@@ -59,8 +59,8 @@ let config = {
             keyIdMaxLength: 25,
             // how many max leaders there can be, and how much tokens and VT they earn per "mined" block
             leaderReward: 1,
-            leaderRewardVT: 500,
-            leaders: 10,
+            leaderRewardVT: 100,
+            leaders: 8,
             // how long of the end of the block hash is used for the leader pseudo random generator shuffle
             leaderShufflePrecision: 6,
             // the maximum number of leaders an account can vote for
@@ -82,6 +82,7 @@ let config = {
             masterPub: 'dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz',
             // the master account public leader key  (irrelevant if using genesis)
             masterPubLeader: 'dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz',
+            masterNoPreloadAcc: true,
             // the maximum time drift in ms before a block is invalid
             maxDrift: 200,
             // the maximum number of transactions in a single block
@@ -95,7 +96,7 @@ let config = {
             // the maximum number of mentions triggering a notification
             notifMaxMentions: 10,
             // the sha256sum hash of block 0 (new origin hash -> new chain)
-            originHash: 'da5fe18d0844f1f97bf5a94e7780dec18b4ab015e32383ede77158e059bacbb2',
+            originHash: '35e9b52e528cfa3ea625dc40af6ef30aceeb13fc6ffc7228a079868b915820c3',
             // the default number of random bytes to use for new key generation
             randomBytesLength: 32,
             // the maximum share of the reward pool a single distribution can generate
@@ -110,50 +111,9 @@ let config = {
             tippedVotePrecision: 2,
             // the time after which transactions expire and wont be accepted by nodes anymore
             txExpirationTime: 60000,
-            // limit which transactions are available
-            // key: transaction id (see transaction.js:TransactionType)
-            // value: null/0 (default): enabled, 1: disabled, 2: master-only
-            txLimits: {
-                14: 2,
-                15: 2,
-                19: 1
-            },
             // the number of ms needed for 0.01 DTC to generate 1 vt
             vtGrowth: 360000000, // +1 vt per hour per DTC (3600 * 1000 * 100)
-            vtPerBurn: 6 // can be updated in the future to modify incentives
-        },
-        1000090: {
-            leaders: 13,
-            leaderRewardVT: 100,
-            vtPerBurn: 44
-        },
-        4800000: {
-            // Author tip hardfork
-            txLimits: {
-                14: 2,
-                15: 2,
-                19: 0,
-                23: 1,
-                24: 1,
-                28: 1
-            }
-        },
-        4860000: {
-            hotfix1: true
-        },
-        8500050: {
-            maxKeys: 25,
-            disallowVotingInactiveLeader: true,
-            burnAccount: 'dtube.airdrop',
-            preloadVt: 50, // 50% of vtPerBurn
-            preloadBwGrowth: 2, // x2 more time of bwGrowth
-            multisig: true,
-            leaders: 15
-        },
-        8595000: {
-            masterNoPreloadAcc: true
-        },
-        17150000: {
+            vtPerBurn: 44, // can be updated in the future to modify incentives
             accountAuthEnabled: true,
             blockHashSerialization: 2,
             burnAccountIsBlackhole: true,
@@ -196,16 +156,25 @@ let config = {
 
             // maximum tx expiration allowed (block ts + 1 hour)
             txExpirationMax: 3600000,
-
-            // update tx type restrictions
+            // limit which transactions are available
+            // key: transaction id (see transaction.js:TransactionType)
+            // value: null/0 (default): enabled, 1: disabled, 2: master-only
             txLimits: {
                 14: 2,
                 15: 2,
-                23: 0,
-                24: 0,
-                28: 0
-            }
-        }
+                19: 0,
+                23: 1,
+                24: 1,
+                28: 1
+            },
+            hotfix1: true,
+            maxKeys: 25,
+            disallowVotingInactiveLeader: true,
+            burnAccount: 'dtube.airdrop',
+            preloadVt: 50, // 50% of vtPerBurn
+            preloadBwGrowth: 2, // x2 more time of bwGrowth
+            multisig: true,
+        },
     },
     read: (blockNum) => {
         let finalConfig = {}

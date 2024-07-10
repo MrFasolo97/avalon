@@ -529,6 +529,8 @@ let chain = {
         let minerPriority = 0
         if (chain.schedule.shuffle[(newBlock._id-1)%config.leaders] != null && chain.schedule.shuffle[(newBlock._id-1)%config.leaders].name === newBlock.miner)
             minerPriority = 1
+        else if (chain.schedule.shuffle[(newBlock._id-1)%config.leaders] == null)
+            minerPriority = 1
         // allow miners of n blocks away
         // to mine after (n+1)*blockTime as 'backups'
         // so that the network can keep going even if 1,2,3...n node(s) have issues

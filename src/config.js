@@ -96,7 +96,7 @@ let config = {
             // the maximum number of mentions triggering a notification
             notifMaxMentions: 10,
             // the sha256sum hash of block 0 (new origin hash -> new chain)
-            originHash: '35e9b52e528cfa3ea625dc40af6ef30aceeb13fc6ffc7228a079868b915820c3',
+            originHash: '95736f84252cdd1995c103e8ec6b7393b4cc305519211f6d15bbffe9f92c3d86',
             // the default number of random bytes to use for new key generation
             randomBytesLength: 32,
             // the maximum share of the reward pool a single distribution can generate

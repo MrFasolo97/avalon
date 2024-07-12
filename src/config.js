@@ -60,7 +60,7 @@ let config = {
             // how many max leaders there can be, and how much tokens and VT they earn per "mined" block
             leaderReward: 1,
             leaderRewardVT: 100,
-            leaders: 8,
+            leaders: 5,
             // how long of the end of the block hash is used for the leader pseudo random generator shuffle
             leaderShufflePrecision: 6,
             // the maximum number of leaders an account can vote for

@@ -1,6 +1,6 @@
 # New net node setup guide
 
-<a href="#why-a-new-codebase" id="user-content-why-a-new-codebase"/>Why a new codebase?</a>
+[Why a new codebase?](https://github.com/MrFasolo97/avalon/blob/new_net/doc/new-net.md#why-a-new-codebase)
 
 1. Clone the new node code
 ```

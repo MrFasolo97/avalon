@@ -175,6 +175,11 @@ let config = {
             preloadBwGrowth: 2, // x2 more time of bwGrowth
             multisig: true,
         },
+        241600: {
+            txLimits: {
+                28: 0
+            }
+        }
     },
     read: (blockNum) => {
         let finalConfig = {}

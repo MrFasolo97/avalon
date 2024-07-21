@@ -42,6 +42,14 @@ module.exports = {
                 db.collection('txs').find(query, filter).toArray(function(err, txs) {
                     if (err || !txs)
                         return res.status(500).send({error: 'failed to query account history'})
+                    txs.sort((a, b) => {
+                        const block = a.includedInBlock - b.includedInBlock;
+                        if (block == 0) {
+                            return a.ts - b.ts;
+                        } else {
+                            return block;
+                        }
+                    })
                     for (let t = 0; t < txs.length; t++)
                         delete txs[t]._id
                     res.send(txs)

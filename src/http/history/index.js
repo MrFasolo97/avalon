@@ -39,17 +39,9 @@ module.exports = {
                 if (!isNaN(skip) && skip > 0)
                     filter.skip = skip
         
-                db.collection('txs').find(query, filter).toArray(function(err, txs) {
+                db.collection('txs').find(query, filter).sort({includedInBlock: -1, ts: -1}).toArray(function(err, txs) {
                     if (err || !txs)
                         return res.status(500).send({error: 'failed to query account history'})
-                    txs.sort((a, b) => {
-                        const block = b.includedInBlock - a.includedInBlock;
-                        if (block == 0) {
-                            return b.ts - a.ts;
-                        } else {
-                            return block;
-                        }
-                    })
                     for (let t = 0; t < txs.length; t++)
                         delete txs[t]._id
                     res.send(txs)

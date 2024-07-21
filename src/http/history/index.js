@@ -43,9 +43,9 @@ module.exports = {
                     if (err || !txs)
                         return res.status(500).send({error: 'failed to query account history'})
                     txs.sort((a, b) => {
-                        const block = a.includedInBlock - b.includedInBlock;
+                        const block = b.includedInBlock - a.includedInBlock;
                         if (block == 0) {
-                            return a.ts - b.ts;
+                            return b.ts - a.ts;
                         } else {
                             return block;
                         }

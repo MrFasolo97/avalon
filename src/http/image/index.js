@@ -38,7 +38,7 @@ module.exports = {
             if (!req.params.name)
                 return res.status(400).send({error: 'username is required'})
             let size = req.params.size || 'medium'
-            if (!imageCache.avatar[size] || size.startsWith('default_'))
+            if (!imageCache.avatar[size] || size.startsWith('default_') || size == '')
                 size = 'medium'
 
             // Return cached image if available

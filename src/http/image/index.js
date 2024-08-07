@@ -138,10 +138,10 @@ async function fetchAndRespondImage(imageUrl,res,width,height,cacher) {
         let buffer = await imgFetch.buffer()
         let img = await resizeImage(buffer,width,height)
         imageResponse(res,img)
-        cacher(img.toJSON())
+        await cacher(await img.toJSON())
     } catch (e) {
-        logr.debug(e);
-        res.status(500).send({error: 'errored while retrieving avatar'})
+        await logr.debug(await e);
+        await res.status(500).send({error: 'errored while retrieving avatar'})
     }
 }
 

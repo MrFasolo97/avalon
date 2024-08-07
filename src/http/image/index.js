@@ -134,8 +134,8 @@ module.exports = {
 
 async function fetchAndRespondImage(imageUrl,res,width,height,cacher) {
     try {
-        let imgFetch = await fetch(imageUrl)
-        let buffer = imgFetch.buffer()
+        let imgFetch = fetch(imageUrl)
+        let buffer = await imgFetch.buffer()
         let img = await resizeImage(buffer,width,height)
         imageResponse(res,img)
         await cacher(await img.toJSON())

@@ -59,7 +59,10 @@ module.exports = {
             let filterParam = req.params.filter
             let filter = filterParam.split(':')
             let filterBy = filter[1]
-            let filterAttrs = filterBy.split('&')
+            let filterAttrs = []
+            if (filterBy !== null) {
+                filterAttrs = filterBy.split('&')
+            }
 
             let filterMap = {}
             let defaultKeys = ['authors', 'tags', 'limit', 'tsrange']

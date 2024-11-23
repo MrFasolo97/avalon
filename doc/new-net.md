@@ -8,7 +8,7 @@ git clone https://github.com/MrFasolo97/avalon/ new_avalon && cd new_avalon && g
 ```
 2. Get genesis
 ```
-mkdir genesis && cd genesis && wget https://dtube.fso.ovh/genesis_new_dtube.zip && mv genesis_new_dtube.zip genesis.zip && cd ..
+mkdir genesis && cd genesis && wget https://dtube.fso.ovh/genesis.zip && cd ..
 ```
 3. Install node dependencies
 ```

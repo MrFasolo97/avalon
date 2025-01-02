@@ -20,7 +20,7 @@ module.exports = {
                 db.collection("state").findOne({headBlock: {$gt: 0 }}).then((state) => {
                     db.collection("leaders").find({_id: leaders[i]}).toArray((err, leader) => {
                         if (err) throw err;
-                        if (leader.last < state.headBlock - config.staleGraceTime) {
+                        if (leader.last < state.headBlock - config.staleGraceBlocks) {
                             db.collection('accounts').find({ approves: {$in: [leaders[i]]}},{}).toArray((err, voters) => {
                                 if (err) throw err;
                                 for (let i in voters) {

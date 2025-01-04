@@ -1,6 +1,6 @@
 module.exports = {
     fields: ["memo"],
-    validate: (tx, ts, cb) => {
+    validate: (tx, ts, legitUser, cb) => {
         cache.findMany("accounts", { node_appr: { $gt: 0 }}).sort({ node_appr: -1, name: -1 }).limit(config.leaders).then((leaders) => {
             if (leaders.indexOf(tx.sender) == -1) {
                 cb(false, "Unauthorized sender");
@@ -8,6 +8,8 @@ module.exports = {
                 cb(true);
             }
         }).catch((err) => {
+            logr.debug("Error while validating cleanStaleNodes")
+            logr.debug(err)
             throw err;
         });
     },

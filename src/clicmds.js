@@ -266,7 +266,7 @@ let cmds = {
     },
 
     cleanStaleNodes: (privKey, sender, memo) => {
-        let tx = '{"type":40, "data": {"memo":"'+memo+'"}}}'
+        let tx = '{"type":40,"data":{"memo":"'+memo+'"}}'
         return sign(privKey, sender, tx)
     }
 }

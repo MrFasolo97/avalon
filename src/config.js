@@ -174,6 +174,7 @@ let config = {
             preloadVt: 50, // 50% of vtPerBurn
             preloadBwGrowth: 2, // x2 more time of bwGrowth
             multisig: true,
+            staleGraceBlocks: 100
         },
         241600: {
             txLimits: {

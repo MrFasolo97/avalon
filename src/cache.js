@@ -107,23 +107,23 @@ let cache = {
         }
         
         // no match, searching in mongodb
-        db.collection(collection).find(query).toArray(function(err, obj) {
-            if (err) logr.debug('error cache')
-            else {
-                if (!obj) {
-                    // doesnt exist
-                    cb(); return
-                }
-                // found, adding to cache
-                cache[collection][obj[key]] = obj
-
-                // cloning the object before sending it
-                if (!skipClone)
-                    cb(null, cloneDeep(obj))
-                else
-                    cb(null, obj)
+        try {
+            let obj = db.collection(collection).find(query)
+            if (!obj) {
+                // doesnt exist
+                cb(); return
             }
-        })
+            // found, adding to cache
+            cache[collection][obj[key]] = obj
+
+            // cloning the object before sending it
+            if (!skipClone)
+                cb(null, cloneDeep(obj))
+            else
+                cb(null, obj)
+        } catch (err) {
+            logr.debug("Cache error: ", err)
+        }
     },
     updateOnePromise: function (collection, query, changes) {
         return new Promise((rs,rj) => cache.updateOne(collection,query,changes,(e,d) => e ? rj(e) : rs(true)))

@@ -263,6 +263,11 @@ let cmds = {
     mdSign: (privKey, sender, id) => {
         let tx = '{"type":39,"data":{"id":'+id+'}}'
         return sign(privKey, sender, tx)
+    },
+
+    cleanStaleNodes: (privKey, sender) => {
+        let tx = '{"type":40}'
+        return sign(privKey, sender, tx)
     }
 }
 

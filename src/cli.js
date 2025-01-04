@@ -677,6 +677,16 @@ program.command('vote-leader <leader>')
         writeLine('  $ vote-leader bob -F key.json -M alice')
     })
 
+program.command('clean-nodes')
+    .description('Clean oldest stale nodes')
+    .action(function() {
+        verifyAndSendTx('cleanStaleNodes')
+    }).on('--help', function(){
+        writeLine('')
+        writeLine('Example:')
+        writeLine('  $ clean-nodes -F key.json -M alice')
+    })
+
 // error on unknown commands
 program.on('command:*', function () {
     writeLine('Unknown command: '+program.args[0])

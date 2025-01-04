@@ -680,7 +680,7 @@ program.command('vote-leader <leader>')
 program.command('clean-nodes')
     .description('Clean oldest stale nodes')
     .option('--memo [text]', 'add a short message to the transaction')    
-    .action(function() {
+    .action(function(options) {
         let memo = ''
         if (options && options.memo) memo = options.memo
         verifyAndSendTx('cleanStaleNodes', memo)

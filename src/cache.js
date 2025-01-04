@@ -92,6 +92,39 @@ let cache = {
             }
         })
     },
+    findMany: function(collection, query, cb, skipClone) {
+        if (!cache.copy[collection])
+            return cb('invalid collection')
+
+        let key = cache.keyByCollection(collection)
+        // searching in cache
+        if (cache[collection][query[key]]) {
+            if (!skipClone)
+                cb(null, cloneDeep(cache[collection][query[key]]))
+            else
+                cb(null, cache[collection][query[key]])
+            return
+        }
+        
+        // no match, searching in mongodb
+        db.collection(collection).find(query).toArray(function(err, obj) {
+            if (err) logr.debug('error cache')
+            else {
+                if (!obj) {
+                    // doesnt exist
+                    cb(); return
+                }
+                // found, adding to cache
+                cache[collection][obj[key]] = obj
+
+                // cloning the object before sending it
+                if (!skipClone)
+                    cb(null, cloneDeep(obj))
+                else
+                    cb(null, obj)
+            }
+        })
+    },
     updateOnePromise: function (collection, query, changes) {
         return new Promise((rs,rj) => cache.updateOne(collection,query,changes,(e,d) => e ? rj(e) : rs(true)))
     },

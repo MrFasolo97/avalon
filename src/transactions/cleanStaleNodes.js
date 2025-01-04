@@ -1,8 +1,8 @@
 module.exports = {
     validate: (tx, ts, cb) => {
-        db.collection('accounts').find({ node_appr: { $gt: 0 } }, {
-            sort: { node_appr: -1 }
-        }).limit(config.leaders).toArray(function (err, leaders) {
+        cache.findMany("accounts", {{ node_appr: { $gt: 0 } }, {
+            sort: { node_appr: -1 }, limit: config.leaders
+        }).toArray(function (err, leaders) {
             if (err) throw err;
             if (leaders.indexOf(tx.sender) == -1) {
                 cb(false, "Unauthorized sender");
@@ -12,16 +12,18 @@ module.exports = {
         })
     },
     execute: (tx, ts, cb) => {
-        db.collection('accounts').find({ node_appr: { $gt: 0 } }, {
-            sort: { node_appr: -1 }
-        }).limit(config.leaders).toArray(function (err, leaders) {
+        cache.collection('accounts').find({ node_appr: { $gt: 0 }},
+        {
+            sort: {node_appr: -1, name: -1},
+            limit: config.leaders,
+        }).toArray((err, leaders) => {
             if (err) throw err;
             for (let i in leaders) {
-                db.collection("state").findOne({headBlock: {$gt: 0 }}).then((state) => {
-                    db.collection("leaders").find({_id: leaders[i]}).toArray((err, leader) => {
+                cache.collection("state").findOne({headBlock: {$gt: 0 }}).then((state) => {
+                    cache.collection("leaders").find({_id: leaders[i].name}).toArray((err, leader) => {
                         if (err) throw err;
                         if (leader.last < state.headBlock - config.staleGraceBlocks) {
-                            db.collection('accounts').find({ approves: {$in: [leaders[i]]}},{}).toArray((err, voters) => {
+                            cache.collection('accounts').find({ approves: {$in: [leaders[i]]}},{}).toArray((err, voters) => {
                                 if (err) throw err;
                                 for (let i in voters) {
                                     cache.findOne('accounts', {name: voters[i].name}, function(err, acc) {

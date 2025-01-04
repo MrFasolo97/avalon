@@ -1,6 +1,6 @@
 module.exports = {
     validate: (tx, ts, cb) => {
-        cache.findMany("accounts", {{ node_appr: { $gt: 0 } }, {
+        cache.findMany("accounts", { node_appr: { $gt: 0 } }, {
             sort: { node_appr: -1 }, limit: config.leaders
         }).toArray(function (err, leaders) {
             if (err) throw err;

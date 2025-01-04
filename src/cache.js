@@ -94,15 +94,15 @@ let cache = {
     },
     findMany: function(collection, query, cb, skipClone) {
         if (!cache.copy[collection])
-            return cb('invalid collection')
+            return 'invalid collection'
 
         let key = cache.keyByCollection(collection)
         // searching in cache
         if (cache[collection][query[key]]) {
             if (!skipClone)
-                cb(null, cloneDeep(cache[collection][query[key]]))
+                return cloneDeep(cache[collection][query[key]])
             else
-                cb(null, cache[collection][query[key]])
+                return cache[collection][query[key]]
             return
         }
         
@@ -111,16 +111,16 @@ let cache = {
             let obj = db.collection(collection).find(query)
             if (!obj) {
                 // doesnt exist
-                cb(); return
+                return
             }
             // found, adding to cache
             cache[collection][obj[key]] = obj
 
             // cloning the object before sending it
             if (!skipClone)
-                cb(null, cloneDeep(obj))
+                return cloneDeep(obj)
             else
-                cb(null, obj)
+                return obj
         } catch (err) {
             logr.debug("Cache error: ", err)
         }

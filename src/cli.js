@@ -679,12 +679,15 @@ program.command('vote-leader <leader>')
 
 program.command('clean-nodes')
     .description('Clean oldest stale nodes')
+    .option('--memo [text]', 'add a short message to the transaction')    
     .action(function() {
-        verifyAndSendTx('cleanStaleNodes')
+        let memo = ''
+        if (options && options.memo) memo = options.memo
+        verifyAndSendTx('cleanStaleNodes', memo)
     }).on('--help', function(){
         writeLine('')
         writeLine('Example:')
-        writeLine('  $ clean-nodes -F key.json -M alice')
+        writeLine('  $ clean-nodes --memo "Cleaning old leader nodes" -F key.json -M alice')
     })
 
 // error on unknown commands

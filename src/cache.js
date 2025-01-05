@@ -103,24 +103,25 @@ let cache = {
                 return cloneDeep(cache[collection][query[key]])
             else
                 return cache[collection][query[key]]
-            return
         }
         
         // no match, searching in mongodb
         try {
-            let obj = db.collection(collection).find(query)
-            if (!obj) {
-                // doesnt exist
-                return
-            }
-            // found, adding to cache
-            cache[collection][obj[key]] = obj
+            db.collection(collection).find(query).toArray(function(err, obj) {
+                if (err) throw err
+                if (!obj) {
+                    // doesnt exist
+                    return
+                }
+                // found, adding to cache
+                cache[collection][obj[key]] = obj
 
-            // cloning the object before sending it
-            if (!skipClone)
-                return cloneDeep(obj)
-            else
-                return obj
+                // cloning the object before sending it
+                if (!skipClone)
+                    return cloneDeep(obj)
+                else
+                    return obj
+            }
         } catch (err) {
             logr.debug("Cache error: ", err)
         }

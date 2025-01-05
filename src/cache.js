@@ -7,6 +7,7 @@ let cache = {
         accounts: {},
         contents: {},
         distributed: {},
+        leaders: {},
         proposals: {},
         playlists: {},
         masterdao: {},

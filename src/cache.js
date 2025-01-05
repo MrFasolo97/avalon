@@ -121,7 +121,7 @@ let cache = {
                     return cloneDeep(obj)
                 else
                     return obj
-            }
+            })
         } catch (err) {
             logr.debug("Cache error: ", err)
         }

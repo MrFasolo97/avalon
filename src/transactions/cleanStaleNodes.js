@@ -41,7 +41,6 @@ module.exports = {
                                                         cache.updateOne('accounts', 
                                                             {name: tx.data.target},
                                                             {$inc: {node_appr: -node_appr_before}}, function() {
-                                                                cache.warmup('accounts', parseInt(process.env.WARMUP_ACCOUNTS))
                                                                 cb(true)
                                                             }
                                                         )

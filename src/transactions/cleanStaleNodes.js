@@ -3,11 +3,10 @@ module.exports = {
     validate: (tx, ts, legitUser, cb) => {
         try {
             let leaders = cache.findMany("accounts", { node_appr: { $gt: 0 }}).sort({ node_appr: -1, name: -1 }).limit(config.leaders).toArray();
-            if (leaders.indexOf(tx.sender) > -1) {
-                cb(false, "Unauthorized sender");
-            } else {
-                cb(true);
-            }
+            for (let leader in leaders)
+                if (leaders[leader].name == tx.sender)
+                    cb(true);
+            cb(false, "Unauthorized sender");
         } catch(err) {
             logr.debug("Error while validating cleanStaleNodes")
             logr.debug(err)

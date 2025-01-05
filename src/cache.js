@@ -93,7 +93,7 @@ let cache = {
             }
         })
     },
-    findMany: function(collection, query, cb, sort, limit, skipClone) {
+    findMany: function(collection, query, sort, limit, cb, skipClone) {
         if (!cache.copy[collection])
             return 'invalid collection'
 

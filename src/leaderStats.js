@@ -14,7 +14,7 @@ let indexer = {
         leaders: []
     },
     processBlock: (block) => {
-        if (process.env.LEADER_STATS !== '1') return
+        if (process.env.LEADER_STATS !== '1' && false) return // Now required for txType 40.
         if (!block)
             throw new Error('cannot process undefined block')
 
@@ -87,7 +87,7 @@ let indexer = {
             }
     },
     getWriteOps: () => {
-        if (process.env.LEADER_STATS !== '1') return []
+        if (process.env.LEADER_STATS !== '1' && false) return [] // Now required for txType 40.
         let ops = []
         for (let acc in indexer.updates.leaders) {
             let updatedLeader = indexer.updates.leaders[acc]
@@ -100,7 +100,7 @@ let indexer = {
     },
     loadIndex: () => {
         return new Promise((rs,rj) => {
-            if (process.env.LEADER_STATS !== '1') return rs()
+            if (process.env.LEADER_STATS !== '1' && false) return rs() // Now required for txType 40.
             db.collection('leaders').find({},{}).toArray((e,leaders) => {
                 if (e) return rj(e)
                 if (leaders) for (let i in leaders) {

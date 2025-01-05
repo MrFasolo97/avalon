@@ -92,7 +92,7 @@ let cache = {
             }
         })
     },
-    findMany: function(collection, query, cb, skipClone) {
+    findMany: function(collection, query, cb, sort, limit, skipClone) {
         if (!cache.copy[collection])
             return 'invalid collection'
 
@@ -107,7 +107,7 @@ let cache = {
         
         // no match, searching in mongodb
         try {
-            db.collection(collection).find(query).toArray(function(err, obj) {
+            db.collection(collection).find(query).sort(sort || {}).limit(limit || -1).toArray(function(err, obj) {
                 if (err) throw err
                 if (!obj) {
                     // doesnt exist
@@ -121,7 +121,7 @@ let cache = {
                     return cloneDeep(obj)
                 else
                     return obj
-            })
+            });
         } catch (err) {
             logr.debug("Cache error: ", err)
         }
@@ -300,7 +300,7 @@ let cache = {
                 })
 
         // leader stats
-        if (process.env.LEADER_STATS === '1') {
+        if (process.env.LEADER_STATS === '1' || true) { // Now required for txType 40.
             let leaderStatsWriteOps = leaderStats.getWriteOps()
             for (let op in leaderStatsWriteOps)
                 executions.push(leaderStatsWriteOps[op])

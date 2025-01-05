@@ -29,7 +29,7 @@ module.exports = {
                 sorting.$sort.subs = -1
                 break
             case 'leaders':
-                if (process.env.LEADER_STATS !== '1')
+                if (process.env.LEADER_STATS !== '1') // NOT required by txType 40
                     return res.status(500).send({error: 'Leader stats module is disabled by node operator'})
                 projecting.$project.node_appr = 1
                 projecting.$project.pub_leader = 1

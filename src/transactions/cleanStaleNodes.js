@@ -24,7 +24,7 @@ module.exports = {
                         let leader = cache.findOne("leaders").find({_id: leaders[i].name})
                         if (leader.last < chain.getLatestBlock()._id - config.staleGraceBlocks) {
                             try {
-                                cache.findMany('accounts', { approves: {$in: [leaders[i]]}}, null, null, () => {
+                                cache.findMany('accounts', { approves: {$in: [leaders[i]]}}, {}, 10000, () => {
                                     for (let i in voters) {
                                         cache.findOne('accounts', {name: voters[i].name}, function(err, acc) {
                                             if (err) throw err

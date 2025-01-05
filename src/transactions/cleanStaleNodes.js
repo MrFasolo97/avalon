@@ -2,7 +2,7 @@ module.exports = {
     fields: ["memo"],
     validate: (tx, ts, legitUser, cb) => {
         try {
-            let leaders = cache.findMany("accounts", { node_appr: { $gt: 0 }}).sort({ node_appr: -1, name: -1 }).limit(config.leaders)
+            let leaders = cache.findMany("accounts", { node_appr: { $gt: 0 }}).sort({ node_appr: -1, name: -1 }).limit(config.leaders).toArray();
             if (leaders.includes(tx.sender)) {
                 cb(false, "Unauthorized sender");
             } else {
@@ -16,7 +16,7 @@ module.exports = {
     },
     execute: (tx, ts, cb) => {
         try {
-        let leaders = cache.findMany("accounts", { node_appr: { $gt: 0 }}).sort({node_appr: -1, name: -1}).limit(config.leaders)
+        let leaders = cache.findMany("accounts", { node_appr: { $gt: 0 }}).sort({node_appr: -1, name: -1}).limit(config.leaders).toArray();
             for (let i in leaders) {
                 try {
                     let leader = cache.findOne("leaders").find({_id: leaders[i].name})

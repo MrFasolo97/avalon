@@ -1,26 +1,28 @@
 module.exports = {
     fields: ["memo"],
     validate: (tx, ts, legitUser, cb) => {
-        cache.findMany("accounts", { node_appr: { $gt: 0 }}).sort({ node_appr: -1, name: -1 }).limit(config.leaders).then((leaders) => {
+        try {
+            let leaders = await cache.findMany("accounts", { node_appr: { $gt: 0 }}).sort({ node_appr: -1, name: -1 }).limit(config.leaders)
             if (leaders.indexOf(tx.sender) == -1) {
                 cb(false, "Unauthorized sender");
             } else {
                 cb(true);
             }
-        }).catch((err) => {
+        } catch((err) => {
             logr.debug("Error while validating cleanStaleNodes")
             logr.debug(err)
             throw err;
-        });
+        };
     },
     execute: (tx, ts, cb) => {
-        cache.findMany("accounts", { node_appr: { $gt: 0 }}).sort({node_appr: -1, name: -1}).limit(config.leaders).then((leaders) => {
+        try {
+        let leaders = await cache.findMany("accounts", { node_appr: { $gt: 0 }}).sort({node_appr: -1, name: -1}).limit(config.leaders)
             for (let i in leaders) {
-                cache.findOne("leaders").find({_id: leaders[i].name}).then((leader) => {
-                    if (err) throw err;
-                    if (leader.last < chain.getLatestBlock()._id - config.staleGraceBlocks) {
-                        cache.findMany('accounts', { approves: {$in: [leaders[i]]}}).toArray((err, voters) => {
-                            if (err) throw err;
+                try {
+                    let leader = await cache.findOne("leaders").find({_id: leaders[i].name})
+                    if (leader.last < await chain.getLatestBlock()._id - config.staleGraceBlocks) {
+                        try {
+                            let voters = await cache.findMany('accounts', { approves: {$in: [leaders[i]]}})
                             for (let i in voters) {
                                 cache.findOne('accounts', {name: voters[i].name}, function(err, acc) {
                                     if (err) throw err
@@ -43,14 +45,16 @@ module.exports = {
                                         })
                                 })
                             }
-                        })         
+                        } catch (err3) {
+                            throw err3;
+                        }
                     }
-                }).catch((err) => {
-                    throw err;
-                });
+                } catch(err2) {
+                    throw err2;
+                };
             }
-        }).catch((err) => {
+        } catch (err) {
             throw err;
-        });
+        };
     }
 }

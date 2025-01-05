@@ -93,7 +93,7 @@ let cache = {
             }
         })
     },
-    findMany: function(collection, query, sort, limit, cb, skipClone) {
+    findMany: function(collection, query, sort, cb, skipClone) {
         if (!cache.copy[collection])
             return 'invalid collection'
 
@@ -108,7 +108,7 @@ let cache = {
         
         // no match, searching in mongodb
         try {
-            db.collection(collection).find(query).sort(sort || {}).limit(limit || -1).toArray(function(err, obj) {
+            db.collection(collection).find(query).sort(sort || {}).toArray(function(err, obj) {
                 if (err) throw err
                 if (!obj) {
                     // doesnt exist

@@ -3,7 +3,7 @@ module.exports = {
     validate: (tx, ts, legitUser, cb) => {
         try {
             let leaders = cache.findMany("accounts", { node_appr: { $gt: 0 }}).sort({ node_appr: -1, name: -1 }).limit(config.leaders).toArray();
-            if (leaders.includes(tx.sender)) {
+            if (leaders.indexOf(tx.sender) > -1) {
                 cb(false, "Unauthorized sender");
             } else {
                 cb(true);

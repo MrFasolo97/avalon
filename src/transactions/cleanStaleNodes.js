@@ -21,7 +21,7 @@ module.exports = {
             cache.findMany("leaders", { node_appr: { $gt: 0 }}, { node_appr: -1, _id: -1 }, (leaders) => {
                 for (let i=0; i<config.leaders; i++) {
                     try {
-                        cache.findOne("leaders", {_id: leaders[i].name}, (leader) => {
+                        cache.findOne("leaders", {_id: leaders[i]._id}, (leader) => {
                             if (leader.last < chain.getLatestBlock()._id - config.staleGraceBlocks) {
                                 try {
                                     cache.findMany('accounts', { approves: {$in: [leaders[i]]}}, {}, () => {
@@ -39,7 +39,7 @@ module.exports = {
                                                     {name: {$in: node_owners}},
                                                     {$inc: {node_appr: node_appr-node_appr_before}}, function() {
                                                         cache.updateOne('accounts', 
-                                                            {name: tx.data.target},
+                                                            {name: leader._id},
                                                             {$inc: {node_appr: -node_appr_before}}, function() {
                                                                 cb(true)
                                                             }

@@ -2,7 +2,7 @@ module.exports = {
     fields: ["memo"],
     validate: (tx, ts, legitUser, cb) => {
         try {
-            cache.findMany("leaders", { node_appr: { $gt: 0 }}, { node_appr: -1, _id: -1 }, (err, leaders) => {
+            cache.findMany("accounts", { node_appr: { $gt: 0 }}, { node_appr: -1, name: -1 }, (err, leaders) => {
                 if (err) throw err;
                 for (let leader=0; leader<config.leaders && leader<leaders.length; leader++)
                     if (leaders[leader]._id == tx.sender)
@@ -18,7 +18,7 @@ module.exports = {
     },
     execute: (tx, ts, cb) => {
         try {
-            cache.findMany("leaders", { node_appr: { $gt: 0 }}, { node_appr: -1, _id: -1 }, (err, leaders) => {
+            cache.findMany("accounts", { node_appr: { $gt: 0 }}, { node_appr: -1, name: -1 }, (err, leaders) => {
                 if (err) throw err
                 for (let i=0; i<config.leaders; i++) {
                     try {

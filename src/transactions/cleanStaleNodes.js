@@ -58,9 +58,10 @@ module.exports = {
                         throw err3;
                     };
                 }
-                cb(true)
             });
+            cb(true)
         } catch (err1) {
+            cb(false, err1)
             throw err1;
         };
     }

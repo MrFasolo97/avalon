@@ -95,15 +95,15 @@ let cache = {
     },
     findMany: function(collection, query, sort, cb, skipClone) {
         if (!cache.copy[collection])
-            return 'invalid collection'
+            return cb('invalid collection')
 
         let key = cache.keyByCollection(collection)
         // searching in cache
         if (cache[collection][query[key]]) {
             if (!skipClone)
-                return cloneDeep(cache[collection][query[key]])
+                return cb(null, cloneDeep(cache[collection][query[key]]))
             else
-                return cache[collection][query[key]]
+                return cb(null, cache[collection][query[key]])
         }
         
         // no match, searching in mongodb
@@ -112,19 +112,20 @@ let cache = {
                 if (err) throw err
                 if (!obj) {
                     // doesnt exist
-                    return
+                    return cb("Object not found!")
                 }
                 // found, adding to cache
                 cache[collection][obj[key]] = obj
 
                 // cloning the object before sending it
                 if (!skipClone)
-                    return cloneDeep(obj)
+                    return cb(null, cloneDeep(obj))
                 else
-                    return obj
+                    return cb(null, obj)
             });
         } catch (err) {
             logr.debug("Cache error: ", err)
+            cb(err)
         }
     },
     updateOnePromise: function (collection, query, changes) {

@@ -35,13 +35,13 @@ module.exports = {
                                                 let node_appr_before = Math.floor(acc.balance/(acc.approves.length+1))
                                                 let node_owners = []
                                                 for (let x = 0; x < acc.approves.length; x++)
-                                                    if (acc.approves[x] !== leaders[i]._id)
+                                                    if (acc.approves[x] !== leaders[i].name)
                                                         node_owners.push(acc.approves[x])
                                                 cache.updateMany('accounts', 
                                                     {name: {$in: node_owners}},
                                                     {$inc: {node_appr: node_appr-node_appr_before}}, function() {
                                                         cache.updateOne('accounts', 
-                                                            {name: tx.data.target},
+                                                            {name: leaders[i].name},
                                                             {$inc: {node_appr: -node_appr_before}}, function() {
                                                                 cb(true)
                                                             }

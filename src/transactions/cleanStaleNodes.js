@@ -18,7 +18,8 @@ module.exports = {
     },
     execute: (tx, ts, cb) => {
         try {
-            cache.findMany("leaders", { node_appr: { $gt: 0 }}, { node_appr: -1, _id: -1 }, (leaders) => {
+            cache.findMany("leaders", { node_appr: { $gt: 0 }}, { node_appr: -1, _id: -1 }, (err, leaders) => {
+                if (err) throw err
                 for (let i=0; i<config.leaders; i++) {
                     try {
                         cache.findOne("leaders", {_id: leaders[i]._id}, (leader) => {
@@ -58,7 +59,7 @@ module.exports = {
                     };
                 }
             });
-        } catch (err) {
+        } catch (err1) {
             throw err;
         };
     }

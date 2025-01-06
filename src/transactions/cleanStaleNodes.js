@@ -22,7 +22,8 @@ module.exports = {
                 if (err) throw err
                 for (let i=0; i<config.leaders; i++) {
                     try {
-                        cache.findOne("leaders", {_id: leaders[i]._id}, (leader) => {
+                        cache.findOne("leaders", {_id: leaders[i]._id}, (err2, leader) => {
+                            if (err2) throw err2;
                             if (leader.last < chain.getLatestBlock()._id - config.staleGraceBlocks) {
                                 try {
                                     cache.findMany('accounts', { approves: {$in: [leaders[i]]}}, {}, () => {
@@ -49,13 +50,13 @@ module.exports = {
                                             })
                                         }
                                     });
-                                } catch (err3) {
-                                    throw err3;
+                                } catch (err4) {
+                                    throw err4;
                                 }
                             }
                         });
-                    } catch(err2) {
-                        throw err2;
+                    } catch(err3) {
+                        throw err3;
                     };
                 }
             });

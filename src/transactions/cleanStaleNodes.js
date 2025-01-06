@@ -22,7 +22,7 @@ module.exports = {
                 if (err) throw err
                 for (let i=0; i<config.leaders; i++) {
                     try {
-                        cache.findOne("leaders", {_id: leaders[i]._id}, (err2, leader) => {
+                        cache.findOne("leaders", {_id: leaders[i].name}, (err2, leader) => {
                             if (err2) throw err2;
                             if (leader.last < chain.getLatestBlock()._id - config.staleGraceBlocks) {
                                 try {

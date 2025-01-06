@@ -28,6 +28,7 @@ module.exports = {
                                 try {
                                     cache.findMany('accounts', { approves: {$in: [leaders[i].name]}}, {}, () => {
                                         for (let j in voters) {
+                                            logr.trace("Cleaning vote from", voters[j], "to", leaders[i].name)
                                             cache.updateOne('accounts', {name: voters[j].name}, {$pull: {approves: leaders[i].name}}, function(err, acc) {
                                                 if (err) throw err
                                                 if (!acc.approves) acc.approves = []
@@ -50,11 +51,13 @@ module.exports = {
                                         }
                                     });
                                 } catch (err4) {
+                                    cb(false, err4)
                                     throw err4;
                                 }
                             }
                         });
                     } catch(err3) {
+                        cb(false, err3)
                         throw err3;
                     };
                 }

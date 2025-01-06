@@ -4,7 +4,7 @@ module.exports = {
         try {
             cache.findMany("leaders", { node_appr: { $gt: 0 }}, { node_appr: -1, _id: -1 }, (err, leaders) => {
                 if (err) throw err;
-                for (let leader=0; leader<config.leaders && leader<leaders.length; i++)
+                for (let leader=0; leader<config.leaders && leader<leaders.length; leader++)
                     if (leaders[leader]._id == tx.sender)
                         cb(true);
                 cb(false, "Unauthorized sender");

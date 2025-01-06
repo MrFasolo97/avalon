@@ -61,7 +61,7 @@ module.exports = {
                 }
             });
         } catch (err1) {
-            throw err;
+            throw err1;
         };
     }
 }

@@ -26,9 +26,9 @@ module.exports = {
                             if (err2) throw err2;
                             if (leader.last < chain.getLatestBlock()._id - config.staleGraceBlocks) {
                                 try {
-                                    cache.findMany('accounts', { approves: {$in: [leaders[i]]}}, {}, () => {
+                                    cache.findMany('accounts', { approves: {$in: [leaders[i].name]}}, {}, () => {
                                         for (let j in voters) {
-                                            cache.findOne('accounts', {name: voters[j].name}, function(err, acc) {
+                                            cache.updateOne('accounts', {name: voters[j].name}, {$pull: {approves: leaders[i].name}}, function(err, acc) {
                                                 if (err) throw err
                                                 if (!acc.approves) acc.approves = []
                                                 let node_appr = (acc.approves.length === 0 ? 0 : Math.floor(acc.balance/acc.approves.length))

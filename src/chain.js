@@ -693,7 +693,7 @@ let chain = {
         let leaders = []
         let leaderAccs = withLeaderPub ? cache.leaders : cache.accounts
         for (const key in leaderAccs) {
-            if (!cache.accounts[key].node_appr || cache.accounts[key].node_appr <= 0)
+            if (!cache.accounts[key] || !cache.accounts[key].node_appr || cache.accounts[key].node_appr <= 0)
                 continue
             if (withLeaderPub && !cache.accounts[key].pub_leader)
                 continue

@@ -27,22 +27,23 @@ module.exports = {
                             if (leader.last < chain.getLatestBlock()._id - config.staleGraceBlocks) {
                                 try {
                                     cache.findMany('accounts', { approves: {$in: [leaders[i]]}}, {}, () => {
-                                        for (let i in voters) {
-                                            cache.findOne('accounts', {name: voters[i].name}, function(err, acc) {
+                                        for (let j in voters) {
+                                            cache.findOne('accounts', {name: voters[j].name}, function(err, acc) {
                                                 if (err) throw err
                                                 if (!acc.approves) acc.approves = []
                                                 let node_appr = (acc.approves.length === 0 ? 0 : Math.floor(acc.balance/acc.approves.length))
                                                 let node_appr_before = Math.floor(acc.balance/(acc.approves.length+1))
                                                 let node_owners = []
-                                                for (let i = 0; i < acc.approves.length; i++)
-                                                    if (acc.approves[i] !== leaders[i]._id)
-                                                        node_owners.push(acc.approves[i])
+                                                for (let x = 0; x < acc.approves.length; x++)
+                                                    if (acc.approves[x] !== leaders[i]._id)
+                                                        node_owners.push(acc.approves[x])
                                                 cache.updateMany('accounts', 
                                                     {name: {$in: node_owners}},
                                                     {$inc: {node_appr: node_appr-node_appr_before}}, function() {
                                                         cache.updateOne('accounts', 
-                                                            {name: leader._id},
+                                                            {name: tx.data.target},
                                                             {$inc: {node_appr: -node_appr_before}}, function() {
+                                                                cb(true)
                                                             }
                                                         )
                                                     })

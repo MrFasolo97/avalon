@@ -6,8 +6,8 @@ module.exports = {
                 if (err) throw err;
                 for (let leader=0; leader<config.leaders && leader<leaders.length; leader++)
                     if (leaders[leader].name == tx.sender)
-                        cb(true);
-                cb(false, "Unauthorized sender");
+                        return cb(true);
+                return cb(false, "Unauthorized sender");
             });
         } catch(err) {
             logr.debug("Error while validating cleanStaleNodes")

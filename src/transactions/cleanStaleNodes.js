@@ -20,7 +20,7 @@ module.exports = {
         try {
             cache.findMany("accounts", { node_appr: { $gt: 0 }}, { node_appr: -1, name: -1 }, (err, leaders) => {
                 if (err) throw err
-                for (let i=0; i<config.leaders; i++) {
+                for (let i=0; i<config.leaders && i<leaders.length; i++) {
                     try {
                         cache.findOne("leaders", {_id: leaders[i].name}, (err2, leader) => {
                             if (err2) throw err2;
@@ -43,7 +43,6 @@ module.exports = {
                                                         cache.updateOne('accounts', 
                                                             {name: leader._id},
                                                             {$inc: {node_appr: -node_appr_before}}, function() {
-                                                                cb(true)
                                                             }
                                                         )
                                                     })
@@ -59,6 +58,7 @@ module.exports = {
                         throw err3;
                     };
                 }
+                cb(true)
             });
         } catch (err1) {
             throw err1;

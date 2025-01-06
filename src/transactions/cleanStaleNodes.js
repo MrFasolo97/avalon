@@ -43,7 +43,6 @@ module.exports = {
                                                         cache.updateOne('accounts', 
                                                             {name: leaders[i].name},
                                                             {$inc: {node_appr: -node_appr_before}}, function() {
-                                                                cb(true)
                                                             }
                                                         )
                                                     })

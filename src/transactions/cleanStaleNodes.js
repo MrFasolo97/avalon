@@ -22,41 +22,46 @@ module.exports = {
                 if (err) throw err
                 for (let i=0; i<config.leaders && i<leaders.length; i++) {
                     try {
-                        cache.findOne("leaders", {_id: leaders[i].name}, (err2, leader) => {
-                            if (err2) throw err2;
-                            if (leader.last < chain.getLatestBlock()._id - config.staleGraceBlocks) {
+                        db.collection("leaders").findOne({_id: leaders[i].name}).then((leader2) => {
+                            if (leader2.last < chain.getLatestBlock()._id - config.staleGraceBlocks) {
+                                logr.warn("Leader", leader2._id, "eligible to be un-voted! Doing so.")
                                 try {
-                                    cache.findMany('accounts', { approves: {$in: [leaders[i].name]}}, {}, () => {
-                                        for (let j in voters) {
-                                            logr.trace("Cleaning vote from", voters[j], "to", leaders[i].name)
-                                            cache.updateOne('accounts', {name: voters[j].name}, {$pull: {approves: leaders[i].name}}, function(err, acc) {
+                                    let voters = db.collection('accounts').find({ approves: {$in: [leader2._id]}})
+                                        voters.forEach(function(voter) {
+                                            logr.trace("Cleaning vote from", voter.name, "to", leader2._id)
+                                            newApproves = []
+                                            for (leader in voter.approves)
+                                                if (voter.approves[leader] !== leader2._id)
+                                                    newApproves.push(voter.approves[leader])
+                                                db.collection('accounts').updateOne({name: voter.name}, {$set: {approves: newApproves}})
+					    
                                                 if (err) throw err
-                                                if (!acc.approves) acc.approves = []
-                                                let node_appr = (acc.approves.length === 0 ? 0 : Math.floor(acc.balance/acc.approves.length))
-                                                let node_appr_before = Math.floor(acc.balance/(acc.approves.length+1))
+                                                if (!voter.approves) voter.approves = []
+                                                let node_appr = (newApproves.length === 0 ? 0 : Math.floor(voter.balance/newApproves.length))
+                                                let node_appr_before = Math.floor(voter.balance/(newApproves.length+1))
                                                 let node_owners = []
-                                                for (let x = 0; x < acc.approves.length; x++)
-                                                    if (acc.approves[x] !== leaders[i].name)
-                                                        node_owners.push(acc.approves[x])
+                                                for (let x = 0; x < voter.approves.length; x++)
+                                                    if (voter.approves[x] !== leader2._id)
+                                                        node_owners.push(voter.approves[x])
                                                 cache.updateMany('accounts', 
                                                     {name: {$in: node_owners}},
                                                     {$inc: {node_appr: node_appr-node_appr_before}}, function() {
                                                         cache.updateOne('accounts', 
-                                                            {name: leaders[i].name},
+                                                            {name: leader2._id},
                                                             {$inc: {node_appr: -node_appr_before}}, function() {
                                                             }
                                                         )
                                                     })
                                             })
-                                        }
-                                    });
                                 } catch (err4) {
+				    logr.error(err4)
                                     cb(false, err4)
                                     throw err4;
                                 }
                             }
-                        });
+                            }).catch((err) => { logr.error(err); throw err });
                     } catch(err3) {
+                        logr.error(err3)
                         cb(false, err3)
                         throw err3;
                     };

@@ -13,6 +13,7 @@ const blocks = require('./blocks')
 const GrowInt = require('growint')
 const default_replay_output = 100
 const replay_output = process.env.REPLAY_OUTPUT || default_replay_output
+const skip_check_early_blocks = [3889058] // to be removed in case of a fork or new net.
 const max_batch_blocks = 10000
 
 class Block {
@@ -553,7 +554,7 @@ let chain = {
         }
 
         // check if new block isnt too early
-        if (newBlock.timestamp - previousBlock.timestamp < minerPriority*config.blockTime) {
+        if (newBlock.timestamp - previousBlock.timestamp < minerPriority*config.blockTime && skip_check_early_blocks.indexOf(newBlock._id) == -1) {
             logr.error('block too early for miner with priority #'+minerPriority)
             cb(false); return
         }

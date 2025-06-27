@@ -7,51 +7,48 @@ const spawn = require('child_process').spawn
 const spawnSync = require('child_process').spawnSync
 
 let mongo = {
-    init: (cb) => {
-        MongoClient.connect(db_url, {
-            useNewUrlParser: true,
-            useUnifiedTopology: true
-        }, async function(err, client) {
-            if (err) throw err
-            this.db = client.db(db_name)
-            try {
-                await this.db.executeDbAdminCommand({
-                    setParameter: 1,
-                    internalQueryExecMaxBlockingSortBytes: 335544320
-                })
-            } catch (e) {}
-            logr.info('Connected to '+db_url+'/'+this.db.databaseName)
-
-            let state = await this.db.collection('state').findOne({_id: 0})
-
-            // MongoDB init stops here when using blocks BSON store
-            if (process.env.BLOCKS_DIR)
-                return cb(state)
-
-            // If a rebuild is specified, drop the database
-            if (process.env.REBUILD_STATE === '1' && (!state || !state.headBlock))
-                return db.dropDatabase(() => mongo.initGenesis().then(cb))
-
-            // check if genesis block exists or not
-            db.collection('blocks').findOne({_id: 0}, function(err, genesis) {
-                if (err) throw err
-                if (genesis) {
-                    if (genesis.hash !== config.originHash) {
-                        logr.fatal('Block #0 hash doesn\'t match config. Did you forget to db.dropDatabase() ?')
-                        process.exit(1)
-                    }
-                    cb(state)
-                } else mongo.initGenesis().then(cb)
-            })
+    init: (callback) => {
+        MongoClient.connect(db_url, { useNewUrlParser: true, useUnifiedTopology: true }, function(err, client) {
+            if (err) {
+                if (typeof callback === 'function') {
+                    return callback(err);
+                }
+                throw err;
+            }
             
-        })
+            db = client.db(db_name);
+            
+            // Load current state
+            db.collection('state').findOne({_id: 0}, function(err, state) {
+                if (err) {
+                    if (typeof callback === 'function') {
+                        return callback(err);
+                    }
+                    throw err;
+                }
+                
+                // Return initialized state
+                if (typeof callback === 'function') {
+                    callback(null, {
+                        headBlock: state?.headBlock || 0,
+                        // other state properties as needed
+                    });
+                }
+            });
+        });
     },
     initGenesis: async () => {
-        if (process.env.REBUILD_STATE === '1')
-            logr.info('Starting genesis for rebuild...')
-        else
-            logr.info('Block #0 not found. Starting genesis...')
-
+        if (process.env.REBUILD_STATE === '1') {
+            logr.info('Starting genesis for rebuild...');
+        } else {
+            // Add a check to prevent duplicate genesis
+            const existingBlock = await db.collection('blocks').findOne({_id: 0});
+            if (existingBlock) {
+                logr.info('Genesis block already exists, skipping initialization');
+                return;
+            }
+            logr.info('Block #0 not found. Starting genesis...');
+        }
         await mongo.addMongoIndexes()
         let genesisFolder = process.cwd()+'/genesis/'
         let genesisZip = genesisFolder+'genesis.zip'

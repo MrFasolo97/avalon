@@ -2,6 +2,7 @@ const parallel = require('run-parallel')
 const cloneDeep = require('clone-deep')
 const ProcessingQueue = require('./processingQueue')
 const txHistory = require('./txHistory')
+
 let cache = {
     copy: {
         accounts: {},
@@ -362,7 +363,7 @@ let cache = {
                 {pub_leader: {$exists:true}},
                 {pub_leader: {$ne: ''}}
             ]
-        }).toArray((e,accs) => {
+        }).sort({"node_appr": -1}).toArray((e,accs) => {
             if (e) throw e
             for (let i in accs) {
                 cache.leaders[accs[i].name] = 1

@@ -6,6 +6,9 @@ const bson = require('bson')
 const Transaction = require('./transactions')
 const TransactionType = Transaction.Types
 const max_mempool = process.env.MEMPOOL_SIZE || 2000
+const secp256k1 = require('secp256k1')
+const bs58 = require('base-x')(config.b58Alphabet)
+const chain = require('./chain')
 
 // probably due to non standard utf8 characters that were not properly written to mongodb/bson file
 // for now we skip them until such bug can be reproduced
@@ -13,9 +16,72 @@ const skiphash = {
     '7dedc07cb42c96b5013710161bf487a2488fce789b80286e3df910075f98a4d1': '16de2c5c847962f3683aec852072e702fb8c4ffd81c3d23cf85b8d2da031bd8e' // tx in block 14,874,851
 }
 
+class UTXOPool {
+    constructor() {
+        this.available = new Set();
+        this.locked = new Map(); // lockedUTXO -> blockHash
+    }
+
+    lockUTXO(outpoint, blockHash) {
+        if (this.available.has(outpoint)) {
+            this.available.delete(outpoint);
+            this.locked.set(outpoint, blockHash);
+        }
+    }
+
+    releaseBlockLocks(blockHash) {
+        for (const [outpoint, lockingBlock] of this.locked) {
+            if (lockingBlock === blockHash) {
+                this.locked.delete(outpoint);
+                this.available.add(outpoint);
+            }
+        }
+    }
+
+    isSpendable(outpoint) {
+        if (this.available.has(outpoint)) {
+            return true;
+        }
+        
+        if (this.locked.has(outpoint)) {
+            const lockingBlockHash = this.locked.get(outpoint);
+            return chain.finalizedHead && chain.finalizedHead.hash === lockingBlockHash;
+        }
+        
+        return false;
+    }
+    
+    isFinalized(outpoint) {
+        const lockingBlockHash = this.locked.get(outpoint);
+        return lockingBlockHash && blocks.finalizedBlocks.has(lockingBlockHash);
+    }
+}
+
 let transaction = {
     pool: [], // the pool holds temporary txs that havent been published on chain yet
     eventConfirmation: new EventEmitter(),
+    processFinalized: (finalizedBlock) => {
+        // Process any transactions that were waiting for finality
+        for (const tx of this.pool) {
+            if (tx.requiresFinality) {
+                this.checkFinalizedInputs(tx, finalizedBlock);
+            }
+        }
+    },
+    checkFinalizedInputs: (tx, finalizedBlock) => {
+        if (!tx.inputs) return;
+        
+        for (const input of tx.inputs) {
+            if (utxoPool.locked.has(input.outpoint)) {
+                const lockingBlockHash = utxoPool.locked.get(input.outpoint);
+                if (lockingBlockHash === finalizedBlock.hash) {
+                    // Input is now finalized
+                    utxoPool.locked.delete(input.outpoint);
+                    utxoPool.available.add(input.outpoint);
+                }
+            }
+        }
+    },
     addToPool: (txs) => {
         if (transaction.isPoolFull())
             return
@@ -160,7 +226,14 @@ let transaction = {
             if (JSON.stringify(tx).length > newBw.v && tx.sender !== config.masterName) {
                 cb(false, 'need more bandwidth ('+(JSON.stringify(tx).length-newBw.v)+' B)'); return
             }
-
+            if (tx.inputs && tx.inputs.length > 0) {
+                for (const input of tx.inputs) {
+                if (!utxoPool.isSpendable(input.outpoint)) {
+                    cb(false, 'UTXO not available or locked');
+                    return;
+                }
+                }
+            }
             // check transaction specifics
             transaction.isValidTxData(tx, ts, legitUser, function(isValid, error) {
                 cb(isValid, error)
@@ -323,7 +396,35 @@ let transaction = {
                 if (err) throw err
                 cb(true)
             })
+    },
+    validate(utxoPool) {
+        // Check all inputs are spendable
+        for (const input of this.inputs) {
+            const outpoint = input.outpoint;
+            if (!utxoPool.isSpendable(outpoint)) {
+                return false;
+            }
+        }
+        return true;
+    },
+
+    lockBlockUTXOs(block) {
+        for (const tx of block.txs) {
+            for (const input of tx.inputs) {
+                utxoPool.lockUTXO(input.outpoint, block.hash);
+            }
+        }
+    },
+    releaseBlockLocks(blockHash) {
+        utxoPool.releaseBlockLocks(blockHash);
     }
 }
 
-module.exports = transaction
+const utxoPool = new UTXOPool();
+
+module.exports = {
+    UTXOPool,
+    Transaction,
+    lockBlockUTXOs: Transaction.lockBlockUTXOs,
+    releaseBlockLocks: Transaction.releaseBlockLocks
+};

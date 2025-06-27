@@ -25,89 +25,162 @@ if (allowNodeV.indexOf(currentNodeV) === -1) {
     process.exit(1)
 } else logr.info('Correctly using NodeJS v'+process.versions.node)
 
+
 let erroredRebuild = false
 
 // init the database and load most recent blocks in memory directly
-mongo.init(async function(state) {
-    // init blocks BSON if not using mongodb for blocks
-    await blocks.init(state)
-
-    // Warmup accounts
-    let timeStart = new Date().getTime()
-    await cache.warmup('accounts', parseInt(process.env.WARMUP_ACCOUNTS))
-    logr.info(Object.keys(cache.accounts).length+' accounts loaded in RAM in '+(new Date().getTime()-timeStart)+' ms')
-    
-    // Warmup contents
-    timeStart = new Date().getTime()
-    await cache.warmup('contents', parseInt(process.env.WARMUP_CONTENTS))
-    logr.info(Object.keys(cache.contents).length+' contents loaded in RAM in '+(new Date().getTime()-timeStart)+' ms')
-    
-    // Warmup leaders
-    timeStart = new Date().getTime()
-    let leaderCount = await cache.warmupLeaders()
-    logr.info(leaderCount+' leaders loaded in RAM in '+(new Date().getTime()-timeStart)+' ms')
-
-    // Warmup leader stats
-    await leaderStats.loadIndex()
-
-    // Load proposal head ID and active proposals
-    await dao.loadID()
-    await dao.loadActiveFundRequests()
-    await dao.loadActiveChainUpdateProposals()
-    await dao.loadGovConfig()
-    await daoMaster.loadID()
-
-    // Rebuild chain state if specified
-    let rebuildResumeBlock = state && state.headBlock ? state.headBlock+1 : 0
-    let isResumingRebuild = process.env.REBUILD_STATE === '1' && rebuildResumeBlock
-
-    // alert when rebuild without validation/signture verification, only use if you know what you are doing
-    if (process.env.REBUILD_STATE === '1')
-        if (process.env.REBUILD_NO_VALIDATE === '1')
-            logr.info('Rebuilding without validation. Only use this if you know what you are doing!')
-        else if (process.env.REBUILD_NO_VERIFY === '1')
-            logr.info('Rebuilding without signature verification. Only use this if you know what you are doing!')
-
-    if (process.env.REBUILD_STATE === '1' && !isResumingRebuild) {
-        logr.info('Chain state rebuild requested'+(process.env.UNZIP_BLOCKS === '1' && !blocks.isOpen ? ', unzipping blocks.zip...' : ''))
-        if (!blocks.isOpen)
-            mongo.restoreBlocks((e)=>{
-                if (e) return logr.error(e)
-                startRebuild(0)
-            })
-        else
-            startRebuild(0)
-        return
+mongo.init(async (err, initialState) => {
+    if (err) {
+        logr.fatal('Failed to initialize database:', err);
+        process.exit(1);
     }
 
-    let block = blocks.isOpen ? blocks.lastBlock() : await mongo.lastBlock()
-    // Resuming an interrupted rebuild
-    if (isResumingRebuild) {
-        logr.info('Resuming interrupted rebuild from block ' + rebuildResumeBlock)
-        config = require('./config').read(rebuildResumeBlock - 1)
-        chain.restoredBlocks = block._id
-        let blkScheduleStart = rebuildResumeBlock-1 - (rebuildResumeBlock-1)%config.leaders
-        if (!blocks.isOpen)
-            mongo.fillInMemoryBlocks(() => 
-                db.collection('blocks').findOne({_id:rebuildResumeBlock-1 - (rebuildResumeBlock-1)%config.leaders},(e,b) => {
-                    chain.schedule = chain.minerSchedule(b)
-                    startRebuild(rebuildResumeBlock)
-                }),rebuildResumeBlock)
-        else {
-            blocks.fillInMemoryBlocks(rebuildResumeBlock)
-            chain.schedule = chain.minerSchedule(blocks.read(blkScheduleStart))
-            startRebuild(rebuildResumeBlock)
+    try {
+        // Initialize blocks storage just once
+        await blocks.init(initialState);
+
+        // Check if we need genesis
+        const needsGenesis = (blocks.isOpen && !blocks.lastBlock()) ||
+                           (!blocks.isOpen && !(await mongo.lastBlock()));
+
+        if (needsGenesis) {
+            logr.info('Initializing genesis block');
+            const genesisBlock = chain.getGenesisBlock();
+            
+            if (!blocks.isOpen) {
+                await db.collection('blocks').insertOne(genesisBlock);
+            } else {
+                blocks.appendBlock(genesisBlock);
+            }
+            
+            await mongo.initGenesis();
+            chain.recentBlocks = [genesisBlock];
+            chain.schedule = chain.getGenesisBlockWithSchedule();
+            logr.info('Genesis initialization complete');
         }
-        return
+
+        // Check if we need to initialize genesis
+        const latestBlock = blocks.isOpen ? blocks.lastBlock() : await mongo.lastBlock();
+        
+        if (!latestBlock) {
+            // Handle genesis case only once
+            logr.info('Initializing genesis block');
+            const genesisBlock = chain.getGenesisBlock();
+            
+            if (!blocks.isOpen) {
+                await db.collection('blocks').insertOne(genesisBlock);
+            } else {
+                // Make sure we're not trying to re-add genesis
+                if (blocks.height !== 0) {
+                    throw new Error('Genesis block already exists');
+                }
+                blocks.appendBlock(genesisBlock);
+            }
+            
+            //await mongo.initGenesis();
+            logr.info('Genesis initialization complete');
+            
+            // Update latest block reference
+            chain.recentBlocks = [genesisBlock];
+            chain.schedule = chain.getGenesisBlockWithSchedule();
+        }
+
+        // Warmup accounts
+        let timeStart = new Date().getTime()
+        await cache.warmup('accounts', parseInt(process.env.WARMUP_ACCOUNTS))
+        logr.info(Object.keys(cache.accounts).length+' accounts loaded in RAM in '+(new Date().getTime()-timeStart)+' ms')
+        
+        // Warmup contents
+        timeStart = new Date().getTime()
+        await cache.warmup('contents', parseInt(process.env.WARMUP_CONTENTS))
+        logr.info(Object.keys(cache.contents).length+' contents loaded in RAM in '+(new Date().getTime()-timeStart)+' ms')
+        
+        // Warmup leaders
+        timeStart = new Date().getTime()
+        let leaderCount = await cache.warmupLeaders()
+        logr.info(leaderCount+' leaders loaded in RAM in '+(new Date().getTime()-timeStart)+' ms')
+
+        await chain.initCasper()
+        await startFinalizationInterval();
+
+        // Warmup leader stats
+        await leaderStats.loadIndex()
+
+        // Load proposal head ID and active proposals
+        await dao.loadID()
+        await dao.loadActiveFundRequests()
+        await dao.loadActiveChainUpdateProposals()
+        await dao.loadGovConfig()
+        await daoMaster.loadID()
+
+        // Rebuild chain state if specified
+        let rebuildResumeBlock = initialState && initialState.headBlock ? initialState.headBlock+1 : 0
+        let isResumingRebuild = process.env.REBUILD_STATE === '1' && rebuildResumeBlock
+
+        // alert when rebuild without validation/signture verification, only use if you know what you are doing
+        if (process.env.REBUILD_STATE === '1')
+            if (process.env.REBUILD_NO_VALIDATE === '1')
+                logr.info('Rebuilding without validation. Only use this if you know what you are doing!')
+            else if (process.env.REBUILD_NO_VERIFY === '1')
+                logr.info('Rebuilding without signature verification. Only use this if you know what you are doing!')
+
+        if (process.env.REBUILD_STATE === '1' && !isResumingRebuild) {
+            logr.info('Chain state rebuild requested'+(process.env.UNZIP_BLOCKS === '1' && !blocks.isOpen ? ', unzipping blocks.zip...' : ''))
+            if (!blocks.isOpen)
+                mongo.restoreBlocks((e)=>{
+                    if (e) return logr.error(e)
+                    startRebuild(0)
+                })
+            else
+                startRebuild(0)
+            return
+        }
+
+        let block = blocks.isOpen ? blocks.lastBlock() : await mongo.lastBlock()
+        // Resuming an interrupted rebuild
+        if (isResumingRebuild) {
+            logr.info('Resuming interrupted rebuild from block ' + rebuildResumeBlock)
+            config = require('./config').read(rebuildResumeBlock - 1)
+            chain.restoredBlocks = block._id
+            let blkScheduleStart = rebuildResumeBlock-1 - (rebuildResumeBlock-1)%config.leaders
+            if (!blocks.isOpen)
+                mongo.fillInMemoryBlocks(() => 
+                    db.collection('blocks').findOne({_id:rebuildResumeBlock-1 - (rebuildResumeBlock-1)%config.leaders},(e,b) => {
+                        chain.schedule = chain.minerSchedule(b)
+                        startRebuild(rebuildResumeBlock)
+                    }),rebuildResumeBlock)
+            else {
+                blocks.fillInMemoryBlocks(rebuildResumeBlock)
+                chain.schedule = chain.minerSchedule(blocks.read(blkScheduleStart))
+                startRebuild(rebuildResumeBlock)
+            }
+            return
+        }
+        logr.info('#' + block._id + ' is the latest block in our db')
+        config = require('./config.js').read(block._id)
+        if (blocks.isOpen) {
+            blocks.fillInMemoryBlocks()
+            startDaemon(initialState)
+        } else
+            mongo.fillInMemoryBlocks(() => startDaemon(initialState))
+        http.init()
+    } catch (e) {
+        logr.error('Initialization failed:', e);
+        process.exit(1);
     }
-    logr.info('#' + block._id + ' is the latest block in our db')
-    config = require('./config.js').read(block._id)
-    if (blocks.isOpen) {
-        blocks.fillInMemoryBlocks()
-        startDaemon()
-    } else
-        mongo.fillInMemoryBlocks(startDaemon)
 })
+
+function startFinalizationInterval() {
+    setInterval(() => {
+        try {
+            if (chain.recentBlocks?.length && chain.casper) {
+                chain.finalizeBlocks();
+            }
+        } catch (e) {
+            logr.error('Finalization interval error:', e);
+        }
+    }, 30000);
+}
 
 function startRebuild(startBlock) {
     let rebuildStartTime = new Date().getTime()
@@ -134,33 +207,110 @@ function startRebuild(startBlock) {
     })
 }
 
-function startDaemon() {
-    // start miner schedule
-    let blkScheduleStart = chain.getLatestBlock()._id - (chain.getLatestBlock()._id % config.leaders)
-    if (blocks.isOpen)
-        chain.schedule = chain.minerSchedule(blocks.read(blkScheduleStart))
-    else
-        db.collection('blocks').findOne({_id: blkScheduleStart}, function(err, block) {
-            if (err) throw err
-            chain.schedule = chain.minerSchedule(block)
-        })
+async function initializeChain(state) {
+    try {
+        // Clear any existing blocks if rebuilding
+        if (process.env.REBUILD_STATE === '1') {
+            await db.collection('blocks').deleteMany({});
+        }
 
-    // init hot/trending
-    rankings.init()
-    // start the http server
-    http.init()
-    // start the websocket server
-    p2p.init()
-    // and connect to peers
-    p2p.connect(process.env.PEERS ? process.env.PEERS.split(',') : [], true)
-    // keep peer connection alive
-    setTimeout(p2p.keepAlive,3000)
+        // Create genesis block if none exists
+        const count = await db.collection('blocks').countDocuments();
+        if (count === 0) {
+            const genesis = chain.getGenesisBlock();
+            await db.collection('blocks').insertOne(genesis);
+            logr.info('Genesis block created:', genesis);
+        }
 
-    // regularly clean up old txs from mempool
-    setInterval(function() {
-        transaction.cleanPool()
-    }, config.blockTime*0.9)
+        // Verify we have exactly one genesis block
+        const genesisBlocks = await db.collection('blocks').find({_id: 0}).toArray();
+        if (genesisBlocks.length !== 1) {
+            throw new Error(`Found ${genesisBlocks.length} genesis blocks!`);
+        }
+        try {
+            // After loading blocks...
+            const latestBlock = chain.getLatestBlock();
+            chain.schedule = chain.minerSchedule(latestBlock);
+            logr.info('Mining schedule initialized');
+        } catch (e) {
+            logr.error('Chain initialization failed:', e);
+            process.exit(1);
+        }
+        logr.info('Mining initialization state:', {
+            hasSchedule: !!chain.schedule?.shuffle,
+            latestBlock: chain.getLatestBlock()?._id,
+            txPoolReady: typeof transaction.pool !== 'undefined',
+            nodeOwner: !!process.env.NODE_OWNER
+        });
+        // In your main initialization
+        if (typeof transaction.pool === 'undefined') {
+            transaction.pool = [];
+            logr.debug('Initialized transaction pool');
+        }
+
+        // 1. Initialize database and load blocks
+        await mongo.init(state);
+
+        // 2. Warm up essential caches
+        await cache.warmup('accounts', parseInt(process.env.WARMUP_ACCOUNTS));
+        await cache.warmupLeaders();
+        if (!chain.recentBlocks.length) {
+            chain.recentBlocks = [chain.getGenesisBlock()];
+            logr.info('Initialized with genesis block');
+        }
+        // 3. Handle genesis case
+        if (blocks.height === 0) {
+            logr.info('Initializing new blockchain with genesis block');
+            const genesisBlock = chain.getGenesisBlock();
+            
+            if (!blocks.isOpen) {
+                await db.collection('blocks').insertOne(genesisBlock);
+            } else {
+                blocks.appendBlock(genesisBlock);
+            }
+            
+            chain.recentBlocks = [genesisBlock];
+            chain.schedule = chain.getGenesisBlockWithSchedule();
+            
+            logr.info('Genesis block initialized successfully');
+            return true;
+        }
+
+        // 4. Normal case - existing chain
+        const latestBlock = blocks.isOpen ? 
+            blocks.lastBlock() : 
+            await db.collection('blocks').findOne({}, {sort: {_id: -1}});
+        
+        if (!latestBlock) {
+            throw new Error('Failed to load latest block');
+        }
+
+        chain.schedule = chain.minerSchedule(latestBlock);
+        logr.info(`Mining schedule created for block ${latestBlock._id}`);
+        return true;
+
+    } catch (e) {
+        logr.error('Chain initialization failed:', e);
+        throw e;
+    }
 }
+
+function startDaemon(state) {
+    initializeChain(state)
+        .then(success => {
+            if (!success) {
+                logr.error('Initialization failed, retrying...');
+                setTimeout(startDaemon(state), 5000);
+                return;
+            }
+
+            logr.info('Daemon started successfully');
+        })
+        .catch(e => {
+            logr.error('Critical initialization error:', e);
+            process.exit(1);
+        });
+}   
 
 process.on('SIGINT', function() {
     if (typeof closing !== 'undefined') return

@@ -17,8 +17,6 @@ let config = {
             b58Alphabet: '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz',
             // the block #0 genesis timestamp
             block0ts: 1601477849000,
-            // the block hash serialization revision
-            blockHashSerialization: 1,
             // the block time in ms
             blockTime: 3000,
             // the number of ms needed for 0.01 DTC to generate 1 byte of bw
@@ -79,9 +77,9 @@ let config = {
             // if false master can create accounts with usernames without burning tokens
             masterPaysForUsernames: false,
             // the master account public original key (irrelevant if using genesis)
-            masterPub: 'dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz',
+            masterPub: 'xUZZC3C1e22p3JhmEPoZ2r8tfHUhdv4JLTjs7rRPArNK',
             // the master account public leader key  (irrelevant if using genesis)
-            masterPubLeader: 'dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz',
+            masterPubLeader: 'xUZZC3C1e22p3JhmEPoZ2r8tfHUhdv4JLTjs7rRPArNK',
             masterNoPreloadAcc: true,
             // the maximum time drift in ms before a block is invalid
             maxDrift: 200,
@@ -175,11 +173,16 @@ let config = {
             preloadBwGrowth: 2, // x2 more time of bwGrowth
             multisig: true,
         },
+        100: {
+            checkpointInterval: 50, // Blocks between finality checkpoints
+            finalityDepth: 150, // Number of finalized blocks to keep in memory
+            casperEpochLength: 50, // Same as checkpointInterval
+        },
         241600: {
             txLimits: {
                 28: 0
             }
-        }
+        },
     },
     read: (blockNum) => {
         let finalConfig = {}

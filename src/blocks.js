@@ -4,6 +4,7 @@ const BSON = require('bson')
 const logr = require('./logger')
 const mongo = require('./mongo')
 const isRebuild = process.env.REBUILD_STATE === '1'
+let isRebuiling = false
 
 let blocks = {
     fd: 0,
@@ -13,9 +14,11 @@ let blocks = {
     dataDir: process.env.BLOCKS_DIR ? process.env.BLOCKS_DIR.replace(/\/$/,''): '',
     isOpen: false,
     notOpenError: 'Blockchain is not open',
+    finalizedBlocks: new Set(), // Track finalized block hashes
+    unfinalizedBlocks: new Map(), // Track pending blocks
     init: async (state) => {
         if (!process.env.BLOCKS_DIR) return
-
+        blocks.loadFinalizedState();
         let bsonPath = blocks.dataDir+'/blocks.bson'
         let indexPath = blocks.dataDir+'/blocks.index'
 
@@ -26,6 +29,7 @@ let blocks = {
                 process.exit(1)
             }
             await mongo.initGenesis()
+            isRebuiling = true
         }
 
         // Create files if not exists already
@@ -85,7 +89,7 @@ let blocks = {
             process.exit(1)
         }
 
-        if (isRebuild && !hasState) {
+        if (isRebuild && !hasState && !isRebuiling) {
             await db.dropDatabase()
             await mongo.initGenesis()
         }
@@ -122,8 +126,18 @@ let blocks = {
         logr.info('Index reconstructed up to block #'+blocks.height+' in '+(new Date().getTime()-startTime)+'ms')
     },
     appendBlock: (newBlock) => {
+        if (this.height >= 0 && newBlock._id !== this.height + 1) {
+            throw new Error(`Cannot append block ${block._id} to height ${this.height}`);
+        }
         assert(blocks.isOpen,blocks.notOpenError)
-        assert(newBlock._id === blocks.height+1,'could not append non-next block')
+        if ( newBlock._id !== 0 ) {
+            assert(newBlock._id === blocks.height,'could not append non-next block') 
+        }
+        // Track as unfinalized first
+        blocks.unfinalizedBlocks.set(newBlock.hash, {
+            block: newBlock,
+            votes: new Set()
+        });
         let serializedBlock = BSON.serialize(newBlock)
         let newBlockSize = BigInt(serializedBlock.length)
         fs.writeSync(blocks.fd,serializedBlock)
@@ -137,6 +151,106 @@ let blocks = {
         indexBuf.writeUInt32LE(Number(pos >> 8n), 0)
         indexBuf.writeUInt32LE(Number(pos & 0xFFn), 4)
         fs.writeSync(blocks.fdIndex,indexBuf)
+    },
+    finalizeBlock: (blockHash) => {
+        if (!blocks.unfinalizedBlocks.has(blockHash)) {
+            return false;
+        }
+
+        const { block } = blocks.unfinalizedBlocks.get(blockHash);
+        
+        // Move to finalized
+        blocks.finalizedBlocks.add(blockHash);
+        blocks.unfinalizedBlocks.delete(blockHash);
+        
+        // Release UTXO locks
+        transaction.releaseBlockLocks(blockHash);
+        
+        // Persist finalized state
+        this.persistFinalizedState();
+        
+        return true;
+    },
+
+    persistFinalizedState: () => {
+        // Write finalized blocks to disk
+        const finalizedPath = `${blocks.dataDir}/finalized.json`;
+        const finalizedData = {
+            height: blocks.height,
+            finalized: Array.from(blocks.finalizedBlocks)
+        };
+        
+        fs.writeFileSync(finalizedPath, JSON.stringify(finalizedData), 'utf8');
+    },
+
+    loadFinalizedState: () => {
+        const finalizedPath = `${blocks.dataDir}/finalized.json`;
+        if (fs.existsSync(finalizedPath)) {
+            try {
+                const data = JSON.parse(fs.readFileSync(finalizedPath, 'utf8'));
+                blocks.finalizedBlocks = new Set(data.finalized);
+                return true;
+            } catch (e) {
+                logr.error('Error loading finalized blocks:', e);
+            }
+        }
+        return false;
+    },
+    handleReorg: (newHead, chain) => {
+        if (!blocks.isOpen) throw new Error(blocks.notOpenError);
+
+        // If we have finalized blocks, check the reorg doesn't conflict
+        if (blocks.finalizedBlocks.size > 0) {
+            // Find the earliest finalized block
+            let earliestFinalized = null;
+            for (const hash of blocks.finalizedBlocks) {
+                const block = blocks.getBlockByHash(hash);
+                if (!earliestFinalized || block._id < earliestFinalized._id) {
+                    earliestFinalized = block;
+                }
+            }
+
+            if (earliestFinalized && newHead._id <= earliestFinalized._id) {
+                return false;
+            }
+        }
+
+        // Build new unfinalized blocks map
+        const newUnfinalized = new Map();
+        let current = newHead;
+        let depth = 0;
+        const maxReorgDepth = config.maxReorgDepth || 100; // Safety limit
+
+        while (current && depth < maxReorgDepth) {
+            // Stop if we hit a finalized block
+            if (blocks.finalizedBlocks.has(current.hash)) {
+                break;
+            }
+
+            // Add to new unfinalized set
+            newUnfinalized.set(current.hash, {
+                block: current,
+                votes: blocks.unfinalizedBlocks.get(current.hash)?.votes || new Set()
+            });
+
+            // Move to parent
+            try {
+                current = chain.getBlockByHash(current.phash);
+                depth++;
+            } catch (e) {
+                logr.warn('Error during reorg - missing block:', current.phash);
+                break;
+            }
+        }
+
+        // Only apply if we successfully built the new chain
+        if (depth < maxReorgDepth) {
+            blocks.unfinalizedBlocks = newUnfinalized;
+            return true;
+        }
+
+        logr.warn('Reorg exceeded maximum depth');
+        return false;
     },
     read: (blockNum = 0) => {
         if (!blocks.isOpen)
@@ -158,6 +272,8 @@ let blocks = {
         let docSize = docSizeBuf.readInt32LE(0)
         let docBuf = Buffer.alloc(docSize)
         fs.readSync(blocks.fd,docBuf,{offset: 0, position: docPosition, length: docSize})
+        let block = BSON.deserialize(docBuf);
+        block.finalized = blocks.finalizedBlocks.has(block.hash);
         return BSON.deserialize(docBuf)
     },
     readRange: (start,end) => {

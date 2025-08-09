@@ -96,7 +96,7 @@ let config = {
             // the maximum number of mentions triggering a notification
             notifMaxMentions: 10,
             // the sha256sum hash of block 0 (new origin hash -> new chain)
-            originHash: '89b3b910f5a465a273d017b9df3d4ab3b4ba571e8e87dffdfecc39dfef2741dd',
+            originHash: 'ae9e076c412e80bc08fab9314599331648169f8c4663729e2ed8800bd4a1fe6a',
             // the default number of random bytes to use for new key generation
             randomBytesLength: 32,
             // the maximum share of the reward pool a single distribution can generate
@@ -165,7 +165,7 @@ let config = {
                 19: 0,
                 23: 1,
                 24: 1,
-                28: 1
+                28: 0
             },
             hotfix1: true,
             maxKeys: 25,
@@ -175,11 +175,6 @@ let config = {
             preloadBwGrowth: 2, // x2 more time of bwGrowth
             multisig: true,
         },
-        241600: {
-            txLimits: {
-                28: 0
-            }
-        }
     },
     read: (blockNum) => {
         let finalConfig = {}

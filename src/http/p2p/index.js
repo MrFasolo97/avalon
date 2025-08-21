@@ -1,11 +1,11 @@
 module.exports = {
     init: (app) => {
         /**
-         * @api {get} /new New
-         * @apiName new
+         * @api {get} /p2p P2PVideos
+         * @apiName p2p
          * @apiGroup Rankings
          * 
-         * @apiSuccess {Object[]} contents List of new contents
+         * @apiSuccess {Object[]} contents List of new p2p contents
          */
         app.get('/p2p', (req, res) => {
             db.collection('contents').find({$and: [{pa: null }, {$or: [{"json.files.ipfs": {$ne: null}},{"json.files.btfs": {$ne: null}}, {"json.files.sia": { $ne: null}}]}]}, { sort: { ts: -1 }, limit: 50 }).toArray(function (err, contents) {
@@ -14,14 +14,14 @@ module.exports = {
         })
 
         /**
-         * @api {get} /new/:author/:link New (continued)
-         * @apiName newContinued
+         * @api {get} /p2p/:author/:link P2PVideos (continued)
+         * @apiName p2pContinued
          * @apiGroup Rankings
          * 
          * @apiParam {String} author Author of post to continue from
          * @apiParam {String} link Permlink of post to continue from
          * 
-         * @apiSuccess {Object[]} contents List of new contents continued
+         * @apiSuccess {Object[]} contents List of new p2p contents continued
          */
         app.get('/p2p/:author/:link', (req, res) => {
             db.collection('contents').findOne({
@@ -48,13 +48,13 @@ module.exports = {
 
         // get new contents with filter by author, tag, limit, tsrange
         /**
-         * @api {get} /new New Filtered
-         * @apiName newFiltered
+         * @api {get} /p2p P2PVideos Filtered
+         * @apiName p2pFiltered
          * @apiGroup Rankings
          * 
          * @apiParam {String} filter Filter parameters
          * 
-         * @apiSuccess {Object[]} contents List of new contents filtered
+         * @apiSuccess {Object[]} contents List of new p2p contents filtered
          */
         app.get('/p2p/:filter', (req, res) => {
             let filterParam = req.params.filter

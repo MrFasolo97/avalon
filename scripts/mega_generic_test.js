@@ -1,4 +1,4 @@
-var javalon = require('javalon')
+var javalon = require('javalon2').default
 javalon.init({api: 'http://127.0.0.1:3001'})
 var Chance = require('chance')
 var chance = new Chance()

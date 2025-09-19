@@ -15,10 +15,11 @@
     "clone-deep": "^4.0.1",
     "commander": "^2.20.0",
     "cors": "^2.8.5",
-    "crypto-js": "^3.1.6",
+    "crypto-js": "^4.2.0",
     "decay": "^1.0.12",
     "express": "^4.16.4",
     "growint": "^1.0.1",
+    "javalon2": "^1.1.7",
     "log4js": "^6.6.0",
     "mongodb": "^4.2.2",
     "node-fetch-commonjs": "^3.2.4",
@@ -58,10 +59,9 @@
     "version": "1.6.2"
   },
   "devDependencies": {
-    "apidoc": "^0.50.2",
+    "apidoc": "^1.2.0",
     "chance": "^1.0.18",
     "eslint": "^8.5.0",
-    "javalon": "^1.0.7",
     "pkg": "^4.4.9"
   }
 }

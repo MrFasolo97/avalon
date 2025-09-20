@@ -62,7 +62,6 @@
   "devDependencies": {
     "apidoc": "^1.2.0",
     "chance": "^1.0.18",
-    "eslint": "^8.5.0",
-    "pkg": "^4.4.9"
+    "eslint": "^8.5.0"
   }
 }

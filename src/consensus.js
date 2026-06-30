@@ -14,6 +14,7 @@ let consensus = {
     processed: [],
     queue: [],
     finalizing: false,
+    forceFinalizeTimeout: null,
     possBlocks: [],
     getActiveLeaderKey: (name) => {
         let shuffle = chain.schedule.shuffle
@@ -109,7 +110,8 @@ let consensus = {
                 } else
                     logr.cons('block '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,4)+' got finalized')
 
-                chain.validateAndAddBlock(possBlock.block, false, function(err) {
+                    consensus.cancelForceFinalize()
+                    chain.validateAndAddBlock(possBlock.block, false, function(err) {
                     if (err) throw err
 
                     // clean up old possible blocks
@@ -184,6 +186,7 @@ let consensus = {
 
                     // adding to possible blocks
                     consensus.possBlocks.push(possBlock)
+                    consensus.scheduleForceFinalize()
                     // adding ourselves to precommit list
                     for (let i = 0; i < consensus.possBlocks.length; i++) 
                         if (block.hash === consensus.possBlocks[i].block.hash
@@ -265,6 +268,89 @@ let consensus = {
             s: signature
         }
         return message
+    },
+    cancelForceFinalize: () => {
+        clearTimeout(consensus.forceFinalizeTimeout)
+        consensus.forceFinalizeTimeout = null
+    },
+    scheduleForceFinalize: () => {
+        consensus.cancelForceFinalize()
+        const latestBlock = chain.getLatestBlock()
+        const expectedHeight = latestBlock._id + 1
+        const hasCandidate = consensus.possBlocks.some(pb => pb.block._id === expectedHeight)
+        if (!hasCandidate) return
+
+        const fromNow = Math.max(1000,
+            latestBlock.timestamp + config.blockTime * (config.leaders + config.consensusRounds + 2) - Date.now()
+        )
+
+        logr.debug('Force finalize scheduled in ' + fromNow + 'ms for height ' + expectedHeight)
+
+        consensus.forceFinalizeTimeout = setTimeout(() => {
+            consensus._forceFinalize(expectedHeight)
+        }, fromNow)
+
+        if (consensus.forceFinalizeTimeout.unref)
+            consensus.forceFinalizeTimeout.unref()
+    },
+    _forceFinalize: (height) => {
+        if (consensus.finalizing) return
+        if (height !== chain.getLatestBlock()._id + 1) return
+
+        let candidates = consensus.possBlocks.filter(pb => pb.block._id === height)
+        if (candidates.length === 0) {
+            logr.warn('Force finalize has no candidates for height ' + height)
+            return
+        }
+
+        candidates.sort((a, b) => {
+            let aVotes = 0, bVotes = 0
+            for (let r = 0; r < config.consensusRounds; r++) {
+                aVotes += Array.isArray(a[r]) ? a[r].length : 0
+                bVotes += Array.isArray(b[r]) ? b[r].length : 0
+            }
+            if (aVotes !== bVotes) return bVotes - aVotes
+            if (a.block.timestamp !== b.block.timestamp)
+                return a.block.timestamp - b.block.timestamp
+            return a.block.hash < b.block.hash ? -1 : 1
+        })
+
+        const winner = candidates[0]
+
+        if (candidates.length > 1) {
+            let details = candidates.map(c => [
+                c.block.miner,
+                c.block._id + '#' + c.block.hash.substr(0, 8),
+                c.block.timestamp,
+                (Array.isArray(c[config.consensusRounds - 1]) ? c[config.consensusRounds - 1].length : 0) + '/' + consensus.activeLeaders().length + ' confirmations'
+            ])
+            logr.info('Block collision timeout at height ' + height + ', forced selection:', details)
+        }
+
+        logr.warn('Force finalizing block ' + height + '#' + winner.block.hash.substr(0, 8) + ' by ' + winner.block.miner)
+
+        consensus.finalizing = true
+
+        chain.validateAndAddBlock(winner.block, false, function(err) {
+            if (err) {
+                logr.error('Force finalize failed for ' + height + '#' + winner.block.hash.substr(0, 8), err)
+                consensus.finalizing = false
+                candidates.shift()
+                if (candidates.length > 0) {
+                    logr.warn('Trying next candidate for height ' + height)
+                    consensus._forceFinalize(height)
+                }
+                return
+            }
+
+            let newPossBlocks = []
+            for (let y = 0; y < consensus.possBlocks.length; y++)
+                if (height < consensus.possBlocks[y].block._id)
+                    newPossBlocks.push(consensus.possBlocks[y])
+            consensus.possBlocks = newPossBlocks
+            consensus.finalizing = false
+            consensus.cancelForceFinalize()
+        })
     },
     verifySignature: (message, cb) => {
         if (!message || !message.s) {

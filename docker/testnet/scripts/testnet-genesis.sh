@@ -19,6 +19,9 @@ MongoClient.connect('${DB_URL}', {useNewUrlParser:true, useUnifiedTopology:true}
 
 rm -rf /avalon/genesis/* /avalon/blocks/* 2>/dev/null || true
 
+# Patch config: add all common tx types to masterDaoTxs so the setup can work
+sed -i "s/masterDaoTxs: \[[^]]*\]/masterDaoTxs: [0,1,2,3,4,5,6,7,8,10,11,12,13,14,15,17,18,19,20,21,23,24,25,26,27,28,29,30,32]/" /avalon/src/config.js
+
 echo "Starting Avalon node..."
 node --stack-size=65500 src/main &
 AVALON_PID=$!

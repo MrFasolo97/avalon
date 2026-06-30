@@ -33,11 +33,19 @@ function genKeypair() {
     return { priv: bs58.encode(priv), pub: bs58.encode(pub) }
 }
 
+function getBlockCount() {
+    const raw = run(`curl -sf ${API}/count 2>/dev/null || echo '{"count":0}'`)
+    try {
+        return parseInt(JSON.parse(raw).count) || 0
+    } catch (e) {
+        return 0
+    }
+}
+
 function waitBlocks(n) {
-    const current = parseInt(run(`curl -sf ${API}/count 2>/dev/null || echo 0`)) || 0
-    const target = current + n
+    const target = getBlockCount() + n
     while (true) {
-        const h = parseInt(run(`curl -sf ${API}/count 2>/dev/null || echo 0`)) || 0
+        const h = getBlockCount()
         if (h >= target) break
         execSync('sleep 2')
     }
@@ -77,7 +85,7 @@ async function main() {
     waitBlocks(3)
     for (const m of miners) {
         for (let attempt = 0; attempt < 30; attempt++) {
-            const r = cli(`transfer ${MASTER} ${m.name} 100000`)
+            const r = cli(`transfer ${m.name} 100000`)
             if (r && r.length < 200) {
                 console.log(`  ✓ ${m.name} transfer`)
                 break

@@ -21,7 +21,7 @@ function run(cmd) {
 }
 
 function cli(args) {
-    return run(`node src/cli.js ${args} -A ${API} -K ${PRIV} -M ${MASTER} -W`)
+    return run(`node src/cli.js ${args} -A ${API} -K ${PRIV} -M ${MASTER}`)
 }
 
 function genKeypair() {
@@ -76,23 +76,44 @@ async function main() {
     console.log('\n--- Transferring tokens ---')
     waitBlocks(3)
     for (const m of miners) {
-        const r = cli(`transfer ${MASTER} ${m.name} 100000`)
-        console.log(`  ${m.name}: ${r ? '✓' : '✗'}`)
+        for (let attempt = 0; attempt < 30; attempt++) {
+            const r = cli(`transfer ${MASTER} ${m.name} 100000`)
+            if (r && r.length < 200) {
+                console.log(`  ✓ ${m.name} transfer`)
+                break
+            }
+            console.log(`  retry ${m.name} transfer (block ${attempt})...`)
+            waitBlocks(1)
+        }
     }
 
     console.log('\n--- Enabling nodes ---')
     waitBlocks(3)
     for (const m of miners) {
-        const r = cli(`enable-node ${m.pub}`)
-        console.log(`  ${m.name}: ${r ? '✓' : '✗'}`)
-        fs.writeFileSync(`${cfgDir}/${m.name}.json`, JSON.stringify(m, null, 2))
+        for (let attempt = 0; attempt < 30; attempt++) {
+            const r = cli(`enable-node ${m.pub}`)
+            if (r && r.length < 200) {
+                console.log(`  ✓ ${m.name} enabled`)
+                fs.writeFileSync(`${cfgDir}/${m.name}.json`, JSON.stringify(m, null, 2))
+                break
+            }
+            console.log(`  retry ${m.name} enable-node (block ${attempt})...`)
+            waitBlocks(1)
+        }
     }
 
     console.log('\n--- Voting for leaders ---')
     waitBlocks(5)
     for (const m of miners) {
-        const r = cli(`vote-leader ${m.name}`)
-        console.log(`  ${m.name}: ${r ? '✓' : '✗'}`)
+        for (let attempt = 0; attempt < 30; attempt++) {
+            const r = cli(`vote-leader ${m.name}`)
+            if (r && r.length < 200) {
+                console.log(`  ✓ ${m.name} voted`)
+                break
+            }
+            console.log(`  retry ${m.name} vote-leader (block ${attempt})...`)
+            waitBlocks(1)
+        }
     }
 
     // Write consolidated env

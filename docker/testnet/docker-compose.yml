@@ -1,6 +1,20 @@
 version: "3.2"
 
 services:
+  mongodb:
+    image: mongo:6.0.2
+    hostname: mongodb
+    container_name: avalon-testnet-mongodb
+    ports:
+      - "37017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: echo "db.runCommand({ping:1})" | mongosh --quiet
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
   bootstrap:
     build:
       context: ../..
@@ -10,15 +24,11 @@ services:
     ports:
       - "3101:3001"
       - "6101:6001"
-    volumes:
-      - mongo_bootstrap:/var/lib/mongodb
-      - blocks_bootstrap:/avalon/blocks
-      - testnet_config:/avalon/config/testnet-keys
     environment:
       - HTTP_PORT=3001
       - P2P_PORT=6001
       - DB_NAME=avalon
-      - DB_URL=mongodb://localhost:27017
+      - DB_URL=mongodb://mongodb:27017
       - NODE_OWNER=dtube
       - NODE_OWNER_PUB=dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz
       - NODE_OWNER_PRIV=34EpMEDFJwKbxaF7FhhLyEe3AhpM4dwHMLVfs4JyRto5
@@ -27,6 +37,9 @@ services:
       - MAX_PEERS=20
       - WARMUP_ACCOUNTS=1000
       - WARMUP_CONTENTS=0
+    depends_on:
+      mongodb:
+        condition: service_healthy
     command: ["bash", "/avalon/scripts/testnet-genesis.sh"]
 
   setup:
@@ -57,15 +70,15 @@ services:
       - "3102:3001"
       - "6102:6001"
     volumes:
-      - mongo_miner1:/var/lib/mongodb
-      - blocks_miner1:/avalon/blocks
       - testnet_config:/avalon/config/testnet-keys
     environment:
       - HTTP_PORT=3001
       - P2P_PORT=6001
       - DB_NAME=avalon
-      - DB_URL=mongodb://localhost:27017
+      - DB_URL=mongodb://mongodb:27017
       - NODE_OWNER=miner1
+      - NODE_OWNER_PUB=
+      - NODE_OWNER_PRIV=
       - PEERS=ws://bootstrap:6001
       - LOG_LEVEL=cons
       - NO_DISCOVERY=1
@@ -73,8 +86,10 @@ services:
       - WARMUP_ACCOUNTS=1000
       - WARMUP_CONTENTS=0
     depends_on:
-      - bootstrap
-      - setup
+      mongodb:
+        condition: service_healthy
+      setup:
+        condition: service_started
     command: ["bash", "/avalon/scripts/testnet-miner.sh"]
 
   miner2:
@@ -87,15 +102,15 @@ services:
       - "3103:3001"
       - "6103:6001"
     volumes:
-      - mongo_miner2:/var/lib/mongodb
-      - blocks_miner2:/avalon/blocks
       - testnet_config:/avalon/config/testnet-keys
     environment:
       - HTTP_PORT=3001
       - P2P_PORT=6001
       - DB_NAME=avalon
-      - DB_URL=mongodb://localhost:27017
+      - DB_URL=mongodb://mongodb:27017
       - NODE_OWNER=miner2
+      - NODE_OWNER_PUB=
+      - NODE_OWNER_PRIV=
       - PEERS=ws://bootstrap:6001
       - LOG_LEVEL=cons
       - NO_DISCOVERY=1
@@ -103,8 +118,10 @@ services:
       - WARMUP_ACCOUNTS=1000
       - WARMUP_CONTENTS=0
     depends_on:
-      - bootstrap
-      - setup
+      mongodb:
+        condition: service_healthy
+      setup:
+        condition: service_started
     command: ["bash", "/avalon/scripts/testnet-miner.sh"]
 
   miner3:
@@ -117,15 +134,15 @@ services:
       - "3104:3001"
       - "6104:6001"
     volumes:
-      - mongo_miner3:/var/lib/mongodb
-      - blocks_miner3:/avalon/blocks
       - testnet_config:/avalon/config/testnet-keys
     environment:
       - HTTP_PORT=3001
       - P2P_PORT=6001
       - DB_NAME=avalon
-      - DB_URL=mongodb://localhost:27017
+      - DB_URL=mongodb://mongodb:27017
       - NODE_OWNER=miner3
+      - NODE_OWNER_PUB=
+      - NODE_OWNER_PRIV=
       - PEERS=ws://bootstrap:6001
       - LOG_LEVEL=cons
       - NO_DISCOVERY=1
@@ -133,17 +150,12 @@ services:
       - WARMUP_ACCOUNTS=1000
       - WARMUP_CONTENTS=0
     depends_on:
-      - bootstrap
-      - setup
+      mongodb:
+        condition: service_healthy
+      setup:
+        condition: service_started
     command: ["bash", "/avalon/scripts/testnet-miner.sh"]
 
 volumes:
-  mongo_bootstrap:
-  blocks_bootstrap:
-  mongo_miner1:
-  blocks_miner1:
-  mongo_miner2:
-  blocks_miner2:
-  mongo_miner3:
-  blocks_miner3:
+  mongo_data:
   testnet_config:

@@ -8,8 +8,8 @@ services:
     hostname: bootstrap
     container_name: avalon-testnet-bootstrap
     ports:
-      - "3001:3001"
-      - "6001:6001"
+      - "3101:3001"
+      - "6101:6001"
     volumes:
       - mongo_bootstrap:/var/lib/mongodb
       - blocks_bootstrap:/avalon/blocks
@@ -54,8 +54,8 @@ services:
     hostname: miner1
     container_name: avalon-testnet-miner1
     ports:
-      - "3002:3001"
-      - "6002:6001"
+      - "3102:3001"
+      - "6102:6001"
     volumes:
       - mongo_miner1:/var/lib/mongodb
       - blocks_miner1:/avalon/blocks
@@ -84,8 +84,8 @@ services:
     hostname: miner2
     container_name: avalon-testnet-miner2
     ports:
-      - "3003:3001"
-      - "6003:6001"
+      - "3103:3001"
+      - "6103:6001"
     volumes:
       - mongo_miner2:/var/lib/mongodb
       - blocks_miner2:/avalon/blocks
@@ -114,8 +114,8 @@ services:
     hostname: miner3
     container_name: avalon-testnet-miner3
     ports:
-      - "3004:3001"
-      - "6004:6001"
+      - "3104:3001"
+      - "6104:6001"
     volumes:
       - mongo_miner3:/var/lib/mongodb
       - blocks_miner3:/avalon/blocks

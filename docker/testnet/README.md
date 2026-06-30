@@ -28,12 +28,12 @@ L'avvio automatico:
 
 ## Architettura
 
-| Servizio | HTTP | P2P | Account |
-|----------|------|-----|---------|
-| bootstrap | `:3001` | `:6001` | dtube (master) |
-| miner1 | `:3002` | `:6002` | miner1 |
-| miner2 | `:3003` | `:6003` | miner2 |
-| miner3 | `:3004` | `:6004` | miner3 |
+| Servizio | HTTP (host) | P2P (host) | Account |
+|----------|-------------|------------|---------|
+| bootstrap | `:3101` | `:6101` | dtube (master) |
+| miner1 | `:3102` | `:6102` | miner1 |
+| miner2 | `:3103` | `:6103` | miner2 |
+| miner3 | `:3104` | `:6104` | miner3 |
 
 Tutti i nodi sono sulla stessa rete Docker e si scoprono via `PEERS=ws://bootstrap:6001`.
 
@@ -45,8 +45,8 @@ Per simulare un conflitto (due leader minano blocchi diversi alla stessa altezza
 
 ```bash
 # In due terminali diversi, esegui quasi contemporaneamente:
-curl http://localhost:3002/mineBlock   # miner1 forza un blocco
-curl http://localhost:3003/mineBlock   # miner2 forza un blocco
+curl http://localhost:3102/mineBlock   # miner1 forza un blocco
+curl http://localhost:3103/mineBlock   # miner2 forza un blocco
 ```
 
 Se i due `/mineBlock` partono allo stesso micro-intervallo, entrambi i minatori
@@ -60,14 +60,14 @@ dopo ~27 secondi (5 leader × 3s + 2 round × 3s + margine) scatta la
 
 ```bash
 # Monitora l'altezza della catena
-watch -n 1 'curl -s http://localhost:3001/count'
+watch -n 1 'curl -s http://localhost:3101/count'
 
 # Vedi il log della force finalization
 docker compose logs bootstrap | grep -i "force\|collision"
 
 # Dopo un conflitto, controlla che la catena continui ad avanzare
 while true; do
-  h=$(curl -s http://localhost:3001/count)
+  h=$(curl -s http://localhost:3101/count)
   echo "Block #$h  $(date)"
   sleep 2
 done

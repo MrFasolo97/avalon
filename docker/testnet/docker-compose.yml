@@ -1,0 +1,149 @@
+version: "3.2"
+
+services:
+  bootstrap:
+    build:
+      context: ../..
+      dockerfile: docker/testnet/Dockerfile
+    hostname: bootstrap
+    container_name: avalon-testnet-bootstrap
+    ports:
+      - "3001:3001"
+      - "6001:6001"
+    volumes:
+      - mongo_bootstrap:/var/lib/mongodb
+      - blocks_bootstrap:/avalon/blocks
+      - testnet_config:/avalon/config/testnet-keys
+    environment:
+      - HTTP_PORT=3001
+      - P2P_PORT=6001
+      - DB_NAME=avalon
+      - DB_URL=mongodb://localhost:27017
+      - NODE_OWNER=dtube
+      - NODE_OWNER_PUB=dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz
+      - NODE_OWNER_PRIV=34EpMEDFJwKbxaF7FhhLyEe3AhpM4dwHMLVfs4JyRto5
+      - LOG_LEVEL=cons
+      - NO_DISCOVERY=1
+      - MAX_PEERS=20
+      - WARMUP_ACCOUNTS=1000
+      - WARMUP_CONTENTS=0
+    command: ["bash", "/avalon/scripts/testnet-genesis.sh"]
+
+  setup:
+    build:
+      context: ../..
+      dockerfile: docker/testnet/Dockerfile
+    hostname: setup
+    container_name: avalon-testnet-setup
+    volumes:
+      - testnet_config:/avalon/config/testnet-keys
+    environment:
+      - HTTP_PORT=3001
+      - BOOTSTRAP_HOST=bootstrap
+      - NODE_OWNER=dtube
+      - NODE_OWNER_PUB=dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz
+      - NODE_OWNER_PRIV=34EpMEDFJwKbxaF7FhhLyEe3AhpM4dwHMLVfs4JyRto5
+    depends_on:
+      - bootstrap
+    command: ["bash", "/avalon/scripts/testnet-setup.sh"]
+
+  miner1:
+    build:
+      context: ../..
+      dockerfile: docker/testnet/Dockerfile
+    hostname: miner1
+    container_name: avalon-testnet-miner1
+    ports:
+      - "3002:3001"
+      - "6002:6001"
+    volumes:
+      - mongo_miner1:/var/lib/mongodb
+      - blocks_miner1:/avalon/blocks
+      - testnet_config:/avalon/config/testnet-keys
+    environment:
+      - HTTP_PORT=3001
+      - P2P_PORT=6001
+      - DB_NAME=avalon
+      - DB_URL=mongodb://localhost:27017
+      - NODE_OWNER=miner1
+      - PEERS=ws://bootstrap:6001
+      - LOG_LEVEL=cons
+      - NO_DISCOVERY=1
+      - MAX_PEERS=20
+      - WARMUP_ACCOUNTS=1000
+      - WARMUP_CONTENTS=0
+    depends_on:
+      - bootstrap
+      - setup
+    command: ["bash", "/avalon/scripts/testnet-miner.sh"]
+
+  miner2:
+    build:
+      context: ../..
+      dockerfile: docker/testnet/Dockerfile
+    hostname: miner2
+    container_name: avalon-testnet-miner2
+    ports:
+      - "3003:3001"
+      - "6003:6001"
+    volumes:
+      - mongo_miner2:/var/lib/mongodb
+      - blocks_miner2:/avalon/blocks
+      - testnet_config:/avalon/config/testnet-keys
+    environment:
+      - HTTP_PORT=3001
+      - P2P_PORT=6001
+      - DB_NAME=avalon
+      - DB_URL=mongodb://localhost:27017
+      - NODE_OWNER=miner2
+      - PEERS=ws://bootstrap:6001
+      - LOG_LEVEL=cons
+      - NO_DISCOVERY=1
+      - MAX_PEERS=20
+      - WARMUP_ACCOUNTS=1000
+      - WARMUP_CONTENTS=0
+    depends_on:
+      - bootstrap
+      - setup
+    command: ["bash", "/avalon/scripts/testnet-miner.sh"]
+
+  miner3:
+    build:
+      context: ../..
+      dockerfile: docker/testnet/Dockerfile
+    hostname: miner3
+    container_name: avalon-testnet-miner3
+    ports:
+      - "3004:3001"
+      - "6004:6001"
+    volumes:
+      - mongo_miner3:/var/lib/mongodb
+      - blocks_miner3:/avalon/blocks
+      - testnet_config:/avalon/config/testnet-keys
+    environment:
+      - HTTP_PORT=3001
+      - P2P_PORT=6001
+      - DB_NAME=avalon
+      - DB_URL=mongodb://localhost:27017
+      - NODE_OWNER=miner3
+      - PEERS=ws://bootstrap:6001
+      - LOG_LEVEL=cons
+      - NO_DISCOVERY=1
+      - MAX_PEERS=20
+      - WARMUP_ACCOUNTS=1000
+      - WARMUP_CONTENTS=0
+    depends_on:
+      - bootstrap
+      - setup
+    command: ["bash", "/avalon/scripts/testnet-miner.sh"]
+
+volumes:
+  mongo_bootstrap:
+  blocks_bootstrap:
+  mongo_miner1:
+  blocks_miner1:
+  mongo_miner2:
+  blocks_miner2:
+  mongo_miner3:
+  blocks_miner3:
+  testnet_config:

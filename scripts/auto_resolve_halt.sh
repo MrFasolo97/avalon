@@ -297,7 +297,7 @@ truncate_blocks_mongo() {
             print('ERROR: Cannot remove $remove_count blocks, only have ' + (oldHeight+1));
             quit(1);
         }
-        const isDryRun = "'"$DRY_RUN"'" === "1";
+        const isDryRun = \"$DRY_RUN\" === \"1\";
         if (isDryRun) {
             print('[DRY-RUN] Would delete ' + $remove_count + ' blocks, keeping 0 - ' + newHeight);
         } else {

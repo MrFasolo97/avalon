@@ -20,8 +20,12 @@ function run(cmd) {
     }
 }
 
-function cli(args) {
-    return run(`node src/cli.js ${args} -A ${API} -K ${PRIV} -M ${MASTER}`)
+function cli(args, signKey, signName) {
+    signKey = signKey || PRIV
+    signName = signName || MASTER
+    const out = run(`node src/cli.js ${args} -A ${API} -K ${signKey} -M ${signName}`)
+    if (out && out.startsWith('Error:')) return null
+    return out
 }
 
 function genKeypair() {
@@ -72,7 +76,7 @@ async function main() {
     for (const m of miners) {
         for (let attempt = 0; attempt < 30; attempt++) {
             const r = cli(`account ${m.pub} ${m.name}`)
-            if (r && r.length < 200) {
+            if (r) {
                 console.log(`  ✓ ${m.name} created`)
                 break
             }
@@ -86,7 +90,7 @@ async function main() {
     for (const m of miners) {
         for (let attempt = 0; attempt < 30; attempt++) {
             const r = cli(`transfer ${m.name} 100000`)
-            if (r && r.length < 200) {
+            if (r) {
                 console.log(`  ✓ ${m.name} transfer`)
                 break
             }
@@ -95,27 +99,31 @@ async function main() {
         }
     }
 
-    console.log('\n--- Enabling nodes ---')
-    waitBlocks(3)
+    console.log('\n--- Enabling nodes (waiting for bandwidth to grow) ---')
+    waitBlocks(40)
     for (const m of miners) {
-        for (let attempt = 0; attempt < 30; attempt++) {
-            const r = cli(`enable-node ${m.pub}`)
-            if (r && r.length < 200) {
+        for (let attempt = 0; attempt < 60; attempt++) {
+            const r = cli(`enable-node ${m.pub}`, m.priv, m.name)
+            if (r) {
                 console.log(`  ✓ ${m.name} enabled`)
                 fs.writeFileSync(`${cfgDir}/${m.name}.json`, JSON.stringify(m, null, 2))
                 break
             }
             console.log(`  retry ${m.name} enable-node (block ${attempt})...`)
-            waitBlocks(1)
+            waitBlocks(3)
         }
     }
 
-    console.log('\n--- Voting for leaders ---')
+    console.log('\n--- Waiting for miners to connect (configs written, miners should start soon) ---')
     waitBlocks(5)
+    console.log('--- Connectivity check ---')
+    run(`curl -sf ${API}/peers 2>/dev/null || echo "no peers yet"`)
+
+    console.log('\n--- Voting for leaders ---')
     for (const m of miners) {
         for (let attempt = 0; attempt < 30; attempt++) {
             const r = cli(`vote-leader ${m.name}`)
-            if (r && r.length < 200) {
+            if (r) {
                 console.log(`  ✓ ${m.name} voted`)
                 break
             }

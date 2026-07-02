@@ -110,7 +110,8 @@ let consensus = {
                 } else
                     logr.cons('block '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,4)+' got finalized')
 
-                    consensus.cancelForceFinalize()
+                    if (config.forceFinalize)
+                        consensus.cancelForceFinalize()
                     chain.validateAndAddBlock(possBlock.block, false, function(err) {
                     if (err) throw err
 
@@ -186,7 +187,8 @@ let consensus = {
 
                     // adding to possible blocks
                     consensus.possBlocks.push(possBlock)
-                    consensus.scheduleForceFinalize()
+                    if (config.forceFinalize)
+                        consensus.scheduleForceFinalize()
                     // adding ourselves to precommit list
                     for (let i = 0; i < consensus.possBlocks.length; i++) 
                         if (block.hash === consensus.possBlocks[i].block.hash
@@ -295,6 +297,7 @@ let consensus = {
     },
     _forceFinalize: (height) => {
         if (consensus.finalizing) return
+        if (!config.forceFinalize) return
         if (height !== chain.getLatestBlock()._id + 1) return
 
         let candidates = consensus.possBlocks.filter(pb => pb.block._id === height)

@@ -74,7 +74,7 @@ services:
     environment:
       - HTTP_PORT=3001
       - P2P_PORT=6001
-      - DB_NAME=avalon
+      - DB_NAME=avalon_miner1
       - DB_URL=mongodb://mongodb:27017
       - NODE_OWNER=miner1
       - NODE_OWNER_PUB=
@@ -106,7 +106,7 @@ services:
     environment:
       - HTTP_PORT=3001
       - P2P_PORT=6001
-      - DB_NAME=avalon
+      - DB_NAME=avalon_miner2
       - DB_URL=mongodb://mongodb:27017
       - NODE_OWNER=miner2
       - NODE_OWNER_PUB=
@@ -138,7 +138,7 @@ services:
     environment:
       - HTTP_PORT=3001
       - P2P_PORT=6001
-      - DB_NAME=avalon
+      - DB_NAME=avalon_miner3
       - DB_URL=mongodb://mongodb:27017
       - NODE_OWNER=miner3
       - NODE_OWNER_PUB=

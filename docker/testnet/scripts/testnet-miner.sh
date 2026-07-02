@@ -8,7 +8,7 @@ echo "=== Avalon Testnet - Miner: ${MINER_NAME} ==="
 # Wait for config file from setup container
 CONFIG_FILE="/avalon/config/testnet-keys/${MINER_NAME}.json"
 echo "Waiting for config at $CONFIG_FILE..."
-for i in $(seq 1 60); do
+for i in $(seq 1 600); do
     if [ -f "$CONFIG_FILE" ]; then
         echo "Config found"
         export NODE_OWNER_PUB=$(node -e "console.log(require('$CONFIG_FILE').pub)")

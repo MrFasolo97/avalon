@@ -1,5 +1,5 @@
 const GrowInt = require('growint')
-const CryptoJS = require('crypto-js')
+const crypto = require('crypto')
 const { EventEmitter } = require('events')
 const cloneDeep = require('clone-deep')
 const bson = require('bson')
@@ -125,7 +125,7 @@ let transaction = {
         let newTx = cloneDeep(tx)
         delete newTx.signature
         delete newTx.hash
-        let computedHash = CryptoJS.SHA256(JSON.stringify(newTx)).toString()
+        let computedHash = crypto.createHash('sha256').update(JSON.stringify(newTx)).digest('hex')
         if (computedHash !== tx.hash && (skiphash[tx.hash] !== computedHash || (!p2p.recovering && chain.getLatestBlock()._id > chain.restoredBlocks))) {
             cb(false, 'invalid tx hash does not match'); return
         }
@@ -133,7 +133,7 @@ let transaction = {
         // skipped during replays or rebuilds
         if (!p2p.recovering && chain.getLatestBlock()._id > chain.restoredBlocks && Transaction.transactions[tx.type].bsonValidate) {
             let bsonified = bson.deserialize(bson.serialize(newTx))
-            let bsonifiedHash = CryptoJS.SHA256(JSON.stringify(bsonified)).toString()
+            let bsonifiedHash = crypto.createHash('sha256').update(JSON.stringify(bsonified)).digest('hex')
             if (computedHash !== bsonifiedHash)
                 return cb(false, 'unserializable transaction, perhaps due to non-utf8 character?')
         }

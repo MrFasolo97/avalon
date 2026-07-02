@@ -1,5 +1,5 @@
 let config = require('./config.js').read(0)
-const CryptoJS = require('crypto-js')
+const crypto = require('crypto')
 const secp256k1 = require('secp256k1')
 const bs58 = require('base-x')(config.b58Alphabet)
 //const bs58 = require('bs58')
@@ -12,7 +12,7 @@ let sign = (privKey, sender, tx) => {
     let txString = JSON.stringify(tx)
 
     // hash the transaction
-    tx.hash = CryptoJS.SHA256(txString).toString()
+    tx.hash = crypto.createHash('sha256').update(txString).digest('hex')
 
     // decode the key
     let rawPriv = bs58.decode(privKey)

@@ -1,5 +1,5 @@
-const CryptoJS = require('crypto-js')
-const { randomBytes } = require('crypto')
+const crypto = require('crypto')
+const { randomBytes } = crypto
 const secp256k1 = require('secp256k1')
 const bs58 = require('base-x')(config.b58Alphabet)
 const series = require('run-series')
@@ -788,7 +788,7 @@ let chain = {
                 delete clonedBlock.hash
                 delete clonedBlock.signature
             }
-            return CryptoJS.SHA256(JSON.stringify(deleteExisting ? clonedBlock : block)).toString()
+            return crypto.createHash('sha256').update(JSON.stringify(deleteExisting ? clonedBlock : block)).digest('hex')
         }
     },
     calculateHashV1: (index, phash, timestamp, txs, miner, missedBy, distributed, burned) => {
@@ -797,7 +797,7 @@ let chain = {
         if (distributed) string += distributed
         if (burned) string += burned
 
-        return CryptoJS.SHA256(string).toString()
+        return crypto.createHash('sha256').update(string).digest('hex')
     },    
     getLatestBlock: () => {
         return chain.recentBlocks[chain.recentBlocks.length-1]

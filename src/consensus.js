@@ -1,5 +1,5 @@
 const secp256k1 = require('secp256k1')
-const CryptoJS = require('crypto-js')
+const crypto = require('crypto')
 const bs58 = require('base-x')(config.b58Alphabet)
 const cloneDeep = require('clone-deep')
 const consensus_need = 2
@@ -262,7 +262,7 @@ let consensus = {
             }       
     },
     signMessage: (message) => {
-        let hash = CryptoJS.SHA256(JSON.stringify(message)).toString()
+        let hash = crypto.createHash('sha256').update(JSON.stringify(message)).digest('hex')
         let signature = secp256k1.ecdsaSign(Buffer.from(hash, 'hex'), bs58.decode(process.env.NODE_OWNER_PRIV))
         signature = bs58.encode(signature.signature)
         message.s = {
@@ -359,7 +359,7 @@ let consensus = {
         let name = message.s.n
         let tmpMess = cloneDeep(message)
         delete tmpMess.s
-        let hash = CryptoJS.SHA256(JSON.stringify(tmpMess)).toString()
+        let hash = crypto.createHash('sha256').update(JSON.stringify(tmpMess)).digest('hex')
         let pub = consensus.getActiveLeaderKey(name)
         if (pub && secp256k1.ecdsaVerify(
             bs58.decode(sign),

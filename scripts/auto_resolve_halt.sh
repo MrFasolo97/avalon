@@ -96,9 +96,9 @@ EOF
     save_state "$new_state"
 }
 
-log()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
-err()  { log "ERROR: $*" >&2; }
-warn() { log "WARN: $*" >&2; }
+log()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >&2; }
+err()  { log "ERROR: $*"; }
+warn() { log "WARN: $*"; }
 info() { log "INFO: $*"; }
 
 api_get() {
@@ -633,7 +633,7 @@ do_auto_resolve() {
         exit 1
     fi
 
-    check_halt || true
+    check_halt
     local rc=$?
     if [ "$rc" = "2" ]; then
         exit 1

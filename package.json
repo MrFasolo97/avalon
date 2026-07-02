@@ -9,31 +9,31 @@
     "apidoc": "apidoc -i src/http -o apidoc"
   },
   "dependencies": {
-    "base-x": "^3.0.8",
-    "body-parser": "^1.15.2",
-    "bson": "^4.6.0",
+    "base-x": "^3.0.11",
+    "body-parser": "^1.20.5",
+    "bson": "^4.7.2",
     "clone-deep": "^4.0.1",
-    "commander": "^2.20.0",
-    "cors": "^2.8.5",
+    "commander": "^2.20.3",
+    "cors": "^2.8.6",
     "crypto-js": "^4.2.0",
     "decay": "^1.0.12",
-    "esbuild-loader": "^4.3.0",
-    "express": "^4.16.4",
+    "esbuild-loader": "^4.5.0",
+    "express": "^4.22.2",
     "growint": "^1.0.1",
     "javalon2": "^1.1.7",
-    "log4js": "^6.6.0",
-    "mongodb": "^4.2.2",
-    "node-fetch-commonjs": "^3.2.4",
-    "oembed-parser": "^1.2.2",
-    "open-graph-scraper": "^4.11.0",
-    "run-parallel": "^1.1.10",
+    "log4js": "^6.9.1",
+    "mongodb": "^4.17.2",
+    "node-fetch-commonjs": "^3.3.2",
+    "oembed-parser": "^1.5.2",
+    "open-graph-scraper": "^4.11.1",
+    "run-parallel": "^1.2.0",
     "run-series": "^1.1.9",
-    "secp256k1": "^4.0.2",
+    "secp256k1": "^4.0.4",
     "sha256-file": "^1.0.0",
     "sharp": "^0.32.6",
     "signale": "^1.4.0",
     "simple-youtube-api": "^5.2.1",
-    "ws": "^7.5.3"
+    "ws": "^7.5.11"
   },
   "engines": {
     "node": ">=4.3.2"
@@ -61,7 +61,7 @@
   },
   "devDependencies": {
     "apidoc": "^1.2.0",
-    "chance": "^1.0.18",
-    "eslint": "^8.5.0"
+    "chance": "^1.1.13",
+    "eslint": "^8.57.1"
   }
 }

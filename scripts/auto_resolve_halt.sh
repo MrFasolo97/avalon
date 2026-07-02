@@ -1,6 +1,11 @@
 #!/bin/bash
-# auto_resolve_halt.sh - Automatic blockchain halt resolution
+# auto_resolve_halt.sh - Automatic blockchain halt resolution (fallback)
 # Detects chain stalls and attempts recovery including block truncation.
+# This script is the LAST-RESORT fallback for the in-process force finalization
+# mechanism (src/consensus.js). Force finalization automatically resolves block
+# conflicts at the consensus level without data loss. This script handles
+# scenarios force finalization cannot: no leader producing blocks, node crashes,
+# MongoDB issues, or force finalization itself failing.
 # Usage: ./scripts/auto_resolve_halt.sh [options]
 
 set -euo pipefail
@@ -18,6 +23,78 @@ DB_NAME="${DB_NAME:-avalon}"
 DB_URL="${DB_URL:-mongodb://localhost:27017}"
 NODE_OWNER="${NODE_OWNER:-}"
 DRY_RUN="${DRY_RUN:-0}"
+
+# Truncation safety: prevent repeated truncation from wiping the chain
+HALT_STATE_DIR="${HALT_STATE_DIR:-${PROJECT_DIR}/.avalon_halt}"
+MAX_TOTAL_REMOVE="${MAX_TOTAL_REMOVE:-$((MAX_REMOVE_BLOCKS * 3))}"
+STATE_FILE="${HALT_STATE_DIR}/state.json"
+
+mkdir -p "$HALT_STATE_DIR"
+
+load_state() {
+    if [ -f "$STATE_FILE" ]; then
+        cat "$STATE_FILE"
+    else
+        echo '{"last_truncated_height":0,"total_removed":0,"last_truncation_ts":0}'
+    fi
+}
+
+save_state() {
+    echo "$1" > "$STATE_FILE"
+}
+
+check_truncation_safety() {
+    local current_height="$1"
+    local to_remove="$2"
+    local state
+    state=$(load_state)
+
+    local last_height
+    last_height=$(echo "$state" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).last_truncated_height||0))")
+    local total_removed
+    total_removed=$(echo "$state" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).total_removed||0))")
+
+    # Prevent removing blocks that were already truncated before (no forward progress)
+    if [ "$current_height" -le "$last_height" ]; then
+        err "Chain height ($current_height) has not progressed since last truncation ($last_height). Refusing to truncate again."
+        err "This prevents a loop that could wipe the entire chain."
+        err "Manual intervention required."
+        return 1
+    fi
+
+    # Enforce cumulative cap
+    local new_total=$(( total_removed + to_remove ))
+    if [ "$new_total" -gt "$MAX_TOTAL_REMOVE" ]; then
+        err "Cumulative blocks removed ($new_total) would exceed MAX_TOTAL_REMOVE ($MAX_TOTAL_REMOVE). Refusing to truncate."
+        err "Previously removed: $total_removed, attempting to remove: $to_remove more."
+        err "Increase MAX_TOTAL_REMOVE or reset ${STATE_FILE} to force."
+        return 1
+    fi
+
+    info "Truncation safety check passed (last_truncated=$last_height, total_removed=$total_removed, removing=$to_remove)"
+    return 0
+}
+
+update_state_after_truncation() {
+    local new_height="$1"
+    local removed="$2"
+    local state
+    state=$(load_state)
+
+    local total_removed
+    total_removed=$(echo "$state" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).total_removed||0))")
+
+    local new_state
+    new_state=$(cat <<EOF
+{
+    "last_truncated_height": $new_height,
+    "total_removed": $(( total_removed + removed )),
+    "last_truncation_ts": $(date +%s)
+}
+EOF
+)
+    save_state "$new_state"
+}
 
 log()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 err()  { log "ERROR: $*" >&2; }
@@ -378,16 +455,71 @@ try_mine_block() {
     return 1
 }
 
+wait_force_finalize() {
+    local cfg="$1"
+    local force_finalize
+    force_finalize=$(echo "$cfg" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const c=JSON.parse(d);console.log(c.forceFinalize===true?'true':'false')})" 2>/dev/null || echo "false")
+
+    if [ "$force_finalize" != "true" ]; then
+        info "skip wait: forceFinalize not enabled in config"
+        return 1
+    fi
+
+    local leaders block_time consensus_rounds
+    leaders=$(echo "$cfg" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).leaders||5))" 2>/dev/null || echo "5")
+    block_time=$(echo "$cfg" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).blockTime||3000))" 2>/dev/null || echo "3000")
+    consensus_rounds=$(echo "$cfg" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).consensusRounds||2))" 2>/dev/null || echo "2")
+
+    local wait_ms=$(( block_time * (leaders + consensus_rounds + 2) + 10000 ))
+    local wait_sec=$(( wait_ms / 1000 ))
+
+    info "forceFinalize is enabled — waiting up to ${wait_sec}s for automatic resolution (timeout=${block_time}ms * (leaders=${leaders} + rounds=${consensus_rounds} + 2) + 10s margin)"
+
+    local block_json before_height now deadline
+    block_json=$(get_latest_block) || true
+    before_height=$(echo "$block_json" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const b=JSON.parse(d);console.log(b._id)})" 2>/dev/null || echo "0")
+    now=$(date +%s)
+    deadline=$(( now + wait_sec ))
+
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+        sleep 5
+        if check_halt 2>/dev/null; then
+            info "Chain recovered during auto-wait (force finalization or normal consensus resumed)"
+            return 0
+        fi
+        local new_block_json
+        new_block_json=$(get_latest_block) || continue
+        local new_height
+        new_height=$(echo "$new_block_json" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const b=JSON.parse(d);console.log(b._id)})" 2>/dev/null || echo "0")
+        if [ "$new_height" -gt "$before_height" ]; then
+            info "Chain progressed to height $new_height (was $before_height) — halt resolved"
+            return 0
+        fi
+    done
+
+    warn "Force finalization did not resolve halt within ${wait_sec}s — proceeding to truncation"
+    return 1
+}
+
 # === Main Flow ===
 
 show_help() {
     cat <<'EOF'
-auto_resolve_halt.sh - Automatic blockchain halt resolution
+auto_resolve_halt.sh - Blockchain halt resolution (LAST-RESORT fallback)
 
-Detects chain stalls and attempts recovery:
+Detects chain stalls and attempts recovery. This is the external fallback
+for the in-process force finalization mechanism (src/consensus.js) which
+automatically resolves block collisions at the consensus level.
+
+Recovery steps:
   1. Calls /recover to try P2P sync
   2. Calls /mineBlock to force block production
-  3. Removes up to maxLeaders*2 blocks as last resort
+  3. Waits for in-process force finalization if enabled in config
+  4. Removes up to maxLeaders*2 blocks as last resort
+
+Note: If forceFinalize is enabled, the node auto-resolves block conflicts.
+      This script is only needed when no leader produces blocks at all,
+      when force finalization is not enabled, or when it fails.
 
 Usage:
   ./scripts/auto_resolve_halt.sh [options]
@@ -403,12 +535,19 @@ Environment variables:
   HTTP_PORT             HTTP API port (default: 3001)
   HTTP_HOST             HTTP API host (default: 0.0.0.0)
   HALT_TIMEOUT_SEC      Seconds before considering chain halted (default: 30)
-  MAX_REMOVE_BLOCKS     Max blocks to remove (default: 10 = maxLeaders*2)
+  MAX_REMOVE_BLOCKS     Max blocks to remove per truncation (default: 10)
+  MAX_TOTAL_REMOVE      Cumulative cap on total blocks removed (default: MAX_REMOVE_BLOCKS*3)
+  HALT_STATE_DIR        Directory for truncation state tracking (default: .avalon_halt)
   BLOCKS_DIR            BSON blocks directory (if using BSON storage)
   DB_NAME               MongoDB database name (default: avalon)
   DB_URL                MongoDB URL (default: mongodb://localhost:27017)
   NODE_OWNER            Your node owner name (for /mineBlock)
   DRY_RUN               Set to 1 for dry-run mode (default: 0)
+
+Config note: If node config has forceFinalize=true, the script will
+  automatically wait for the in-process force finalization timeout
+  (blockTime * (leaders + consensusRounds + 2) ms + 10s margin)
+  before proceeding to block truncation.
 EOF
 }
 
@@ -453,6 +592,22 @@ do_force_remove() {
     fi
 
     info "=== Force Remove Mode: removing $remove_count blocks ==="
+
+    # Get current height before stopping
+    local current_height=0
+    if is_node_running; then
+        local block_json
+        block_json=$(get_latest_block) || true
+        if [ -n "$block_json" ]; then
+            current_height=$(echo "$block_json" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const b=JSON.parse(d);console.log(b._id)})")
+        fi
+    fi
+
+    # Safety check
+    if [ "$current_height" -gt 0 ]; then
+        check_truncation_safety "$current_height" "$remove_count" || exit 1
+    fi
+
     stop_node
 
     local new_height=0
@@ -460,6 +615,10 @@ do_force_remove() {
         new_height=$(truncate_blocks_bson "$remove_count")
     else
         new_height=$(truncate_blocks_mongo "$remove_count")
+    fi
+
+    if [ -n "$new_height" ]; then
+        update_state_after_truncation "$new_height" "$remove_count"
     fi
 
     cleanup_mongodb_state "$new_height"
@@ -488,10 +647,22 @@ do_auto_resolve() {
     try_recover && exit 0
     try_mine_block && exit 0
 
-    # Still halted - get config to determine max blocks to remove
-    info "Step 3: Recovery failed, preparing block truncation..."
+    # Still halted — check if force finalization can resolve conflicts in-process
+    info "Step 3: /recover and /mineBlock failed — checking force finalization..."
 
     local cfg
+    cfg=$(get_config) || true
+    if [ -n "$cfg" ]; then
+        if wait_force_finalize "$cfg"; then
+            info "Halt resolved via force finalization"
+            exit 0
+        fi
+    else
+        warn "Cannot fetch config, skipping forceFinalize wait"
+    fi
+
+    info "Step 4: Force finalization did not resolve halt — preparing block truncation..."
+
     cfg=$(get_config) || {
         warn "Cannot fetch config, using defaults: leaders=5, blockTime=3000"
         local leaders=5
@@ -511,8 +682,9 @@ do_auto_resolve() {
     # Calculate halt duration in blocks
     local block_json
     block_json=$(get_latest_block) || true
-    local latest_ts=0
+    local latest_height=0 latest_ts=0
     if [ -n "$block_json" ]; then
+        latest_height=$(echo "$block_json" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const b=JSON.parse(d);console.log(b._id)})")
         latest_ts=$(echo "$block_json" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const b=JSON.parse(d);console.log(b.timestamp)})")
     fi
     local now_ms
@@ -526,6 +698,9 @@ do_auto_resolve() {
 
     info "Halt duration: ~${halt_blocks} blocks, removing ${to_remove}"
 
+    # Safety check: prevent repeated truncation from wiping the chain
+    check_truncation_safety "$latest_height" "$to_remove" || exit 1
+
     stop_node
 
     local new_height=0
@@ -533,6 +708,10 @@ do_auto_resolve() {
         new_height=$(truncate_blocks_bson "$to_remove")
     else
         new_height=$(truncate_blocks_mongo "$to_remove")
+    fi
+
+    if [ -n "$new_height" ]; then
+        update_state_after_truncation "$new_height" "$to_remove"
     fi
 
     cleanup_mongodb_state "$new_height"

@@ -174,8 +174,11 @@ let config = {
             preloadVt: 50, // 50% of vtPerBurn
             preloadBwGrowth: 2, // x2 more time of bwGrowth
             multisig: true,
+            // force finalize disabled in base config — enabled at hard fork height below
+            forceFinalize: false,
         },
         241600: {
+            forceFinalize: true,
             txLimits: {
                 28: 0
             }

@@ -1,6 +1,11 @@
 #!/bin/bash
-# auto_resolve_halt.sh - Automatic blockchain halt resolution
+# auto_resolve_halt.sh - Automatic blockchain halt resolution (fallback)
 # Detects chain stalls and attempts recovery including block truncation.
+# This script is the LAST-RESORT fallback for the in-process force finalization
+# mechanism (src/consensus.js). Force finalization automatically resolves block
+# conflicts at the consensus level without data loss. This script handles
+# scenarios force finalization cannot: no leader producing blocks, node crashes,
+# MongoDB issues, or force finalization itself failing.
 # Usage: ./scripts/auto_resolve_halt.sh [options]
 
 set -euo pipefail
@@ -450,16 +455,71 @@ try_mine_block() {
     return 1
 }
 
+wait_force_finalize() {
+    local cfg="$1"
+    local force_finalize
+    force_finalize=$(echo "$cfg" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const c=JSON.parse(d);console.log(c.forceFinalize===true?'true':'false')})" 2>/dev/null || echo "false")
+
+    if [ "$force_finalize" != "true" ]; then
+        info "skip wait: forceFinalize not enabled in config"
+        return 1
+    fi
+
+    local leaders block_time consensus_rounds
+    leaders=$(echo "$cfg" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).leaders||5))" 2>/dev/null || echo "5")
+    block_time=$(echo "$cfg" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).blockTime||3000))" 2>/dev/null || echo "3000")
+    consensus_rounds=$(echo "$cfg" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).consensusRounds||2))" 2>/dev/null || echo "2")
+
+    local wait_ms=$(( block_time * (leaders + consensus_rounds + 2) + 10000 ))
+    local wait_sec=$(( wait_ms / 1000 ))
+
+    info "forceFinalize is enabled — waiting up to ${wait_sec}s for automatic resolution (timeout=${block_time}ms * (leaders=${leaders} + rounds=${consensus_rounds} + 2) + 10s margin)"
+
+    local block_json before_height now deadline
+    block_json=$(get_latest_block) || true
+    before_height=$(echo "$block_json" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const b=JSON.parse(d);console.log(b._id)})" 2>/dev/null || echo "0")
+    now=$(date +%s)
+    deadline=$(( now + wait_sec ))
+
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+        sleep 5
+        if check_halt 2>/dev/null; then
+            info "Chain recovered during auto-wait (force finalization or normal consensus resumed)"
+            return 0
+        fi
+        local new_block_json
+        new_block_json=$(get_latest_block) || continue
+        local new_height
+        new_height=$(echo "$new_block_json" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const b=JSON.parse(d);console.log(b._id)})" 2>/dev/null || echo "0")
+        if [ "$new_height" -gt "$before_height" ]; then
+            info "Chain progressed to height $new_height (was $before_height) — halt resolved"
+            return 0
+        fi
+    done
+
+    warn "Force finalization did not resolve halt within ${wait_sec}s — proceeding to truncation"
+    return 1
+}
+
 # === Main Flow ===
 
 show_help() {
     cat <<'EOF'
-auto_resolve_halt.sh - Automatic blockchain halt resolution
+auto_resolve_halt.sh - Blockchain halt resolution (LAST-RESORT fallback)
 
-Detects chain stalls and attempts recovery:
+Detects chain stalls and attempts recovery. This is the external fallback
+for the in-process force finalization mechanism (src/consensus.js) which
+automatically resolves block collisions at the consensus level.
+
+Recovery steps:
   1. Calls /recover to try P2P sync
   2. Calls /mineBlock to force block production
-  3. Removes up to maxLeaders*2 blocks as last resort
+  3. Waits for in-process force finalization if enabled in config
+  4. Removes up to maxLeaders*2 blocks as last resort
+
+Note: If forceFinalize is enabled, the node auto-resolves block conflicts.
+      This script is only needed when no leader produces blocks at all,
+      when force finalization is not enabled, or when it fails.
 
 Usage:
   ./scripts/auto_resolve_halt.sh [options]
@@ -483,6 +543,11 @@ Environment variables:
   DB_URL                MongoDB URL (default: mongodb://localhost:27017)
   NODE_OWNER            Your node owner name (for /mineBlock)
   DRY_RUN               Set to 1 for dry-run mode (default: 0)
+
+Config note: If node config has forceFinalize=true, the script will
+  automatically wait for the in-process force finalization timeout
+  (blockTime * (leaders + consensusRounds + 2) ms + 10s margin)
+  before proceeding to block truncation.
 EOF
 }
 
@@ -582,10 +647,22 @@ do_auto_resolve() {
     try_recover && exit 0
     try_mine_block && exit 0
 
-    # Still halted - get config to determine max blocks to remove
-    info "Step 3: Recovery failed, preparing block truncation..."
+    # Still halted — check if force finalization can resolve conflicts in-process
+    info "Step 3: /recover and /mineBlock failed — checking force finalization..."
 
     local cfg
+    cfg=$(get_config) || true
+    if [ -n "$cfg" ]; then
+        if wait_force_finalize "$cfg"; then
+            info "Halt resolved via force finalization"
+            exit 0
+        fi
+    else
+        warn "Cannot fetch config, skipping forceFinalize wait"
+    fi
+
+    info "Step 4: Force finalization did not resolve halt — preparing block truncation..."
+
     cfg=$(get_config) || {
         warn "Cannot fetch config, using defaults: leaders=5, blockTime=3000"
         local leaders=5

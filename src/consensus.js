@@ -307,12 +307,6 @@ let consensus = {
         }
 
         candidates.sort((a, b) => {
-            let aVotes = 0, bVotes = 0
-            for (let r = 0; r < config.consensusRounds; r++) {
-                aVotes += Array.isArray(a[r]) ? a[r].length : 0
-                bVotes += Array.isArray(b[r]) ? b[r].length : 0
-            }
-            if (aVotes !== bVotes) return bVotes - aVotes
             if (a.block.timestamp !== b.block.timestamp)
                 return a.block.timestamp - b.block.timestamp
             return a.block.hash < b.block.hash ? -1 : 1
@@ -325,7 +319,7 @@ let consensus = {
                 c.block.miner,
                 c.block._id + '#' + c.block.hash.substr(0, 8),
                 c.block.timestamp,
-                (Array.isArray(c[config.consensusRounds - 1]) ? c[config.consensusRounds - 1].length : 0) + '/' + consensus.activeLeaders().length + ' confirmations'
+                c.block.hash.substr(0, 8)
             ])
             logr.info('Block collision timeout at height ' + height + ', forced selection:', details)
         }
@@ -338,6 +332,7 @@ let consensus = {
             if (err) {
                 logr.error('Force finalize failed for ' + height + '#' + winner.block.hash.substr(0, 8), err)
                 consensus.finalizing = false
+                consensus.possBlocks = consensus.possBlocks.filter(pb => pb.block.hash !== winner.block.hash)
                 candidates.shift()
                 if (candidates.length > 0) {
                     logr.warn('Trying next candidate for height ' + height)

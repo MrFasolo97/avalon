@@ -202,12 +202,12 @@ truncate_blocks_bson() {
     info "Truncating BSON storage: removing $remove_count blocks"
 
     local output new_height
-    output=$(node -e '
+    output=$(IDX_PATH="$idx_path" BSON_PATH="$bson_path" REMOVE_COUNT="$remove_count" DRY_RUN="$DRY_RUN" node -e '
     const fs = require("fs");
-    const idxPath = "'"$idx_path"'";
-    const bsonPath = "'"$bson_path"'";
-    const remove = '"$remove_count"';
-    const isDryRun = "'"$DRY_RUN"'" === "1";
+    const idxPath = process.env.IDX_PATH;
+    const bsonPath = process.env.BSON_PATH;
+    const remove = parseInt(process.env.REMOVE_COUNT, 10);
+    const isDryRun = process.env.DRY_RUN === "1";
 
     if (!fs.existsSync(idxPath)) { console.error("Index not found:", idxPath); process.exit(1); }
     if (!fs.existsSync(bsonPath)) { console.error("BSON not found:", bsonPath); process.exit(1); }

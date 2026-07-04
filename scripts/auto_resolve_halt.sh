@@ -297,7 +297,8 @@ truncate_blocks_mongo() {
             quit(1);
         }
         const oldHeight = lastBlock._id;
-        const newHeight = oldHeight - $remove_count;
+        const remove = parseInt(\"$remove_count\", 10);
+        const newHeight = oldHeight - remove;
         if (newHeight < 0) {
             print('ERROR: Cannot remove $remove_count blocks, only have ' + (oldHeight+1));
             quit(1);

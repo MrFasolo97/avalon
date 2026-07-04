@@ -69,14 +69,19 @@ notifications = {
                 for (let y = 0; y < words[i].length; y++) 
                     if (config.allowedUsernameChars.indexOf(words[i][y]) === -1) {
                         if (y > 0) {
-                            notif = {
-                                u: words[i].substring(0,y),
-                                tx: tx,
-                                ts: ts
-                            }
-                            delete notif.tx.data.json
-                            db.collection('notifications').insertOne(notif, function(err) {
-                                if (err) throw err
+                            let candidate = words[i].substring(0,y)
+                            db.collection('accounts').findOne({name: candidate}, function(err, account) {
+                                if (!err && account) {
+                                    let mNotif = {
+                                        u: candidate,
+                                        tx: tx,
+                                        ts: ts
+                                    }
+                                    delete mNotif.tx.data.json
+                                    db.collection('notifications').insertOne(mNotif, function(err2) {
+                                        if (err2) throw err2
+                                    })
+                                }
                             })
                             mentions++
                         }

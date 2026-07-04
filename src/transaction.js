@@ -16,20 +16,24 @@ const skiphash = {
 let transaction = {
     pool: [], // the pool holds temporary txs that havent been published on chain yet
     eventConfirmation: new EventEmitter(),
+    poolLock: false,
     addToPool: (txs) => {
-        if (transaction.isPoolFull())
+        if (transaction.poolLock || transaction.isPoolFull())
             return
-
-        for (let y = 0; y < txs.length; y++) {
-            let exists = false
-            for (let i = 0; i < transaction.pool.length; i++)
-                if (transaction.pool[i].hash === txs[y].hash)
-                    exists = true
-            
-            if (!exists)
-                transaction.pool.push(txs[y])
+        transaction.poolLock = true
+        try {
+            for (let y = 0; y < txs.length; y++) {
+                let exists = false
+                for (let i = 0; i < transaction.pool.length; i++)
+                    if (transaction.pool[i].hash === txs[y].hash)
+                        exists = true
+                
+                if (!exists)
+                    transaction.pool.push(txs[y])
+            }
+        } finally {
+            transaction.poolLock = false
         }
-        
     },
     isPoolFull: () => {
         if (transaction.pool.length >= max_mempool) {
@@ -39,19 +43,29 @@ let transaction = {
         return false
     },
     removeFromPool: (txs) => {
-        for (let y = 0; y < txs.length; y++)
-            for (let i = 0; i < transaction.pool.length; i++)
-                if (transaction.pool[i].hash === txs[y].hash) {
-                    transaction.pool.splice(i, 1)
-                    break
-                }
+        if (transaction.poolLock) return
+        transaction.poolLock = true
+        try {
+            for (let y = 0; y < txs.length; y++)
+                for (let i = transaction.pool.length - 1; i >= 0; i--)
+                    if (transaction.pool[i].hash === txs[y].hash) {
+                        transaction.pool.splice(i, 1)
+                        break
+                    }
+        } finally {
+            transaction.poolLock = false
+        }
     },
     cleanPool: () => {
-        for (let i = 0; i < transaction.pool.length; i++)
-            if (transaction.pool[i].ts + config.txExpirationTime < new Date().getTime()) {
-                transaction.pool.splice(i,1)
-                i--
-            }
+        if (transaction.poolLock) return
+        transaction.poolLock = true
+        try {
+            for (let i = transaction.pool.length - 1; i >= 0; i--)
+                if (transaction.pool[i].ts + config.txExpirationTime < new Date().getTime())
+                    transaction.pool.splice(i,1)
+        } finally {
+            transaction.poolLock = false
+        }
     },
     isInPool: (tx) => {
         let isInPool = false
@@ -126,6 +140,8 @@ let transaction = {
         delete newTx.signature
         delete newTx.hash
         let computedHash = crypto.createHash('sha256').update(JSON.stringify(newTx)).digest('hex')
+        if (skiphash[tx.hash] && skiphash[tx.hash] === computedHash && !(!p2p.recovering && chain.getLatestBlock()._id > chain.restoredBlocks))
+            logr.warn('SKIPHASH used for tx', tx.hash, tx)
         if (computedHash !== tx.hash && (skiphash[tx.hash] !== computedHash || (!p2p.recovering && chain.getLatestBlock()._id > chain.restoredBlocks))) {
             cb(false, 'invalid tx hash does not match'); return
         }

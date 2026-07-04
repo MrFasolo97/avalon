@@ -1,5 +1,6 @@
 const sharp = require('sharp')
 const fetch = require('node-fetch-commonjs')
+const { URL } = require('url')
 logr = require('../../logger.js')
 
 const QUALITY = 95
@@ -9,8 +10,31 @@ const AVATAR_WIDTH = {
     large: 512
 }
 const DEFAULT_AVATAR = 'https://steemitimages.com/DQmb2HNSGKN3pakguJ4ChCRjgkVuDN9WniFRPmrxoJ4sjR4'
-const CACHE_SIZE = parseInt(process.env.IMG_CACHE_SIZE) || -1
+const CACHE_SIZE = Math.max(parseInt(process.env.IMG_CACHE_SIZE) || 52428800, -1)
 const CACHE_TIME = parseInt(process.env.IMG_CACHE_TIME) || 900000 // 15 minutes default
+
+const PRIVATE_RANGES = [
+    /^https?:\/\/127\./,
+    /^https?:\/\/10\./,
+    /^https?:\/\/172\.(1[6-9]|2\d|3[01])\./,
+    /^https?:\/\/192\.168\./,
+    /^https?:\/\/0\./,
+    /^https?:\/\/169\.254\./,
+    /^https?:\/\/\[::1\]/,
+    /^https?:\/\/\[f[cd][0-9a-f]{2}:/
+]
+
+function isPrivateURL(urlStr) {
+    try {
+        const parsed = new URL(urlStr)
+        const host = parsed.hostname
+        if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '[::1]')
+            return true
+        return PRIVATE_RANGES.some(r => r.test(urlStr))
+    } catch {
+        return true
+    }
+}
 
 let imageCache = {
     avatar: {
@@ -134,13 +158,18 @@ module.exports = {
 
 async function fetchAndRespondImage(imageUrl,res,width,height,cacher) {
     try {
-        let imgFetch = await fetch(imageUrl)
+        if (isPrivateURL(imageUrl))
+            return res.status(400).send({error: 'invalid image url'})
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 5000)
+        let imgFetch = await fetch(imageUrl, { signal: controller.signal })
+        clearTimeout(timeout)
         let buffer = await imgFetch.buffer()
         let img = await resizeImage(buffer,width,height)
         imageResponse(res,img)
         await cacher(await img.toJSON())
     } catch (e) {
-        logr.debug(await e);
+        logr.debug(e);
         res.status(500).send({error: 'errored while retrieving avatar'})
     }
 }

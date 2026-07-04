@@ -47,6 +47,10 @@ module.exports = {
          * 
          * @apiSuccess {Object[]} contents List of ranked trending contents filtered
          */
+        function isValidFilterValue(val) {
+            return /^[a-zA-Z0-9_\-.\u00C0-\u024F]+$/.test(val)
+        }
+
         app.get('/trending/:filter', (req, res) => {
             let filterParam = req.params.filter
             let filter = filterParam.split(':')
@@ -92,6 +96,10 @@ module.exports = {
                     tags_ex.push(tags[i].substring(1, tags[i].length))
                 else 
                     tags_in.push(tags[i])
+
+            for (let v of tags_in.concat(tags_ex))
+                if (v !== 'all' && !isValidFilterValue(v))
+                    return res.status(400).send({error: 'invalid filter value'})
 
             let limit = filterMap['limit']
 
@@ -164,7 +172,7 @@ module.exports = {
                             if (contents[i].votes[y].vt < 0)
                                 contents[i].downs += Math.abs(contents[i].votes[y].vt)
                         }
-                        contents[i].score = rankings.types['hot'].score(contents[i].ups, contents[i].downs, new Date(contents[i].ts))
+                        contents[i].score = rankings.types['trending'].score(contents[i].ups, contents[i].downs, new Date(contents[i].ts))
                     }
                     contents = contents.sort(function(a,b) {
                         return b.score - a.score

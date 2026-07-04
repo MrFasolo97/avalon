@@ -73,6 +73,10 @@ module.exports = {
          * 
          * @apiSuccess {Array} posts Filtered list of root posts authored by followed accounts
          */
+        function isValidFilterValue(val) {
+            return /^[a-zA-Z0-9_\-.\u00C0-\u024F]+$/.test(val)
+        }
+
         app.get('/feed/:username/:filter', (req, res) => {
             let filterParam = req.params.filter
             let filter = filterParam.split(':')
@@ -139,6 +143,10 @@ module.exports = {
                     tags_ex.push(tags[i].substring(1, tags[i].length))
                 else 
                     tags_in.push(tags[i])
+
+            for (let v of authors_in.concat(authors_ex, tags_in, tags_ex))
+                if (v !== 'all' && !isValidFilterValue(v))
+                    return res.status(400).send({error: 'invalid filter value'})
             let limit = filterMap['limit']
 
             if(limit === -1 || isNaN(limit)) 

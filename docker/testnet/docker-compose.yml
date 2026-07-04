@@ -26,6 +26,7 @@ services:
       - "6101:6001"
     environment:
       - HTTP_PORT=3001
+      - HTTP_HOST=0.0.0.0
       - P2P_PORT=6001
       - DB_NAME=avalon
       - DB_URL=mongodb://mongodb:27017
@@ -73,6 +74,7 @@ services:
       - testnet_config:/avalon/config/testnet-keys
     environment:
       - HTTP_PORT=3001
+      - HTTP_HOST=0.0.0.0
       - P2P_PORT=6001
       - DB_NAME=avalon_miner1
       - DB_URL=mongodb://mongodb:27017
@@ -105,6 +107,7 @@ services:
       - testnet_config:/avalon/config/testnet-keys
     environment:
       - HTTP_PORT=3001
+      - HTTP_HOST=0.0.0.0
       - P2P_PORT=6001
       - DB_NAME=avalon_miner2
       - DB_URL=mongodb://mongodb:27017
@@ -137,6 +140,7 @@ services:
       - testnet_config:/avalon/config/testnet-keys
     environment:
       - HTTP_PORT=3001
+      - HTTP_HOST=0.0.0.0
       - P2P_PORT=6001
       - DB_NAME=avalon_miner3
       - DB_URL=mongodb://mongodb:27017

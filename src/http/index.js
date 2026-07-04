@@ -1,5 +1,5 @@
 const http_port = process.env.HTTP_PORT || 3001
-const http_host = process.env.HTTP_HOST || "0.0.0.0"
+const http_host = process.env.HTTP_HOST || "127.0.0.1"
 const express = require('express')
 const cors = require('cors')
 const bodyParser = require('body-parser')

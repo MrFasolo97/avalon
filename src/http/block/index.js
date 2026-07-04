@@ -22,6 +22,8 @@ module.exports = {
          */
         app.get('/block/:number', (req, res) => {
             let blockNumber = parseInt(req.params.number)
+            if (isNaN(blockNumber))
+                return res.status(400).send({error: 'invalid block number'})
             if (blocks.isOpen) {
                 let block = {}
                 try {

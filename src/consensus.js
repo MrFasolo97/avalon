@@ -295,10 +295,12 @@ let consensus = {
         if (consensus.forceFinalizeTimeout.unref)
             consensus.forceFinalizeTimeout.unref()
     },
-    _forceFinalize: (height) => {
+    _forceFinalize: (height, retryCount) => {
         if (consensus.finalizing) return
         if (!config.forceFinalize) return
         if (height !== chain.getLatestBlock()._id + 1) return
+
+        if (retryCount === undefined) retryCount = 0
 
         let candidates = consensus.possBlocks.filter(pb => pb.block._id === height)
         if (candidates.length === 0) {
@@ -324,20 +326,25 @@ let consensus = {
             logr.info('Block collision timeout at height ' + height + ', forced selection:', details)
         }
 
-        logr.warn('Force finalizing block ' + height + '#' + winner.block.hash.substr(0, 8) + ' by ' + winner.block.miner)
+        logr.warn('Force finalizing block ' + height + '#' + winner.block.hash.substr(0, 8) + ' by ' + winner.block.miner + ' — selected locally without consensus, fork risk if peers diverge')
 
         consensus.finalizing = true
 
         chain.validateAndAddBlock(winner.block, false, function(err) {
             if (err) {
                 logr.error('Force finalize failed for ' + height + '#' + winner.block.hash.substr(0, 8), err)
-                consensus.finalizing = false
                 consensus.possBlocks = consensus.possBlocks.filter(pb => pb.block.hash !== winner.block.hash)
                 candidates.shift()
-                if (candidates.length > 0) {
-                    logr.warn('Trying next candidate for height ' + height)
-                    consensus._forceFinalize(height)
+                if (candidates.length > 0 && retryCount < 3) {
+                    logr.warn('Trying next candidate for height ' + height + ' (retry ' + (retryCount + 1) + '/3)')
+                    consensus.finalizing = false
+                    setImmediate(() => consensus._forceFinalize(height, retryCount + 1))
+                    return
                 }
+                if (candidates.length > 0) {
+                    logr.fatal('Force finalize: retry limit exceeded for height ' + height + '. All candidates failed. Manual intervention required.')
+                }
+                consensus.finalizing = false
                 return
             }
 

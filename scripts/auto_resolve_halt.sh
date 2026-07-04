@@ -232,6 +232,11 @@ truncate_blocks_bson() {
     const truncPos = (BigInt(high) << 8n) + BigInt(low);
     const idxTruncSize = (newHeight + 1) * 8;
 
+    if (Number(truncPos) > bsonSize || truncPos < 0n) {
+        console.error("Invalid truncation position: " + truncPos + " (BSON file size: " + bsonSize + " bytes)");
+        process.exit(1);
+    }
+
     console.log("KEEPING blocks 0 - " + newHeight + " (" + (newHeight+1) + " total)");
     console.log("  index: " + idxSize + " -> " + idxTruncSize + " bytes");
     console.log("  bson:  " + bsonSize + " -> " + truncPos + " bytes");

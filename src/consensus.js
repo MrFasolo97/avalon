@@ -341,9 +341,8 @@ let consensus = {
                     setImmediate(() => consensus._forceFinalize(height, retryCount + 1))
                     return
                 }
-                if (candidates.length > 0) {
+                if (candidates.length > 0)
                     logr.fatal('Force finalize: retry limit exceeded for height ' + height + '. All candidates failed. Manual intervention required.')
-                }
                 consensus.finalizing = false
                 return
             }

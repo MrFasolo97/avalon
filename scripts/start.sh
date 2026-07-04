@@ -51,9 +51,9 @@ export PEERS=
 export MAX_PEERS=20
 
 # your user and keys (only useful for active node owners)
+# export NODE_OWNER_PRIV=<your-private-key>  # SET THIS!
 export NODE_OWNER=dtube
 export NODE_OWNER_PUB=dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz
-export NODE_OWNER_PRIV=34EpMEDFJwKbxaF7FhhLyEe3AhpM4dwHMLVfs4JyRto5
 
 # Memory limit for in-memory rebuild (in MB)
 export NODE_OPTIONS=--max_old_space_size=8192

@@ -305,7 +305,7 @@ let eco = {
         // otherwise we proportionally reduce based on recent votes weight
         // and how much is available for printing
         else
-            thNewCoins = stats.avail * Math.abs((vt) / stats.votes)
+            thNewCoins = Math.min(stats.avail * Math.abs((vt) / stats.votes), Number.MAX_SAFE_INTEGER)
 
         // rounding down
         thNewCoins = eco.floor(thNewCoins)

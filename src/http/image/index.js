@@ -140,7 +140,7 @@ async function fetchAndRespondImage(imageUrl,res,width,height,cacher) {
         imageResponse(res,img)
         await cacher(await img.toJSON())
     } catch (e) {
-        logr.debug(await e);
+        logr.debug(e);
         res.status(500).send({error: 'errored while retrieving avatar'})
     }
 }

@@ -336,7 +336,7 @@ let consensus = {
                 candidates.shift()
                 if (candidates.length > 0) {
                     logr.warn('Trying next candidate for height ' + height)
-                    consensus._forceFinalize(height)
+                    setImmediate(() => consensus._forceFinalize(height))
                 }
                 return
             }

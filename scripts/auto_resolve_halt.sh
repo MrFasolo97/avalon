@@ -285,21 +285,22 @@ truncate_blocks_mongo() {
 
     local output new_height
 
-    output=$(run_mongo "
+    output=$(REMOVE_COUNT="$remove_count" DRY_RUN="$DRY_RUN" run_mongo "
         const lastBlock = db.blocks.find().sort({_id:-1}).limit(1).next();
         if (!lastBlock) {
             print('ERROR: No blocks found');
             quit(1);
         }
         const oldHeight = lastBlock._id;
-        const newHeight = oldHeight - $remove_count;
+        const remove = parseInt(\$process.env.REMOVE_COUNT, 10);
+        const newHeight = oldHeight - remove;
         if (newHeight < 0) {
-            print('ERROR: Cannot remove $remove_count blocks, only have ' + (oldHeight+1));
+            print('ERROR: Cannot remove ' + remove + ' blocks, only have ' + (oldHeight+1));
             quit(1);
         }
-        const isDryRun = \"$DRY_RUN\" === \"1\";
+        const isDryRun = \$process.env.DRY_RUN === \"1\";
         if (isDryRun) {
-            print('[DRY-RUN] Would delete ' + $remove_count + ' blocks, keeping 0 - ' + newHeight);
+            print('[DRY-RUN] Would delete ' + remove + ' blocks, keeping 0 - ' + newHeight);
         } else {
             const result = db.blocks.deleteMany({_id: {\$gt: newHeight}});
             print('Deleted ' + result.deletedCount + ' blocks');

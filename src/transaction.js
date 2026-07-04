@@ -16,10 +16,23 @@ const skiphash = {
 let transaction = {
     pool: [], // the pool holds temporary txs that havent been published on chain yet
     eventConfirmation: new EventEmitter(),
+    poolQueue: [],
     poolLock: false,
+    processPoolQueue: () => {
+        if (transaction.poolQueue.length === 0) return
+        if (transaction.poolLock) return
+        const item = transaction.poolQueue.shift()
+        transaction.addToPool(item)
+    },
     addToPool: (txs) => {
-        if (transaction.poolLock || transaction.isPoolFull())
+        if (transaction.poolLock) {
+            transaction.poolQueue.push(txs)
             return
+        }
+        if (transaction.isPoolFull()) {
+            transaction.poolQueue = []
+            return
+        }
         transaction.poolLock = true
         try {
             for (let y = 0; y < txs.length; y++) {
@@ -33,6 +46,7 @@ let transaction = {
             }
         } finally {
             transaction.poolLock = false
+            setImmediate(() => transaction.processPoolQueue())
         }
     },
     isPoolFull: () => {
@@ -173,7 +187,7 @@ let transaction = {
             }
 
             // checking if the user has enough bandwidth
-            if (JSON.stringify(tx).length > newBw.v && tx.sender !== config.masterName) {
+            if (JSON.stringify(tx).length > newBw.v) {
                 cb(false, 'need more bandwidth ('+(JSON.stringify(tx).length-newBw.v)+' B)'); return
             }
 

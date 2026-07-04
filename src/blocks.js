@@ -94,7 +94,7 @@ let blocks = {
     },
     touch: () => {
         let bsonPath = blocks.dataDir+'/blocks.bson'
-        let indexPath = blocks.dataDir+'/blocks.bson'
+        let indexPath = blocks.dataDir+'/blocks.index'
         if (!fs.existsSync(bsonPath))
             fs.closeSync(fs.openSync(bsonPath,'w'))
         if (!fs.existsSync(indexPath))
@@ -158,7 +158,11 @@ let blocks = {
         let docSize = docSizeBuf.readInt32LE(0)
         let docBuf = Buffer.alloc(docSize)
         fs.readSync(blocks.fd,docBuf,{offset: 0, position: docPosition, length: docSize})
-        return BSON.deserialize(docBuf)
+        try {
+            return BSON.deserialize(docBuf)
+        } catch (e) {
+            throw new Error('Failed to deserialize block #' + blockNum + ': ' + e.message)
+        }
     },
     readRange: (start,end) => {
         if (!blocks.isOpen)
@@ -193,7 +197,11 @@ let blocks = {
         let docBuf = Buffer.alloc(rangeSize)
         let docArr = []
         fs.readSync(blocks.fd,docBuf,{offset: 0, position: docPosition, length: rangeSize})
-        BSON.deserializeStream(docBuf,0,end-start+1,docArr,0)
+        try {
+            BSON.deserializeStream(docBuf,0,end-start+1,docArr,0)
+        } catch (e) {
+            throw new Error('Failed to deserialize blocks ' + start + '-' + end + ': ' + e.message)
+        }
         return docArr
     },
     fillInMemoryBlocks: (headBlock = blocks.height+1) => {

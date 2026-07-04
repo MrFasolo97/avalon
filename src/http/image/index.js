@@ -1,6 +1,8 @@
 const sharp = require('sharp')
 const fetch = require('node-fetch-commonjs')
 const { URL } = require('url')
+const dns = require('dns')
+const net = require('net')
 logr = require('../../logger.js')
 
 const QUALITY = 95
@@ -13,24 +15,38 @@ const DEFAULT_AVATAR = 'https://steemitimages.com/DQmb2HNSGKN3pakguJ4ChCRjgkVuDN
 const CACHE_SIZE = Math.max(parseInt(process.env.IMG_CACHE_SIZE) || 52428800, -1)
 const CACHE_TIME = parseInt(process.env.IMG_CACHE_TIME) || 900000 // 15 minutes default
 
-const PRIVATE_RANGES = [
-    /^https?:\/\/127\./,
-    /^https?:\/\/10\./,
-    /^https?:\/\/172\.(1[6-9]|2\d|3[01])\./,
-    /^https?:\/\/192\.168\./,
-    /^https?:\/\/0\./,
-    /^https?:\/\/169\.254\./,
-    /^https?:\/\/\[::1\]/,
-    /^https?:\/\/\[f[cd][0-9a-f]{2}:/
-]
-
 function isPrivateURL(urlStr) {
     try {
         const parsed = new URL(urlStr)
         const host = parsed.hostname
         if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '[::1]')
             return true
-        return PRIVATE_RANGES.some(r => r.test(urlStr))
+
+        let ip
+        if (net.isIP(host)) {
+            ip = host
+        } else {
+            ip = dns.lookupSync(host, {family: 4})
+        }
+        if (!ip) return false
+
+        if (net.isIPv4(ip)) {
+            const parts = ip.split('.').map(Number)
+            if (parts[0] === 10) return true
+            if (parts[0] === 127) return true
+            if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true
+            if (parts[0] === 192 && parts[1] === 168) return true
+            if (parts[0] === 169 && parts[1] === 254) return true
+            if (parts[0] === 0) return true
+        }
+
+        if (net.isIPv6(ip)) {
+            const lower = ip.toLowerCase()
+            if (lower === '::1' || lower === '0:0:0:0:0:0:0:1') return true
+            if (lower.startsWith('fd') || lower.startsWith('fc')) return true
+            if (lower.startsWith('fe80')) return true
+        }
+        return false
     } catch {
         return true
     }
@@ -162,7 +178,13 @@ async function fetchAndRespondImage(imageUrl,res,width,height,cacher) {
             return res.status(400).send({error: 'invalid image url'})
         const controller = new AbortController()
         const timeout = setTimeout(() => controller.abort(), 5000)
-        let imgFetch = await fetch(imageUrl, { signal: controller.signal })
+        let imgFetch = await fetch(imageUrl, { signal: controller.signal, redirect: 'manual' })
+        if (imgFetch.status >= 300 && imgFetch.status < 400) {
+            const location = imgFetch.headers.get('location')
+            if (location && isPrivateURL(location))
+                return res.status(400).send({error: 'invalid image url'})
+            return res.status(400).send({error: 'redirect not allowed'})
+        }
         clearTimeout(timeout)
         let buffer = await imgFetch.buffer()
         let img = await resizeImage(buffer,width,height)
@@ -187,7 +209,7 @@ function resizeImage(buf,width,height) {
 }
 
 function imageResponse(res,img) {
-    res.setHeader('Cache-Control', 'public, max-age=3600000')
+    res.setHeader('Cache-Control', 'no-store')
     res.setHeader('Content-Type', 'image/png')
     res.send(img)
 }

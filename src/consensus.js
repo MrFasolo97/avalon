@@ -59,6 +59,10 @@ let consensus = {
         return actives
     },
     tryNextStep: () => {
+        if (consensus.finalizing) {
+            setImmediate(() => consensus.tryNextStep())
+            return
+        }
         let consensus_size = consensus.activeLeaders().length
         let threshold = consensus_size * consensus_threshold
 

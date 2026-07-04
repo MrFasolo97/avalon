@@ -297,13 +297,13 @@ truncate_blocks_mongo() {
             quit(1);
         }
         const oldHeight = lastBlock._id;
-        const remove = parseInt(\$process.env.REMOVE_COUNT, 10);
+        const remove = parseInt(\"$remove_count\", 10);
         const newHeight = oldHeight - remove;
         if (newHeight < 0) {
             print('ERROR: Cannot remove ' + remove + ' blocks, only have ' + (oldHeight+1));
             quit(1);
         }
-        const isDryRun = \$process.env.DRY_RUN === \"1\";
+        const isDryRun = \"$DRY_RUN\" === \"1\";
         if (isDryRun) {
             print('[DRY-RUN] Would delete ' + remove + ' blocks, keeping 0 - ' + newHeight);
         } else {

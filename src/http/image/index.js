@@ -57,6 +57,26 @@ async function isPrivateURL(urlStr) {
     }
 }
 
+async function resolveAndPin(host) {
+    if (net.isIP(host)) return host
+    try {
+        const lookup = await dns.lookup(host, {family: 4})
+        return lookup.address
+    } catch {
+        return null
+    }
+}
+
+async function checkRebinding(host, pinnedIp) {
+    if (net.isIP(host)) return pinnedIp === host
+    try {
+        const lookup = await dns.lookup(host, {family: 4})
+        return lookup.address === pinnedIp
+    } catch {
+        return false
+    }
+}
+
 let imageCache = {
     avatar: {
         small: {},
@@ -181,6 +201,14 @@ async function fetchAndRespondImage(imageUrl,res,width,height,cacher) {
     try {
         if (await isPrivateURL(imageUrl))
             return res.status(400).send({error: 'invalid image url'})
+        const parsed = new URL(imageUrl)
+        const pinnedIp = await resolveAndPin(parsed.hostname)
+        if (!pinnedIp)
+            return res.status(400).send({error: 'could not resolve host'})
+        if (await isPrivateURL('http://' + pinnedIp))
+            return res.status(400).send({error: 'invalid image url'})
+        if (!(await checkRebinding(parsed.hostname, pinnedIp)))
+            return res.status(400).send({error: 'dns rebinding detected'})
         const controller = new AbortController()
         const timeout = setTimeout(() => controller.abort(), 5000)
         let imgFetch = await fetch(imageUrl, { signal: controller.signal, redirect: 'manual' })
@@ -189,6 +217,10 @@ async function fetchAndRespondImage(imageUrl,res,width,height,cacher) {
             if (location) {
                 if (await isPrivateURL(location))
                     return res.status(400).send({error: 'invalid image url'})
+                const locParsed = new URL(location)
+                const locPinned = await resolveAndPin(locParsed.hostname)
+                if (!locPinned || !(await checkRebinding(locParsed.hostname, locPinned)))
+                    return res.status(400).send({error: 'dns rebinding detected on redirect'})
                 clearTimeout(timeout)
                 return fetchAndRespondImage(location, res, width, height, cacher)
             }

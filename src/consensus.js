@@ -50,6 +50,8 @@ let consensus = {
         // and out of consensus 2*config.leaders blocks after his last scheduled block
         let blockNum = chain.getLatestBlock()._id+1
         let actives = []
+        if (!chain.schedule.shuffle || chain.schedule.shuffle.length === 0)
+            return actives
         let currentLeader = chain.schedule.shuffle[(blockNum-1)%config.leaders].name
         if (consensus.getActiveLeaderKey(currentLeader))
             actives.push(currentLeader)
@@ -63,11 +65,13 @@ let consensus = {
         // logr.cons('Leaders: ' + actives.join(','))
         return actives
     },
+    tryNextStepBusy: false,
     tryNextStep: () => {
-        if (consensus.finalizing) {
+        if (consensus.finalizing || consensus.tryNextStepBusy) {
             setImmediate(() => consensus.tryNextStep())
             return
         }
+        consensus.tryNextStepBusy = true
         let consensus_size = consensus.activeLeaders().length
         let threshold = consensus_size * consensus_threshold
 
@@ -147,6 +151,7 @@ let consensus = {
                 if (possBlock[y].length > threshold)
                     consensus.round(y+1, possBlock.block) 
         }
+        consensus.tryNextStepBusy = false
     },
     round: (round, block, cb) => {
         // ignore for different block height
@@ -338,6 +343,11 @@ let consensus = {
             latestBlock.timestamp + config.blockTime * (config.leaders + config.consensusRounds + 2) - Date.now()
         )
 
+        if (fromNow > 86400000) {
+            logr.warn('Force finalize scheduled too far in the future (' + fromNow + 'ms) for height ' + expectedHeight + ', skipping')
+            return
+        }
+
         logr.debug('Force finalize scheduled in ' + fromNow + 'ms for height ' + expectedHeight)
 
         consensus.forceFinalizeTimeout = setTimeout(() => {
@@ -348,7 +358,10 @@ let consensus = {
             consensus.forceFinalizeTimeout.unref()
     },
     _getQuorumThreshold: () => {
-        return Math.ceil(consensus.activeLeaders().length * 2 / 3)
+        // Use fixed config.leaders (total elected set) rather than dynamic
+        // activeLeaders() to prevent Sybil/leader-dropping attacks from
+        // lowering the quorum threshold below a safe level.
+        return Math.ceil(config.leaders * 2 / 3)
     },
     _forceFinalize: (height, candidateRetry) => {
         if (consensus.finalizing) return
@@ -356,6 +369,11 @@ let consensus = {
         if (height !== chain.getLatestBlock()._id + 1) return
 
         if (candidateRetry === undefined) candidateRetry = 0
+        if (candidateRetry >= 3) {
+            logr.fatal('Force finalize: retry limit exceeded for height ' + height)
+            consensus.finalizing = false
+            return
+        }
 
         let candidates = consensus.possBlocks.filter(pb => pb.block._id === height)
         if (candidates.length === 0) {

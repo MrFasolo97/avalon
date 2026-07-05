@@ -300,7 +300,7 @@ let chain = {
             if (rebuilding)
                 output += '/' + chain.restoredBlocks
             else
-                output += '  by '+block.miner
+                output += '  by '+(block.miner||'').replace(/[\x00-\x1f]/g, '')
 
             output += '  '+chain.nextOutput.txs+' tx'
             if (chain.nextOutput.txs>1)

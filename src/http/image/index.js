@@ -1,7 +1,7 @@
 const sharp = require('sharp')
 const fetch = require('node-fetch-commonjs')
 const { URL } = require('url')
-const dns = require('dns')
+const dns = require('dns').promises
 const net = require('net')
 logr = require('../../logger.js')
 
@@ -15,7 +15,7 @@ const DEFAULT_AVATAR = 'https://steemitimages.com/DQmb2HNSGKN3pakguJ4ChCRjgkVuDN
 const CACHE_SIZE = Math.max(parseInt(process.env.IMG_CACHE_SIZE) || 52428800, -1)
 const CACHE_TIME = parseInt(process.env.IMG_CACHE_TIME) || 900000 // 15 minutes default
 
-function isPrivateURL(urlStr) {
+async function isPrivateURL(urlStr) {
     try {
         const parsed = new URL(urlStr)
         const host = parsed.hostname
@@ -26,7 +26,12 @@ function isPrivateURL(urlStr) {
         if (net.isIP(host)) {
             ip = host
         } else {
-            ip = dns.lookupSync(host, {family: 4})
+            try {
+                const lookup = await dns.lookup(host, {family: 4})
+                ip = lookup.address
+            } catch {
+                return true
+            }
         }
         if (!ip) return false
 
@@ -174,15 +179,19 @@ module.exports = {
 
 async function fetchAndRespondImage(imageUrl,res,width,height,cacher) {
     try {
-        if (isPrivateURL(imageUrl))
+        if (await isPrivateURL(imageUrl))
             return res.status(400).send({error: 'invalid image url'})
         const controller = new AbortController()
         const timeout = setTimeout(() => controller.abort(), 5000)
         let imgFetch = await fetch(imageUrl, { signal: controller.signal, redirect: 'manual' })
         if (imgFetch.status >= 300 && imgFetch.status < 400) {
             const location = imgFetch.headers.get('location')
-            if (location && isPrivateURL(location))
-                return res.status(400).send({error: 'invalid image url'})
+            if (location) {
+                if (await isPrivateURL(location))
+                    return res.status(400).send({error: 'invalid image url'})
+                clearTimeout(timeout)
+                return fetchAndRespondImage(location, res, width, height, cacher)
+            }
             return res.status(400).send({error: 'redirect not allowed'})
         }
         clearTimeout(timeout)

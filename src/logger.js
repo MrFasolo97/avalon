@@ -17,11 +17,12 @@ log4js.configure({
             maxLogSize: 10485760,
             backups: 3,
             compress: true
-        }
+        },
+        buffer: { type: './logAppender' }
     },
-    categories: { 
-        default: { 
-            appenders: ['out', 'file'],
+    categories: {
+        default: {
+            appenders: ['out', 'file', 'buffer'],
             level: process.env.LOG_LEVEL || 'info'
         }
     }

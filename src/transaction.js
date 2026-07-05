@@ -20,13 +20,11 @@ let transaction = {
     poolLock: false,
     maxPoolQueue: 1000,
     processPoolQueue: () => {
-        if (transaction.poolQueue.length === 0) return
-        if (transaction.poolLock) return
-        const item = transaction.poolQueue.shift()
-        transaction.addToPool(item)
+        if (transaction.poolQueue.length === 0 || transaction.poolLock) return
+        transaction.addToPool(null, true)
     },
-    addToPool: (txs) => {
-        if (transaction.poolLock) {
+    addToPool: (txs, fromQueue) => {
+        if (!fromQueue && transaction.poolLock) {
             if (transaction.poolQueue.length >= transaction.maxPoolQueue) {
                 transaction.poolQueue.shift()
                 logr.warn('Pool queue overflow, evicting oldest')
@@ -49,9 +47,20 @@ let transaction = {
                 if (!exists)
                     transaction.pool.push(txs[y])
             }
+            // drain queue while we hold the lock
+            while (transaction.poolQueue.length > 0) {
+                const qItem = transaction.poolQueue.shift()
+                for (let y = 0; y < qItem.length; y++) {
+                    let exists = false
+                    for (let i = 0; i < transaction.pool.length; i++)
+                        if (transaction.pool[i].hash === qItem[y].hash)
+                            exists = true
+                    if (!exists)
+                        transaction.pool.push(qItem[y])
+                }
+            }
         } finally {
             transaction.poolLock = false
-            setImmediate(() => transaction.processPoolQueue())
         }
     },
     isPoolFull: () => {
@@ -62,7 +71,12 @@ let transaction = {
         return false
     },
     removeFromPool: (txs) => {
-        if (transaction.poolLock) return
+        if (transaction.poolLock) {
+            transaction.removalQueue = transaction.removalQueue || []
+            for (let y = 0; y < txs.length; y++)
+                transaction.removalQueue.push(txs[y])
+            return
+        }
         transaction.poolLock = true
         try {
             for (let y = 0; y < txs.length; y++)
@@ -71,17 +85,39 @@ let transaction = {
                         transaction.pool.splice(i, 1)
                         break
                     }
+            // drain pending removals while we hold the lock
+            if (transaction.removalQueue)
+                for (let y = 0; y < transaction.removalQueue.length; y++)
+                    for (let i = transaction.pool.length - 1; i >= 0; i--)
+                        if (transaction.pool[i].hash === transaction.removalQueue[y].hash) {
+                            transaction.pool.splice(i, 1)
+                            break
+                        }
+            transaction.removalQueue = []
         } finally {
             transaction.poolLock = false
         }
     },
     cleanPool: () => {
-        if (transaction.poolLock) return
+        if (transaction.poolLock) {
+            transaction.cleanPoolPending = true
+            return
+        }
         transaction.poolLock = true
         try {
             for (let i = transaction.pool.length - 1; i >= 0; i--)
                 if (transaction.pool[i].ts + config.txExpirationTime < new Date().getTime())
                     transaction.pool.splice(i,1)
+            // also drain removal queue if any
+            if (transaction.removalQueue)
+                for (let y = 0; y < transaction.removalQueue.length; y++)
+                    for (let i = transaction.pool.length - 1; i >= 0; i--)
+                        if (transaction.pool[i].hash === transaction.removalQueue[y].hash) {
+                            transaction.pool.splice(i, 1)
+                            break
+                        }
+            transaction.removalQueue = []
+            transaction.cleanPoolPending = false
         } finally {
             transaction.poolLock = false
         }

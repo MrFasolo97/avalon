@@ -622,7 +622,6 @@ let chain = {
                             burned: burned
                         })
                     })
-                i++
             })
         executions.push((callback) => chain.applyHardfork(block,callback))
         

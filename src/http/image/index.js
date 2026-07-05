@@ -209,9 +209,12 @@ async function fetchAndRespondImage(imageUrl,res,width,height,cacher) {
             return res.status(400).send({error: 'invalid image url'})
         if (!(await checkRebinding(parsed.hostname, pinnedIp)))
             return res.status(400).send({error: 'dns rebinding detected'})
+        // Use pinned IP for the actual fetch to prevent DNS rebinding TOCTOU
+        parsed.hostname = pinnedIp
+        const fetchUrl = parsed.toString()
         const controller = new AbortController()
         const timeout = setTimeout(() => controller.abort(), 5000)
-        let imgFetch = await fetch(imageUrl, { signal: controller.signal, redirect: 'manual' })
+        let imgFetch = await fetch(fetchUrl, { signal: controller.signal, redirect: 'manual' })
         if (imgFetch.status >= 300 && imgFetch.status < 400) {
             const location = imgFetch.headers.get('location')
             if (location) {

@@ -86,7 +86,7 @@ let consensus = {
         // todo: add leader slashing for double production and other possible malicious behaviour
         let possBlocksById = {}
         if (consensus.possBlocks.length > 1) {
-            for (let i in consensus.possBlocks) {
+            for (let i = 0; i < consensus.possBlocks.length; i++) {
                 if (possBlocksById[consensus.possBlocks[i].block._id])
                     possBlocksById[consensus.possBlocks[i].block._id].push(consensus.possBlocks[i])
                 else
@@ -115,16 +115,15 @@ let consensus = {
                 // log which block got applied if collision exists
                 if (possBlocksById[possBlock.block._id] && possBlocksById[possBlock.block._id].length > 1) {
                     let collisions = []
-                    for (let j in possBlocksById[possBlock.block._id])
-                        collisions.push([possBlocksById[possBlock.block._id][j].block.miner,possBlocksById[possBlock.block._id][j].block.timestamp])
+                    let collisionBlocks = possBlocksById[possBlock.block._id]
+                    for (let j = 0; j < collisionBlocks.length; j++)
+                        collisions.push([collisionBlocks[j].block.miner, collisionBlocks[j].block.timestamp])
                     logr.info('Block collision detected at height '+possBlock.block._id+', the leaders are:',collisions)
                     logr.cons('Poss blocks',possBlocksById[possBlock.block._id])
                     logr.info('Applying block '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,4)+' by '+possBlock.block.miner+' with timestamp '+possBlock.block.timestamp)
                 } else
                     logr.cons('block '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,4)+' got finalized')
 
-                    if (config.forceFinalize)
-                        consensus.cancelForceFinalize()
                     chain.validateAndAddBlock(possBlock.block, false, function(err) {
                     if (err) {
                         logr.error('Consensus block validation failed for '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,8)+' by '+possBlock.block.miner, err)
@@ -144,6 +143,8 @@ let consensus = {
                     
                     consensus.possBlocks = newPossBlocks
                     consensus.finalizing = false
+                    if (config.forceFinalize)
+                        consensus.cancelForceFinalize()
                 })
             }
             // if 2/3+ of any previous round, we try to commit it again
@@ -271,26 +272,40 @@ let consensus = {
         
         for (let i = 0; i < consensus.possBlocks.length; i++) 
             if (block.hash === consensus.possBlocks[i].block.hash) {
-                if (consensus.possBlocks[i][round] && consensus.possBlocks[i][round].indexOf(leader) === -1) {
-                    // this leader has not already confirmed this round
-                    //  add the leader to the ones who passed precommit
-                    
-                    for (let r = round; r >= 0; r--)
-                        if (consensus.possBlocks[i][r].indexOf(leader) === -1)
-                            consensus.possBlocks[i][r].push(leader)
-                    
-                    consensus.tryNextStep()
-                }
+                if (!consensus.possBlocks[i][round] || consensus.possBlocks[i][round].indexOf(leader) !== -1)
+                    break
+                // Verify leader not already in ANY round for this block
+                let alreadyVoted = false
+                for (let r = 0; r < config.consensusRounds; r++)
+                    if (consensus.possBlocks[i][r] && consensus.possBlocks[i][r].indexOf(leader) !== -1) {
+                        alreadyVoted = true
+                        break
+                    }
+                if (alreadyVoted) break
+                
+                // Add the leader to all rounds up to this one
+                for (let r = round; r >= 0; r--)
+                    if (consensus.possBlocks[i][r])
+                        consensus.possBlocks[i][r].push(leader)
+                
+                consensus.tryNextStep()
                 break
             }       
     },
     signMessage: (message) => {
-        let hash = crypto.createHash('sha256').update(JSON.stringify(message)).digest('hex')
+        let sigVersion = config.consensusSigVersion || 1
+        let serialized
+        if (sigVersion === 2)
+            serialized = JSON.stringify(Object.keys(message).sort().reduce((o, k) => { o[k] = message[k]; return o }, {}))
+        else
+            serialized = JSON.stringify(message)
+        let hash = crypto.createHash('sha256').update(serialized).digest('hex')
         let signature = secp256k1.ecdsaSign(Buffer.from(hash, 'hex'), bs58.decode(process.env.NODE_OWNER_PRIV))
         signature = bs58.encode(signature.signature)
         message.s = {
             n: process.env.NODE_OWNER,
-            s: signature
+            s: signature,
+            v: sigVersion
         }
         return message
     },
@@ -323,19 +338,22 @@ let consensus = {
         if (p2p && p2p.broadcastNotSent)
             p2p.broadcastNotSent(message)
     },
-    cancelForceFinalize: () => {
+    cancelForceFinalize: (safe) => {
+        // don't null ffProposals if a resolve is in-flight — let it complete
+        if (safe && consensus.finalizing) return
         clearTimeout(consensus.forceFinalizeTimeout)
         consensus.forceFinalizeTimeout = null
         if (consensus.ffResolveTimeout) {
             clearTimeout(consensus.ffResolveTimeout)
             consensus.ffResolveTimeout = null
         }
-        consensus.ffProposals = null
+        if (!safe) consensus.ffProposals = null
     },
     scheduleForceFinalize: () => {
-        consensus.cancelForceFinalize()
         const latestBlock = chain.getLatestBlock()
         const expectedHeight = latestBlock._id + 1
+        // skip if timer already set for this height (don't reset = don't delay)
+        if (consensus.forceFinalizeTimeout || consensus.finalizing) return
         const hasCandidate = consensus.possBlocks.some(pb => pb.block._id === expectedHeight)
         if (!hasCandidate) return
 
@@ -384,7 +402,7 @@ let consensus = {
         candidates.sort((a, b) => {
             if (a.block.timestamp !== b.block.timestamp)
                 return a.block.timestamp - b.block.timestamp
-            return a.block.hash < b.block.hash ? -1 : 1
+            return a.block.hash.localeCompare(b.block.hash)
         })
 
         const winner = candidates[0]
@@ -433,7 +451,7 @@ let consensus = {
         allCandidates.sort((a, b) => {
             if (a.block.timestamp !== b.block.timestamp)
                 return a.block.timestamp - b.block.timestamp
-            return a.block.hash < b.block.hash ? -1 : 1
+            return a.block.hash.localeCompare(b.block.hash)
         })
 
         const activeLeadersCount = consensus.activeLeaders().length
@@ -447,8 +465,10 @@ let consensus = {
             hashVotes[hash] = (hashVotes[hash] || 0) + 1
         }
 
-        const bestHash = Object.keys(hashVotes).reduce((a, b) => hashVotes[a] > hashVotes[b] ? a : b, allCandidates[0].block.hash)
-        const bestVotes = hashVotes[bestHash] || 0
+        const bestHash = Object.keys(hashVotes).length > 0
+            ? Object.keys(hashVotes).reduce((a, b) => hashVotes[a] > hashVotes[b] ? a : b)
+            : allCandidates[0].block.hash
+        const bestVotes = bestHash ? (hashVotes[bestHash] || 0) : 0
         const hasQuorum = bestVotes >= quorumThreshold
 
         const respondentsByHash = {}
@@ -530,11 +550,18 @@ let consensus = {
                 }
                 if (remaining.length > 0) {
                     logr.fatal('Force finalize: retry limit exceeded for height ' + height + '. All candidates failed. Manual intervention required.')
+                } else {
+                    logr.fatal('Force finalize: no remaining candidates for height ' + height + ' after eviction. Chain stalled.')
                 }
                 consensus.finalizing = false
                 return
             }
 
+            // cleanup P2P blockSenders — delete entries for all finalized blocks
+            if (p2p && p2p.blockSenders && winner.block && winner.block.phash)
+                for (const h in p2p.blockSenders)
+                    if (h === winner.block.hash || h === winner.block.phash)
+                        delete p2p.blockSenders[h]
             let newPossBlocks = []
             for (let y = 0; y < consensus.possBlocks.length; y++)
                 if (height < consensus.possBlocks[y].block._id)
@@ -551,10 +578,29 @@ let consensus = {
         }
         let sign = message.s.s
         let name = message.s.n
+        let sigVersion = message.s.v || 1
         let tmpMess = cloneDeep(message)
         delete tmpMess.s
-        let hash = crypto.createHash('sha256').update(JSON.stringify(tmpMess)).digest('hex')
+        let serialized
+        if (sigVersion === 2)
+            serialized = JSON.stringify(Object.keys(tmpMess).sort().reduce((o, k) => { o[k] = tmpMess[k]; return o }, {}))
+        else
+            serialized = JSON.stringify(tmpMess)
+        let hash = crypto.createHash('sha256').update(serialized).digest('hex')
         let pub = consensus.getActiveLeaderKey(name)
+        if (pub && secp256k1.ecdsaVerify(
+            bs58.decode(sign),
+            Buffer.from(hash, 'hex'),
+            bs58.decode(pub))) {
+            cb(true)
+            return
+        }
+        // fallback: try the other serialization (supports transition period)
+        if (sigVersion === 2)
+            serialized = JSON.stringify(tmpMess)
+        else
+            serialized = JSON.stringify(Object.keys(tmpMess).sort().reduce((o, k) => { o[k] = tmpMess[k]; return o }, {}))
+        hash = crypto.createHash('sha256').update(serialized).digest('hex')
         if (pub && secp256k1.ecdsaVerify(
             bs58.decode(sign),
             Buffer.from(hash, 'hex'),

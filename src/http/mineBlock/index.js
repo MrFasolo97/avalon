@@ -12,10 +12,11 @@ module.exports = {
     init: (app) => {
         // this suggests the node to produce a block and submit it
         app.get('/mineBlock', mineLimiter, (req, res) => {
-            if (!requiredToken)
-                return res.status(500).json({error: 'MINE_TOKEN not set'})
-            if (req.query.token !== requiredToken)
-                return res.status(401).send({error: 'invalid token'})
+            if (requiredToken) {
+                const bearer = req.headers['authorization'] ? req.headers['authorization'].replace('Bearer ', '') : ''
+                if (bearer !== requiredToken && req.query.token !== requiredToken)
+                    return res.status(401).send({error: 'invalid token'})
+            }
             delete p2p.recovering
             res.send(chain.getLatestBlock()._id.toString())
             chain.mineBlock(function (error, finalBlock) {

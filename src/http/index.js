@@ -12,12 +12,6 @@ const globalLimiter = rateLimit({
     message: { error: 'too many requests' }
 })
 
-const strictLimiter = rateLimit({
-    windowMs: 1000,
-    max: 5,
-    message: { error: 'too many requests' }
-})
-
 let http = {
     init: () => {
         let app = express()

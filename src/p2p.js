@@ -397,8 +397,15 @@ let p2p = {
                 break
 
             case MessageType.FORCE_FINALIZE:
-                if (!message.s || !message.s.n) break
-                consensus.handleForceFinalizeProposal(message)
+                if (!message.s || !message.s.s || !message.s.n) break
+                consensus.verifySignature(message, function(isValid) {
+                    if (!isValid) {
+                        logr.warn('Received wrong FF signature from ' + message.s.n)
+                        return
+                    }
+                    p2p.broadcastNotSent(message)
+                    consensus.handleForceFinalizeProposal(message)
+                })
                 break
             }
         })

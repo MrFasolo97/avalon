@@ -9,6 +9,7 @@ const consensus_threshold = consensus_need/consensus_total
 // all p2p.sockets referenced here are verified nodes with a node_status
 
 const FORCE_FINALIZE_WAIT_MS = 600
+const FF_BACKOFF_MS = [600, 1200, 2400, 4800]
 
 let consensus = {
     observer: false,
@@ -290,18 +291,32 @@ let consensus = {
     },
     handleForceFinalizeProposal: (message) => {
         if (!consensus.ffProposals) return
-        if (!message.s || !message.s.n || !consensus.getActiveLeaderKey(message.s.n)) return
+        const sender = message.s && message.s.n
+        if (!sender || !consensus.getActiveLeaderKey(sender)) return
         if (message.d.height !== consensus.ffProposals.height) return
         const hash = message.d.hash
-        if (!hash || consensus.ffProposals.proposals[hash]) return
-        for (let i = 0; i < consensus.possBlocks.length; i++) {
-            const pb = consensus.possBlocks[i]
-            if (pb.block.hash === hash && pb.block._id === message.d.height) {
-                consensus.ffProposals.proposals[hash] = pb
-                logr.cons('FF proposal from ' + message.s.n + ' for ' + message.d.height + '#' + hash.substr(0, 8))
-                break
+        if (!hash) return
+
+        // Track this respondent (even if we already have this hash — counts toward quorum)
+        if (consensus.ffProposals.respondents[sender] !== hash) {
+            consensus.ffProposals.respondents[sender] = hash
+            logr.cons('FF respondent: ' + sender + ' for ' + message.d.height + '#' + hash.substr(0, 8))
+        }
+
+        // Add the block to proposals if we have it and haven't recorded it yet
+        if (!consensus.ffProposals.proposals[hash]) {
+            for (let i = 0; i < consensus.possBlocks.length; i++) {
+                const pb = consensus.possBlocks[i]
+                if (pb.block.hash === hash && pb.block._id === message.d.height) {
+                    consensus.ffProposals.proposals[hash] = pb
+                    break
+                }
             }
         }
+
+        // Re-broadcast the proposal to accelerate convergence
+        if (p2p && p2p.broadcastNotSent)
+            p2p.broadcastNotSent(message)
     },
     cancelForceFinalize: () => {
         clearTimeout(consensus.forceFinalizeTimeout)
@@ -332,12 +347,15 @@ let consensus = {
         if (consensus.forceFinalizeTimeout.unref)
             consensus.forceFinalizeTimeout.unref()
     },
-    _forceFinalize: (height, retryCount) => {
+    _getQuorumThreshold: () => {
+        return Math.ceil(consensus.activeLeaders().length * 2 / 3)
+    },
+    _forceFinalize: (height, candidateRetry) => {
         if (consensus.finalizing) return
         if (!config.forceFinalize) return
         if (height !== chain.getLatestBlock()._id + 1) return
 
-        if (retryCount === undefined) retryCount = 0
+        if (candidateRetry === undefined) candidateRetry = 0
 
         let candidates = consensus.possBlocks.filter(pb => pb.block._id === height)
         if (candidates.length === 0) {
@@ -368,9 +386,12 @@ let consensus = {
         }
 
         // Anti-fork: broadcast proposal to peers and collect responses before committing
-        consensus.ffProposals = { height, proposals: {} }
+        const ownName = process.env.NODE_OWNER
+        consensus.ffProposals = { height, proposals: {}, respondents: {} }
         candidates.forEach(c => { consensus.ffProposals.proposals[c.block.hash] = c })
         consensus.ffProposals.proposals[winner.block.hash] = winner
+        if (consensus.getActiveLeaderKey(ownName))
+            consensus.ffProposals.respondents[ownName] = winner.block.hash
 
         if (p2p && p2p.broadcast) {
             const proposal = consensus.signMessage({
@@ -381,31 +402,93 @@ let consensus = {
         }
 
         consensus.finalizing = true
-        consensus.ffResolveTimeout = setTimeout(() => {
-            consensus.ffResolveTimeout = null
-            let allCandidates
-            if (consensus.ffProposals) {
-                allCandidates = Object.values(consensus.ffProposals.proposals)
-                allCandidates.sort((a, b) => {
-                    if (a.block.timestamp !== b.block.timestamp)
-                        return a.block.timestamp - b.block.timestamp
-                    return a.block.hash < b.block.hash ? -1 : 1
+        consensus._resolveForceFinalize(height, candidateRetry, 0)
+    },
+    _resolveForceFinalize: (height, candidateRetry, ffAttempt) => {
+        consensus.ffResolveTimeout = null
+        if (!consensus.ffProposals) {
+            consensus._applyForceFinalize(height, consensus.possBlocks.filter(pb => pb.block._id === height)[0], candidateRetry)
+            return
+        }
+
+        const allCandidates = Object.values(consensus.ffProposals.proposals)
+        allCandidates.sort((a, b) => {
+            if (a.block.timestamp !== b.block.timestamp)
+                return a.block.timestamp - b.block.timestamp
+            return a.block.hash < b.block.hash ? -1 : 1
+        })
+
+        const activeLeadersCount = consensus.activeLeaders().length
+        const quorumThreshold = consensus._getQuorumThreshold()
+        const respondents = consensus.ffProposals.respondents
+        const respondentCount = Object.keys(respondents).length
+
+        // Count votes per hash among respondents
+        const hashVotes = {}
+        for (const hash of Object.values(respondents)) {
+            hashVotes[hash] = (hashVotes[hash] || 0) + 1
+        }
+
+        const bestHash = Object.keys(hashVotes).reduce((a, b) => hashVotes[a] > hashVotes[b] ? a : b, allCandidates[0].block.hash)
+        const bestVotes = hashVotes[bestHash] || 0
+        const hasQuorum = bestVotes >= quorumThreshold
+
+        const respondentsByHash = {}
+        for (const [name, hash] of Object.entries(respondents))
+            (respondentsByHash[hash] = respondentsByHash[hash] || []).push(name)
+
+        if (hasQuorum) {
+            logr.cons('FF quorum reached: ' + bestVotes + '/' + quorumThreshold + ' for ' + height + '#' + bestHash.substr(0, 8))
+        } else {
+            const totalLeaders = activeLeadersCount || respondents.length
+            logr.cons('FF quorum not met: ' + bestVotes + '/' + quorumThreshold + ' (' + respondentCount + '/' + totalLeaders + ' respondents)')
+        }
+
+        // Find the block for bestHash
+        const bestBlock = allCandidates.find(c => c.block.hash === bestHash)
+        if (!bestBlock) {
+            logr.error('FF resolve: best hash ' + bestHash.substr(0, 8) + ' not found among candidates, using local winner')
+        }
+
+        if (hasQuorum) {
+            if (bestBlock && bestBlock.block.hash !== allCandidates[0].block.hash) {
+                logr.info('Anti-fork: quorum selected ' + height + '#' + bestBlock.block.hash.substr(0, 8) + ' by ' + bestBlock.block.miner + ' (local was ' + allCandidates[0].block.miner + ')')
+            }
+            consensus.ffProposals = null
+            consensus._applyForceFinalize(height, bestBlock || allCandidates[0], candidateRetry)
+            return
+        }
+
+        const maxAttempts = FF_BACKOFF_MS.length
+        if (ffAttempt + 1 < maxAttempts) {
+            const delay = FF_BACKOFF_MS[ffAttempt + 1]
+            logr.cons('FF retry ' + (ffAttempt + 1) + '/' + maxAttempts + ' in ' + delay + 'ms for height ' + height)
+
+            // Re-broadcast proposal in case peers missed it
+            if (p2p && p2p.broadcast) {
+                const winner = allCandidates[0]
+                const proposal = consensus.signMessage({
+                    t: 7,
+                    d: { height, hash: winner.block.hash, timestamp: winner.block.timestamp }
                 })
-                consensus.ffProposals = null
+                p2p.broadcast(proposal)
+            }
+
+            consensus.ffResolveTimeout = setTimeout(() => {
+                consensus._resolveForceFinalize(height, candidateRetry, ffAttempt + 1)
+            }, delay)
+            if (consensus.ffResolveTimeout && consensus.ffResolveTimeout.unref)
+                consensus.ffResolveTimeout.unref()
+        } else {
+            const collisionRisk = Object.keys(hashVotes).length > 1
+            if (collisionRisk) {
+                logr.crit('FF backoff exhausted with ' + Object.keys(hashVotes).length + ' conflicting hashes for height ' + height + '. FORK RISK. Respondents:', respondentsByHash)
             } else {
-                allCandidates = candidates
+                logr.warn('FF backoff exhausted without quorum for height ' + height + ' (' + respondentCount + '/' + quorumThreshold + ' respondents). Proceeding with best candidate.')
             }
-            const bestWinner = allCandidates[0]
-
-            if (bestWinner.block.hash !== winner.block.hash) {
-                logr.info('Anti-fork: switched to better candidate ' + height + '#' + bestWinner.block.hash.substr(0, 8) + ' by ' + bestWinner.block.miner + ' (was ' + winner.block.miner + ')')
-            }
-
-            consensus._applyForceFinalize(height, bestWinner, retryCount)
-        }, FORCE_FINALIZE_WAIT_MS)
-
-        if (consensus.ffResolveTimeout && consensus.ffResolveTimeout.unref)
-            consensus.ffResolveTimeout.unref()
+            consensus.ffProposals = null
+            consensus._applyForceFinalize(height, bestBlock || allCandidates[0], candidateRetry)
+        }
     },
     _applyForceFinalize: (height, winner, retryCount) => {
         chain.validateAndAddBlock(winner.block, false, function(err) {

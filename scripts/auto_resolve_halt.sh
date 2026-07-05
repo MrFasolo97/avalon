@@ -579,7 +579,12 @@ do_recover() {
         exit 1
     fi
 
-    check_halt || true
+    local halt_rc=0
+    check_halt || halt_rc=$?
+
+    if [ "$halt_rc" = "2" ]; then
+        exit 1
+    fi
 
     try_recover && exit 0
     try_mine_block && exit 0

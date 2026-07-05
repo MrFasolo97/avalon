@@ -194,7 +194,6 @@ let consensus = {
                     if (block.hash && p2p && p2p.recordBlockFailure)
                         p2p.recordBlockFailure(block.hash)
                     logr.error('Received invalid new block from '+block.miner, block.hash)
-                    logr.error('Received invalid new block from '+block.miner, block.hash)
                     if (cb) cb(-1)
                 } else {
                     logr.cons('Precommitting block '+block._id+'#'+block.hash.substr(0,4))

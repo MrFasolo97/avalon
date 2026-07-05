@@ -18,10 +18,9 @@ const mongo = require('./mongo')
 const http = require('./http')
 
 // verify node version
-const allowNodeV = [18, 20, 22]
 const currentNodeV = parseInt(process.versions.node.split('.')[0])
-if (allowNodeV.indexOf(currentNodeV) === -1) {
-    logr.fatal('Wrong NodeJS version. Allowed versions: v'+allowNodeV.join(', v'))
+if (currentNodeV < 18) {
+    logr.fatal('Wrong NodeJS version. Allowed versions: >= v18')
     process.exit(1)
 } else logr.info('Correctly using NodeJS v'+process.versions.node)
 

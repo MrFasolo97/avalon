@@ -62,7 +62,7 @@ let config = {
             leaderRewardVT: 100,
             leaders: 5,
             // how long of the end of the block hash is used for the leader pseudo random generator shuffle
-            leaderShufflePrecision: 6,
+            leaderShufflePrecision: 16,
             // the maximum number of leaders an account can vote for
             leaderMaxVotes: 5,
             // the "master" account starting stake (total starting supply)

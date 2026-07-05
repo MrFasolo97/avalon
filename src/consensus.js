@@ -117,7 +117,15 @@ let consensus = {
                     if (config.forceFinalize)
                         consensus.cancelForceFinalize()
                     chain.validateAndAddBlock(possBlock.block, false, function(err) {
-                    if (err) throw err
+                    if (err) {
+                        logr.error('Consensus block validation failed for '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,8)+' by '+possBlock.block.miner, err)
+                        cache.rollback()
+                        dao.resetID()
+                        daoMaster.resetID()
+                        consensus.possBlocks = consensus.possBlocks.filter(pb => pb.block.hash !== possBlock.block.hash)
+                        consensus.finalizing = false
+                        return
+                    }
 
                     // clean up old possible blocks
                     let newPossBlocks = []
@@ -183,7 +191,9 @@ let consensus = {
             chain.isValidNewBlock(block, true, true, function(isValid) {
                 consensus.validating.splice(consensus.validating.indexOf(possBlock.block.hash), 1)
                 if (!isValid) {
-                    // todo add punishment (close socket?)
+                    if (block.hash && p2p && p2p.recordBlockFailure)
+                        p2p.recordBlockFailure(block.hash)
+                    logr.error('Received invalid new block from '+block.miner, block.hash)
                     logr.error('Received invalid new block from '+block.miner, block.hash)
                     if (cb) cb(-1)
                 } else {

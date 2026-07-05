@@ -18,6 +18,7 @@
     "decay": "^1.0.12",
     "esbuild-loader": "^4.5.0",
     "express": "^4.22.2",
+    "express-rate-limit": "^8.5.2",
     "growint": "^1.0.1",
     "javalon2": "^1.1.9",
     "log4js": "^6.9.1",

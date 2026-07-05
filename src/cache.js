@@ -74,7 +74,9 @@ let cache = {
         }
         
         // no match, searching in mongodb
-        db.collection(collection).findOne(query, function(err, obj) {
+        let sanitizedQuery = {}
+        sanitizedQuery[key] = query[key]
+        db.collection(collection).findOne(sanitizedQuery, function(err, obj) {
             if (err) logr.debug('error cache')
             else {
                 if (!obj) {

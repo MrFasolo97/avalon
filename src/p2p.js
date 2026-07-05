@@ -32,6 +32,9 @@ const MessageType = {
 
 let p2p = {
     sockets: [],
+    bannedPeers: {},
+    peerFailures: {},
+    blockSenders: {},
     recoveringBlocks: [],
     recoveredBlocks: [],
     recovering: false,
@@ -134,6 +137,14 @@ let p2p = {
         }
         if (p2p.sockets.length >= max_peers) {
             logr.warn('Incoming handshake refused because already peered enough '+p2p.sockets.length+'/'+max_peers)
+            ws.close(); return
+        }
+        // refuse connection from banned peers
+        let remoteIp = ws._socket.remoteAddress
+        if (remoteIp.indexOf('::ffff:') > -1)
+            remoteIp = remoteIp.replace('::ffff:', '')
+        if (p2p.isBanned(remoteIp)) {
+            logr.warn('Refused handshake from banned peer ' + remoteIp)
             ws.close(); return
         }
         // close connection if we already have this peer ip in our connected sockets
@@ -300,6 +311,10 @@ let p2p = {
                 p2p.sockets[p2p.sockets.indexOf(ws)].node_status.head_block_hash = block.hash
                 p2p.sockets[p2p.sockets.indexOf(ws)].node_status.previous_block_hash = block.phash
 
+                // track which peer sent this block for failure banning
+                if (block.hash)
+                    p2p.blockSenders[block.hash] = ws
+
                 if (p2p.recovering) return
                 consensus.round(0, block)
                 break
@@ -399,10 +414,12 @@ let p2p = {
             return
         }
 
-        let champion = peersAhead[Math.floor(Math.random()*peersAhead.length)]
+        let champions = peersAhead.sort(() => Math.random() - 0.5).slice(0, Math.min(3, peersAhead.length))
+        let champion = champions[0]
         if (p2p.recovering+1 <= champion.node_status.head_block) {
             p2p.recovering++
-            p2p.sendJSON(champion, {t: MessageType.QUERY_BLOCK, d:p2p.recovering})
+            for (let i = 0; i < champions.length; i++)
+                p2p.sendJSON(champions[i], {t: MessageType.QUERY_BLOCK, d:p2p.recovering})
             p2p.recoveringBlocks.push(p2p.recovering)
             logr.debug('query block #'+p2p.recovering+' -- head block: '+champion.node_status.head_block)
             if (p2p.recovering%2) p2p.recover()
@@ -425,8 +442,36 @@ let p2p = {
         ws.on('error', () => p2p.closeConnection(ws))
     },
     closeConnection: (ws) => {
-        p2p.sockets.splice(p2p.sockets.indexOf(ws), 1)
+        const idx = p2p.sockets.indexOf(ws)
+        if (idx !== -1)
+            p2p.sockets.splice(idx, 1)
         logr.debug('a peer disconnected, '+p2p.sockets.length+' peers left')
+    },
+    recordBlockFailure: (blockHash) => {
+        const ws = p2p.blockSenders[blockHash]
+        delete p2p.blockSenders[blockHash]
+        if (!ws || !ws._socket) return
+        let ip = ws._socket.remoteAddress
+        if (ip.indexOf('::ffff:') > -1)
+            ip = ip.replace('::ffff:', '')
+        if (!p2p.peerFailures[ip])
+            p2p.peerFailures[ip] = 0
+        p2p.peerFailures[ip]++
+        if (p2p.peerFailures[ip] >= 5) {
+            const banSeconds = 300 // 5 minutes
+            logr.warn('Banning peer ' + ip + ' for ' + banSeconds + 's (' + p2p.peerFailures[ip] + ' failures)')
+            p2p.bannedPeers[ip] = Date.now() + banSeconds * 1000
+            delete p2p.peerFailures[ip]
+            ws.close()
+        }
+    },
+    isBanned: (ip) => {
+        if (!p2p.bannedPeers[ip]) return false
+        if (Date.now() > p2p.bannedPeers[ip]) {
+            delete p2p.bannedPeers[ip]
+            return false
+        }
+        return true
     },
     sendJSON: (ws, d) => {
         try {

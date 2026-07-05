@@ -1,9 +1,10 @@
 const { extract } = require('oembed-parser')
 const { URL } = require('url')
-const dns = require('dns')
+const dns = require('dns').promises
 const net = require('net')
+const fetch = require('node-fetch-commonjs')
 
-function isPrivateURL(urlStr) {
+async function isPrivateURL(urlStr) {
     try {
         const parsed = new URL(urlStr)
         const host = parsed.hostname
@@ -14,7 +15,12 @@ function isPrivateURL(urlStr) {
         if (net.isIP(host)) {
             ip = host
         } else {
-            ip = dns.lookupSync(host, {family: 4})
+            try {
+                const lookup = await dns.lookup(host, {family: 4})
+                ip = lookup.address
+            } catch {
+                return true
+            }
         }
         if (!ip) return false
 
@@ -40,32 +46,49 @@ function isPrivateURL(urlStr) {
     }
 }
 
+async function resolveSafeUrl(urlStr) {
+    const maxRedirects = 5
+    let currentUrl = urlStr
+    for (let i = 0; i < maxRedirects; i++) {
+        if (await isPrivateURL(currentUrl))
+            throw new Error('blocked private URL')
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 5000)
+        try {
+            const resp = await fetch(currentUrl, { method: 'HEAD', signal: controller.signal, redirect: 'manual' })
+            clearTimeout(timeout)
+            if (resp.status >= 300 && resp.status < 400) {
+                const location = resp.headers.get('location')
+                if (!location) throw new Error('redirect with no location')
+                currentUrl = new URL(location, currentUrl).href
+                continue
+            }
+            return currentUrl
+        } catch (e) {
+            clearTimeout(timeout)
+            throw e
+        }
+    }
+    throw new Error('too many redirects')
+}
+
 module.exports = {
     init: (app) => {
-        // get oembed for any url
-        /**
-         * @api {get} /oembed/:url OEmbed
-         * @apiName oembed
-         * @apiGroup External
-         * 
-         * @apiParam {String} url The URL to query oembed data of
-         * 
-         * @apiSuccess {Object} info The oembed data
-         */
-        app.get('/oembed/:url', (req, res) => {
+        app.get('/oembed/:url', async (req, res) => {
             if (!req.params.url) {
                 res.sendStatus(500)
                 return
             }
-            if (isPrivateURL(req.params.url)) {
+            try {
+                const finalUrl = await resolveSafeUrl(req.params.url)
+                extract(finalUrl).then((data) => {
+                    res.send(data)
+                }).catch(() => {
+                    res.sendStatus(404)
+                })
+            } catch {
                 res.status(400).send({error: 'invalid url'})
-                return
             }
-            extract(req.params.url).then((data) => {
-                res.send(data)
-            }).catch(() => {
-                res.sendStatus(404)
-            })
         })
     }
 }

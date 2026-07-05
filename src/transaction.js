@@ -18,6 +18,7 @@ let transaction = {
     eventConfirmation: new EventEmitter(),
     poolQueue: [],
     poolLock: false,
+    maxPoolQueue: 1000,
     processPoolQueue: () => {
         if (transaction.poolQueue.length === 0) return
         if (transaction.poolLock) return
@@ -26,6 +27,10 @@ let transaction = {
     },
     addToPool: (txs) => {
         if (transaction.poolLock) {
+            if (transaction.poolQueue.length >= transaction.maxPoolQueue) {
+                transaction.poolQueue.shift()
+                logr.warn('Pool queue overflow, evicting oldest')
+            }
             transaction.poolQueue.push(txs)
             return
         }
@@ -187,8 +192,8 @@ let transaction = {
             }
 
             // checking if the user has enough bandwidth
-            if (JSON.stringify(tx).length > newBw.v) {
-                cb(false, 'need more bandwidth ('+(JSON.stringify(tx).length-newBw.v)+' B)'); return
+            if (Buffer.byteLength(JSON.stringify(tx), 'utf8') > newBw.v) {
+                cb(false, 'need more bandwidth ('+(Buffer.byteLength(JSON.stringify(tx), 'utf8')-newBw.v)+' B)'); return
             }
 
             // check transaction specifics
@@ -221,7 +226,7 @@ let transaction = {
                 growth: Math.max(account.baseBwGrowth || 0, account.balance)/(config.bwGrowth),
                 max: config.bwMax
             })
-            let needed_bytes = JSON.stringify(tx).length
+            let needed_bytes = Buffer.byteLength(JSON.stringify(tx), 'utf8')
             let bw = bandwidth.grow(ts)
             if (!bw) 
                 throw 'No bandwidth error'

@@ -2,9 +2,7 @@ module.exports = {
     init: (app) => {
         // get in-memory data (intensive) - admin only
         app.get('/debug', (req, res) => {
-            if (!process.env.DEBUG_TOKEN)
-                return res.status(500).json({error: 'DEBUG_TOKEN not set'})
-            if (req.query.token !== process.env.DEBUG_TOKEN && req.headers['authorization'] !== `Bearer ${process.env.DEBUG_TOKEN}`) {
+            if (process.env.DEBUG_TOKEN && req.query.token !== process.env.DEBUG_TOKEN && req.headers['authorization'] !== `Bearer ${process.env.DEBUG_TOKEN}`) {
                 return res.sendStatus(401)
             }
             res.send({

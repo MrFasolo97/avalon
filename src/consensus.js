@@ -480,6 +480,14 @@ let consensus = {
             if (consensus.ffResolveTimeout && consensus.ffResolveTimeout.unref)
                 consensus.ffResolveTimeout.unref()
         } else {
+            if (!config.forceFinalizeFallback) {
+                logr.fatal('FF backoff exhausted and fallback disabled — chain halts at height ' + height + '. Quorum: ' + bestVotes + '/' + quorumThreshold + '. Retrying in 10s...')
+                consensus.ffProposals = null
+                consensus.finalizing = false
+                const retryTimer = setTimeout(() => consensus.scheduleForceFinalize(), 10000)
+                if (retryTimer.unref) retryTimer.unref()
+                return
+            }
             const collisionRisk = Object.keys(hashVotes).length > 1
             if (collisionRisk) {
                 logr.fatal('FF backoff exhausted with ' + Object.keys(hashVotes).length + ' conflicting hashes for height ' + height + '. FORK RISK. Respondents:', respondentsByHash)

@@ -482,7 +482,7 @@ let consensus = {
         } else {
             const collisionRisk = Object.keys(hashVotes).length > 1
             if (collisionRisk) {
-                logr.crit('FF backoff exhausted with ' + Object.keys(hashVotes).length + ' conflicting hashes for height ' + height + '. FORK RISK. Respondents:', respondentsByHash)
+                logr.fatal('FF backoff exhausted with ' + Object.keys(hashVotes).length + ' conflicting hashes for height ' + height + '. FORK RISK. Respondents:', respondentsByHash)
             } else {
                 logr.warn('FF backoff exhausted without quorum for height ' + height + ' (' + respondentCount + '/' + quorumThreshold + ' respondents). Proceeding with best candidate.')
             }

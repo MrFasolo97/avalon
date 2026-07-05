@@ -27,7 +27,8 @@ const MessageType = {
     BLOCK: 3,
     NEW_BLOCK: 4,
     NEW_TX: 5,
-    BLOCK_CONF_ROUND: 6
+    BLOCK_CONF_ROUND: 6,
+    FORCE_FINALIZE: 7
 }
 
 let p2p = {
@@ -393,6 +394,11 @@ let p2p = {
                             consensus.remoteRoundConfirm(message)
                     })
                 })
+                break
+
+            case MessageType.FORCE_FINALIZE:
+                if (!message.s || !message.s.n) break
+                consensus.handleForceFinalizeProposal(message)
                 break
             }
         })

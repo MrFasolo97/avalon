@@ -8,6 +8,8 @@ const consensus_threshold = consensus_need/consensus_total
 
 // all p2p.sockets referenced here are verified nodes with a node_status
 
+const FORCE_FINALIZE_WAIT_MS = 600
+
 let consensus = {
     observer: false,
     validating: [],
@@ -15,6 +17,8 @@ let consensus = {
     queue: [],
     finalizing: false,
     forceFinalizeTimeout: null,
+    ffProposals: null,
+    ffResolveTimeout: null,
     possBlocks: [],
     getActiveLeaderKey: (name) => {
         let shuffle = chain.schedule.shuffle
@@ -284,9 +288,29 @@ let consensus = {
         }
         return message
     },
+    handleForceFinalizeProposal: (message) => {
+        if (!consensus.ffProposals) return
+        if (!message.s || !message.s.n || !consensus.getActiveLeaderKey(message.s.n)) return
+        if (message.d.height !== consensus.ffProposals.height) return
+        const hash = message.d.hash
+        if (!hash || consensus.ffProposals.proposals[hash]) return
+        for (let i = 0; i < consensus.possBlocks.length; i++) {
+            const pb = consensus.possBlocks[i]
+            if (pb.block.hash === hash && pb.block._id === message.d.height) {
+                consensus.ffProposals.proposals[hash] = pb
+                logr.cons('FF proposal from ' + message.s.n + ' for ' + message.d.height + '#' + hash.substr(0, 8))
+                break
+            }
+        }
+    },
     cancelForceFinalize: () => {
         clearTimeout(consensus.forceFinalizeTimeout)
         consensus.forceFinalizeTimeout = null
+        if (consensus.ffResolveTimeout) {
+            clearTimeout(consensus.ffResolveTimeout)
+            consensus.ffResolveTimeout = null
+        }
+        consensus.ffProposals = null
     },
     scheduleForceFinalize: () => {
         consensus.cancelForceFinalize()
@@ -339,10 +363,51 @@ let consensus = {
             logr.info('Block collision timeout at height ' + height + ', forced selection:', details)
         }
 
-        logr.warn('Force finalizing block ' + height + '#' + winner.block.hash.substr(0, 8) + ' by ' + winner.block.miner + ' — selected locally without consensus, fork risk if peers diverge')
+        if (candidates.length > 1) {
+            logr.warn('Force finalizing block ' + height + '#' + winner.block.hash.substr(0, 8) + ' by ' + winner.block.miner + ' — selected locally without consensus, fork risk if peers diverge')
+        }
+
+        // Anti-fork: broadcast proposal to peers and collect responses before committing
+        consensus.ffProposals = { height, proposals: {} }
+        candidates.forEach(c => { consensus.ffProposals.proposals[c.block.hash] = c })
+        consensus.ffProposals.proposals[winner.block.hash] = winner
+
+        if (p2p && p2p.broadcast) {
+            const proposal = consensus.signMessage({
+                t: 7,
+                d: { height, hash: winner.block.hash, timestamp: winner.block.timestamp }
+            })
+            p2p.broadcast(proposal)
+        }
 
         consensus.finalizing = true
+        consensus.ffResolveTimeout = setTimeout(() => {
+            consensus.ffResolveTimeout = null
+            let allCandidates
+            if (consensus.ffProposals) {
+                allCandidates = Object.values(consensus.ffProposals.proposals)
+                allCandidates.sort((a, b) => {
+                    if (a.block.timestamp !== b.block.timestamp)
+                        return a.block.timestamp - b.block.timestamp
+                    return a.block.hash < b.block.hash ? -1 : 1
+                })
+                consensus.ffProposals = null
+            } else {
+                allCandidates = candidates
+            }
+            const bestWinner = allCandidates[0]
 
+            if (bestWinner.block.hash !== winner.block.hash) {
+                logr.info('Anti-fork: switched to better candidate ' + height + '#' + bestWinner.block.hash.substr(0, 8) + ' by ' + bestWinner.block.miner + ' (was ' + winner.block.miner + ')')
+            }
+
+            consensus._applyForceFinalize(height, bestWinner, retryCount)
+        }, FORCE_FINALIZE_WAIT_MS)
+
+        if (consensus.ffResolveTimeout && consensus.ffResolveTimeout.unref)
+            consensus.ffResolveTimeout.unref()
+    },
+    _applyForceFinalize: (height, winner, retryCount) => {
         chain.validateAndAddBlock(winner.block, false, function(err) {
             if (err) {
                 logr.error('Force finalize failed for ' + height + '#' + winner.block.hash.substr(0, 8), err)

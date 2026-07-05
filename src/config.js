@@ -176,6 +176,11 @@ let config = {
             multisig: true,
             // force finalize disabled in base config — enabled at hard fork height below
             forceFinalize: false,
+            // force finalize fallback: if backoff is exhausted without quorum among
+            // active leaders, fallback to force finalizing anyway.
+            // WARNING: enabling fallback can create a permanent fork during network
+            // partitions. When false, the chain halts until quorum is reached — safer.
+            forceFinalizeFallback: false,
         },
         241600: {
             forceFinalize: true,

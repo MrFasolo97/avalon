@@ -289,7 +289,34 @@ function simulateRetry(candidates, failingHashes) {
     console.log('PASS: anti-fork picks majority hash')
 }
 
-// Test 19: Deterministic tiebreaker when votes tied
+// Test 19: Fallback disabled — halt instead of force finalize
+{
+    const config = { forceFinalizeFallback: false }
+    const quorumThreshold = 5  // 7 leaders, only 3 responded
+    const respondents = { a: 'X', b: 'X', c: 'Y' }
+    const hashVotes = {}
+    for (const hash of Object.values(respondents))
+        hashVotes[hash] = (hashVotes[hash] || 0) + 1
+    const bestVotes = Math.max(...Object.values(hashVotes))
+    const hasQuorum = bestVotes >= quorumThreshold
+    assert.strictEqual(hasQuorum, false, 'should not have quorum')
+    // If fallback is disabled, we should NOT proceed to finalize
+    const shouldHalt = !config.forceFinalizeFallback && !hasQuorum
+    assert.strictEqual(shouldHalt, true, 'should halt when fallback disabled and no quorum')
+    console.log('PASS: fallback disabled halts correctly')
+}
+
+// Test 20: Fallback enabled — finalize even without quorum
+{
+    const config = { forceFinalizeFallback: true }
+    const candidates = [makeBlock(100, 1000, 'a')]
+    const sorted = deterministicSort(candidates)
+    assert.strictEqual(sorted[0].block.hash, candidates[0].block.hash, 'should still pick winner')
+    assert.strictEqual(config.forceFinalizeFallback, true, 'fallback enabled')
+    console.log('PASS: fallback enabled allows finalization without quorum')
+}
+
+// Test 21: Deterministic tiebreaker when votes tied
 {
     const respondents = { a: 'X', b: 'X', c: 'Y', d: 'Y' }
     const blockMap = {

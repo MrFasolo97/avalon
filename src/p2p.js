@@ -224,43 +224,42 @@ let p2p = {
 
             case MessageType.NODE_STATUS:
                 // we received a peer node status
-                if (typeof message.d.sign === 'string') {
-                    let nodeId = p2p.sockets[p2p.sockets.indexOf(ws)].node_status.nodeId
-                    if (!message.d.nodeId || message.d.nodeId !== nodeId)
-                        return
-                    let challengeHash = p2p.sockets[p2p.sockets.indexOf(ws)].challengeHash
-                    if (!challengeHash)
-                        return
-                    if (message.d.origin_block !== config.originHash) {
-                        logr.debug('Different chain id, disconnecting')
-                        return ws.close()
-                    }
-                    try {
-                        let isValidSignature = secp256k1.ecdsaVerify(
-                            bs58.decode(message.d.sign),
-                            Buffer.from(challengeHash, 'hex'),
-                            bs58.decode(nodeId))
-                        if (!isValidSignature) {
-                            logr.warn('Wrong NODE_STATUS signature, disconnecting')
-                            ws.close()
-                        }
-                        
-                        for (let i = 0; i < p2p.sockets.length; i++)
-                            if (i !== p2p.sockets.indexOf(ws)
-                            && p2p.sockets[i].node_status
-                            && p2p.sockets[i].node_status.nodeId === nodeId) {
-                                logr.debug('Peer disconnected because duplicate connections')
-                                p2p.sockets[i].close()
-                            }
-    
-                        clearInterval(p2p.sockets[p2p.sockets.indexOf(ws)].pendingDisconnect)
-                        delete message.d.sign
-                        p2p.sockets[p2p.sockets.indexOf(ws)].node_status = message.d
-                    } catch (error) {
-                        logr.error('Error during NODE_STATUS verification', error)
-                    }
+                if (typeof message.d !== 'object' || typeof message.d.sign !== 'string') break
+                let nodeId = p2p.sockets[p2p.sockets.indexOf(ws)].node_status.nodeId
+                if (!message.d.nodeId || message.d.nodeId !== nodeId)
+                    return
+                let challengeHash = p2p.sockets[p2p.sockets.indexOf(ws)].challengeHash
+                if (!challengeHash)
+                    return
+                if (message.d.origin_block !== config.originHash) {
+                    logr.debug('Different chain id, disconnecting')
+                    return ws.close()
                 }
-                
+                try {
+                    let isValidSignature = secp256k1.ecdsaVerify(
+                        bs58.decode(message.d.sign),
+                        Buffer.from(challengeHash, 'hex'),
+                        bs58.decode(nodeId))
+                    if (!isValidSignature) {
+                        logr.warn('Wrong NODE_STATUS signature, disconnecting')
+                        ws.close()
+                    }
+
+                    for (let i = 0; i < p2p.sockets.length; i++)
+                        if (i !== p2p.sockets.indexOf(ws)
+                        && p2p.sockets[i].node_status
+                        && p2p.sockets[i].node_status.nodeId === nodeId) {
+                            logr.debug('Peer disconnected because duplicate connections')
+                            p2p.sockets[i].close()
+                        }
+
+                    clearInterval(p2p.sockets[p2p.sockets.indexOf(ws)].pendingDisconnect)
+                    delete message.d.sign
+                    p2p.sockets[p2p.sockets.indexOf(ws)].node_status = message.d
+                } catch (error) {
+                    logr.error('Error during NODE_STATUS verification', error)
+                }
+
                 break
 
             case MessageType.QUERY_BLOCK:
@@ -467,6 +466,9 @@ let p2p = {
         let ip = ws._socket.remoteAddress
         if (ip.indexOf('::ffff:') > -1)
             ip = ip.replace('::ffff:', '')
+        // cap peerFailures to prevent memory leak from IP cycling
+        if (Object.keys(p2p.peerFailures).length >= 1000)
+            return
         if (!p2p.peerFailures[ip])
             p2p.peerFailures[ip] = 0
         p2p.peerFailures[ip]++

@@ -19,6 +19,10 @@ let config = {
             block0ts: 1601477849000,
             // the block hash serialization revision
             blockHashSerialization: 1,
+            // the consensus message serialization version
+            // 1: insertion order (no sort) — legacy
+            // 2: sorted keys — prevents key-ordering mismatches
+            consensusSigVersion: 1,
             // the block time in ms
             blockTime: 3000,
             // the number of ms needed for 0.01 DTC to generate 1 byte of bw
@@ -184,6 +188,7 @@ let config = {
         },
         241600: {
             forceFinalize: true,
+            consensusSigVersion: 2,
             txLimits: {
                 28: 0
             }

@@ -210,7 +210,7 @@ let chain = {
         })
     },
     addRecentTxsInBlock: (txs = []) => {
-        for (let t in txs)
+        for (let t = 0; t < txs.length; t++)
             chain.recentTxs[txs[t].hash] = txs[t]
     },
     minerWorker: (block) => {

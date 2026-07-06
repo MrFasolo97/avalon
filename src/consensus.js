@@ -74,7 +74,7 @@ let consensus = {
         consensus.tryNextStepBusy = true
         try {
         let consensus_size = consensus.activeLeaders().length
-        let threshold = consensus_size * consensus_threshold
+        let threshold = Math.ceil(consensus_size * consensus_threshold)
 
         // if we are observing, we need +1 to pass consensus as we want to manage our own rounds
         if (!consensus.isActive())
@@ -104,9 +104,9 @@ let consensus = {
 
         for (let i = 0; i < consensus.possBlocks.length; i++) {
             const possBlock = consensus.possBlocks[i]
-            logr.cons('T'+Math.ceil(threshold)+' R0-'+possBlock[0].length+' R1-'+possBlock[1].length)
+            logr.cons('T'+Math.ceil(threshold)+' R0-'+(possBlock[0]?possBlock[0].length:'?')+' R1-'+(possBlock[1]?possBlock[1].length:'?'))
             // if 2/3+ of the final round and not already finalizing another block
-            if (possBlock[config.consensusRounds-1].length > threshold 
+            if (possBlock[config.consensusRounds-1].length >= threshold 
             && !consensus.finalizing 
             && possBlock.block._id === chain.getLatestBlock()._id+1
             && possBlock[0] && possBlock[0].indexOf(process.env.NODE_OWNER) !== -1) {
@@ -155,7 +155,7 @@ let consensus = {
             }
             // if 2/3+ of any previous round, we try to commit it again
             else for (let y = 0; y < config.consensusRounds-1; y++)
-                if (possBlock[y].length > threshold)
+                if (possBlock[y].length >= threshold)
                     consensus.round(y+1, possBlock.block) 
         }
         } finally {

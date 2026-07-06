@@ -152,6 +152,7 @@ let consensus = {
             else for (let y = 0; y < config.consensusRounds-1; y++)
                 if (possBlock[y].length > threshold)
                     consensus.round(y+1, possBlock.block) 
+        }
         } finally {
             consensus.tryNextStepBusy = false
         }

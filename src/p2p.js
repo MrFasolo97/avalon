@@ -264,16 +264,18 @@ let p2p = {
 
             case MessageType.QUERY_BLOCK:
                 // a peer wants to see the data in one of our stored blocks
+                const blockId = parseInt(message.d, 10)
+                if (isNaN(blockId) || blockId < 0) break
                 if (blocks.isOpen) {
                     let block = {}
                     try {
-                        block = blocks.read(message.d)
+                        block = blocks.read(blockId)
                     } catch (e) {
                         break
                     }
                     p2p.sendJSON(ws, {t:MessageType.BLOCK, d:block})
                 } else
-                    db.collection('blocks').findOne({_id: message.d}, function(err, block) {
+                    db.collection('blocks').findOne({_id: blockId}, function(err, block) {
                         if (err)
                             throw err
                         if (block)

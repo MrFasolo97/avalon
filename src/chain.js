@@ -358,12 +358,12 @@ let chain = {
                     if (account.keys[i].types.indexOf(txType) > -1)
                         allowedPubKeys.push([account.keys[i].pub, account.keys[i].weight || 1])
             // account authorities
-            if (account.auths && typeof txType === 'number' && Number.isInteger(txType))
-                for (let i in account.auths)
+            if (account.auths && Array.isArray(account.auths) && typeof txType === 'number' && Number.isInteger(txType))
+                for (let i = 0; i < account.auths.length; i++)
                     if (account.auths[i].types.indexOf(txType) > -1) {
                         let authorizedAcc = await cache.findOnePromise('accounts',{name: account.auths[i].user})
-                        if (authorizedAcc && authorizedAcc.keys)
-                            for (let a in authorizedAcc.keys)
+                        if (authorizedAcc && authorizedAcc.keys && Array.isArray(authorizedAcc.keys))
+                            for (let a = 0; a < authorizedAcc.keys.length; a++)
                                 if (authorizedAcc.keys[a].id === account.auths[i].id) {
                                     allowedPubKeys.push([authorizedAcc.keys[a].pub, account.auths[i].weight || 1])
                                     break

@@ -72,6 +72,7 @@ let consensus = {
             return
         }
         consensus.tryNextStepBusy = true
+        try {
         let consensus_size = consensus.activeLeaders().length
         let threshold = consensus_size * consensus_threshold
 
@@ -152,7 +153,9 @@ let consensus = {
                 if (possBlock[y].length > threshold)
                     consensus.round(y+1, possBlock.block) 
         }
-        consensus.tryNextStepBusy = false
+        } finally {
+            consensus.tryNextStepBusy = false
+        }
     },
     round: (round, block, cb) => {
         // ignore for different block height
@@ -314,22 +317,29 @@ let consensus = {
         const sender = message.s && message.s.n
         if (!sender || !consensus.getActiveLeaderKey(sender)) return
         if (message.d.height !== consensus.ffProposals.height) return
-        const hash = message.d.hash
-        if (!hash) return
+        const hashes = message.d.hashes || (message.d.hash ? [message.d.hash] : null)
+        if (!hashes || !hashes.length) return
+
+        // Use the FIRST hash for respondent tracking (backward-compatible with single-hash messages)
+        const respondentHash = hashes[0]
+        if (!respondentHash) return
 
         // Track this respondent (even if we already have this hash — counts toward quorum)
-        if (consensus.ffProposals.respondents[sender] !== hash) {
-            consensus.ffProposals.respondents[sender] = hash
-            logr.cons('FF respondent: ' + sender + ' for ' + message.d.height + '#' + hash.substr(0, 8))
+        if (consensus.ffProposals.respondents[sender] !== respondentHash) {
+            consensus.ffProposals.respondents[sender] = respondentHash
+            logr.cons('FF respondent: ' + sender + ' for ' + message.d.height + '#' + (respondentHash.substr(0, 8)))
         }
 
-        // Add the block to proposals if we have it and haven't recorded it yet
-        if (!consensus.ffProposals.proposals[hash]) {
-            for (let i = 0; i < consensus.possBlocks.length; i++) {
-                const pb = consensus.possBlocks[i]
-                if (pb.block.hash === hash && pb.block._id === message.d.height) {
-                    consensus.ffProposals.proposals[hash] = pb
-                    break
+        // Add any candidates we have to proposals
+        for (let h = 0; h < hashes.length; h++) {
+            const hash = hashes[h]
+            if (!consensus.ffProposals.proposals[hash]) {
+                for (let i = 0; i < consensus.possBlocks.length; i++) {
+                    const pb = consensus.possBlocks[i]
+                    if (pb.block.hash === hash && pb.block._id === message.d.height) {
+                        consensus.ffProposals.proposals[hash] = pb
+                        break
+                    }
                 }
             }
         }
@@ -376,10 +386,12 @@ let consensus = {
             consensus.forceFinalizeTimeout.unref()
     },
     _getQuorumThreshold: () => {
-        // Use fixed config.leaders (total elected set) rather than dynamic
-        // activeLeaders() to prevent Sybil/leader-dropping attacks from
-        // lowering the quorum threshold below a safe level.
-        return Math.ceil(config.leaders * 2 / 3)
+        const activeCount = Math.max(1, consensus.activeLeaders().length)
+        const configThreshold = Math.ceil(config.leaders * 2 / 3)
+        const activeThreshold = Math.ceil(activeCount * 2 / 3)
+        // Cap quorum to the lower of config-based and active-based thresholds,
+        // ensuring achievability when few leaders are active.
+        return Math.min(configThreshold, Math.max(activeThreshold, 1))
     },
     _forceFinalize: (height, candidateRetry) => {
         if (consensus.finalizing) return
@@ -432,7 +444,7 @@ let consensus = {
         if (p2p && p2p.broadcast) {
             const proposal = consensus.signMessage({
                 t: 7,
-                d: { height, hash: winner.block.hash, timestamp: winner.block.timestamp }
+                d: { height, hashes: candidates.map(c => c.block.hash), timestamp: winner.block.timestamp }
             })
             p2p.broadcast(proposal)
         }
@@ -507,7 +519,7 @@ let consensus = {
                 const winner = allCandidates[0]
                 const proposal = consensus.signMessage({
                     t: 7,
-                    d: { height, hash: winner.block.hash, timestamp: winner.block.timestamp }
+                    d: { height, hashes: allCandidates.map(c => c.block.hash), timestamp: winner.block.timestamp }
                 })
                 p2p.broadcast(proposal)
             }

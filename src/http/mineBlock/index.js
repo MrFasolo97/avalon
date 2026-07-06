@@ -17,7 +17,6 @@ module.exports = {
                 if (bearer !== requiredToken && req.query.token !== requiredToken)
                     return res.status(401).send({error: 'invalid token'})
             }
-            delete p2p.recovering
             res.send(chain.getLatestBlock()._id.toString())
             chain.mineBlock(function (error, finalBlock) {
                 if (error)

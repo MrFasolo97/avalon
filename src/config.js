@@ -187,6 +187,8 @@ let config = {
             forceFinalizeFallback: false,
         },
         241600: {
+            forceFinalize: true,
+            consensusSigVersion: 2,
             txLimits: {
                 28: 0
             }

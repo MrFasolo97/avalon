@@ -259,6 +259,13 @@ truncate_blocks_bson() {
 
 # === MongoDB Helpers ===
 
+is_positive_integer() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
 find_mongo_cmd() {
     if command -v mongosh &>/dev/null; then
         echo "mongosh"
@@ -357,14 +364,20 @@ cleanup_mongodb_state() {
             info "[DRY-RUN] Would move kept blocks (≤ #$new_height) to temp, drop DB, restore"
             return 0
         fi
-        run_mongo "
-            const newHeight = $new_height;
+        if ! is_positive_integer "$new_height"; then
+            err "Invalid block height: $new_height"
+            return 1
+        fi
+
+        NEW_HEIGHT="$new_height" TMP_COLL="$tmp_coll" run_mongo "
+            const newHeight = parseInt(process.env.NEW_HEIGHT, 10);
+            const tmpColl = process.env.TMP_COLL;
             // Copy kept blocks to temp collection
             const docs = db.blocks.aggregate([
                 {\$match: {_id: {\$lte: newHeight}}},
-                {\$out: '$tmp_coll'}
+                {\$out: tmpColl}
             ]);
-            const kept = db.getCollection('$tmp_coll').countDocuments();
+            const kept = db.getCollection(tmpColl).countDocuments();
             if (kept === 0) {
                 print('ERROR: No blocks to preserve');
                 quit(1);
@@ -376,11 +389,11 @@ cleanup_mongodb_state() {
             print('Database dropped');
 
             // Restore blocks from temp
-            db.getCollection('$tmp_coll').aggregate([
+            db.getCollection(tmpColl).aggregate([
                 {\$match: {}},
                 {\$out: 'blocks'}
             ]);
-            db.getCollection('$tmp_coll').drop();
+            db.getCollection(tmpColl).drop();
             print('Blocks restored, temp collection removed');
         " || {
             err "Failed to reset MongoDB state"

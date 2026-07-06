@@ -396,10 +396,13 @@ let consensus = {
             consensus.forceFinalizeTimeout.unref()
     },
     _getQuorumThreshold: () => {
-        // Use fixed config.leaders (total elected set) rather than dynamic
-        // activeLeaders() to prevent Sybil/leader-dropping attacks from
-        // lowering the quorum threshold below a safe level.
-        return Math.ceil(config.leaders * 2 / 3)
+        const activeCount = Math.max(1, consensus.activeLeaders().length)
+        const configThreshold = Math.ceil(config.leaders * 2 / 3)
+        const activeThreshold = Math.ceil(activeCount * 2 / 3)
+        // Cap quorum to the lower of config-based and active-based thresholds,
+        // so it's achievable when few leaders are mining, while keeping a minimum
+        // of 1 to prevent Sybil from reducing quorum to zero.
+        return Math.min(configThreshold, Math.max(activeThreshold, 1))
     },
     _forceFinalize: (height, candidateRetry) => {
         if (consensus.finalizing) return

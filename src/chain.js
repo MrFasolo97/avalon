@@ -342,6 +342,7 @@ let chain = {
     isValidSignature: (user, txType, hash, sign, cb) => {
         // verify signature and bandwidth
         cache.findOne('accounts', {name: user}, async function(err, account) {
+            try {
             if (err) throw err
             if (!account) {
                 cb(false); return
@@ -401,6 +402,10 @@ let chain = {
                 }
             } catch (e) {}
             cb(false)
+            } catch (e) {
+                logr.error('Unhandled error in isValidSignature', e)
+                cb(false)
+            }
         })
     },
     isValidMultisig: (account,threshold,allowedPubKeys,hash,signatures,cb) => {

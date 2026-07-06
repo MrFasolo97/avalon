@@ -823,6 +823,13 @@ let chain = {
     cleanMemoryBlocks: () => {
         if (config.ecoBlocksIncreasesSoon) {
             logr.trace('Keeping old blocks in memory because ecoBlocks is changing soon')
+            if (chain.recentBlocks.length > config.ecoBlocks * 2) {
+                let overflow = chain.recentBlocks.length - config.ecoBlocks * 2
+                while (overflow > 0) {
+                    chain.recentBlocks.shift()
+                    overflow--
+                }
+            }
             return
         }
             

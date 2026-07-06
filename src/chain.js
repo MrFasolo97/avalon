@@ -70,13 +70,18 @@ let chain = {
         // grab all transactions and sort by ts
         let txs = []
         let mempool = transaction.pool.sort(function(a,b){return a.ts-b.ts})
+        const maxPerSender = Math.max(1, Math.floor(config.maxTxPerBlock / 10))
         loopOne:
         for (let i = 0; i < mempool.length; i++) {
             if (txs.length === config.maxTxPerBlock)
                 break
+            let senderCount = 0
             for (let y = 0; y < txs.length; y++)
-                if (txs[y].sender === mempool[i].sender)
-                    continue loopOne
+                if (txs[y].sender === mempool[i].sender) {
+                    senderCount++
+                    if (senderCount >= maxPerSender)
+                        continue loopOne
+                }
             txs.push(mempool[i])
         }
 

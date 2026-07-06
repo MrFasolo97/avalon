@@ -349,8 +349,8 @@ let p2p = {
                 // it should come from one of the elected leaders, so let's verify signature
                 if (p2p.recovering) return
                 if (!message.s || !message.s.s || !message.s.n) return
-                if (!message.d || !message.d.ts || 
-                    typeof message.d.ts != 'number' ||
+                if (!message.d || !Number.isFinite(message.d.ts) ||
+                    !Number.isInteger(message.d.ts) || message.d.ts <= 0 ||
                     message.d.ts + 2*config.blockTime < new Date().getTime() ||
                     message.d.ts - 2*config.blockTime > new Date().getTime()) return
 

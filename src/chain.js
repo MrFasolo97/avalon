@@ -342,6 +342,7 @@ let chain = {
     isValidSignature: (user, txType, hash, sign, cb) => {
         // verify signature and bandwidth
         cache.findOne('accounts', {name: user}, async function(err, account) {
+            try {
             if (err) throw err
             if (!account) {
                 cb(false); return
@@ -401,22 +402,32 @@ let chain = {
                 }
             } catch (e) {}
             cb(false)
+            } catch (e) {
+                logr.error('Unhandled error in isValidSignature', e)
+                cb(false)
+            }
         })
     },
     isValidMultisig: (account,threshold,allowedPubKeys,hash,signatures,cb) => {
+        if (!Array.isArray(signatures) || signatures.length > 50) {
+            return cb(false, 'invalid signature count')
+        }
         let validWeights = 0
-        let validSigs = []
+        let validSigSet = new Set()
         try {
+            let allowedPubSet = {}
+            for (let p = 0; p < allowedPubKeys.length; p++)
+                allowedPubSet[allowedPubKeys[p][0]] = true
             let hashBuf = Buffer.from(hash, 'hex')
             for (let s = 0; s < signatures.length; s++) {
                 let signBuf = bs58.decode(signatures[s][0])
                 let recoveredPub = bs58.encode(secp256k1.ecdsaRecover(signBuf,signatures[s][1],hashBuf))
-                if (validSigs.includes(recoveredPub))
-                    return cb(false, 'duplicate signatures found')
+                if (!allowedPubSet[recoveredPub] || validSigSet.has(recoveredPub))
+                    continue
                 for (let p = 0; p < allowedPubKeys.length; p++)
                     if (allowedPubKeys[p][0] === recoveredPub) {
                         validWeights += allowedPubKeys[p][1]
-                        validSigs.push(recoveredPub)
+                        validSigSet.add(recoveredPub)
                     }
             }
         } catch (e) {
@@ -693,7 +704,7 @@ let chain = {
         let leaders = []
         let leaderAccs = withLeaderPub ? cache.leaders : cache.accounts
         for (const key in leaderAccs) {
-            if (!cache.accounts[key].node_appr || cache.accounts[key].node_appr <= 0)
+            if (!cache.accounts[key] || !cache.accounts[key].node_appr || cache.accounts[key].node_appr <= 0)
                 continue
             if (withLeaderPub && !cache.accounts[key].pub_leader)
                 continue
@@ -812,6 +823,13 @@ let chain = {
     cleanMemoryBlocks: () => {
         if (config.ecoBlocksIncreasesSoon) {
             logr.trace('Keeping old blocks in memory because ecoBlocks is changing soon')
+            if (chain.recentBlocks.length > config.ecoBlocks * 2) {
+                let overflow = chain.recentBlocks.length - config.ecoBlocks * 2
+                while (overflow > 0) {
+                    chain.recentBlocks.shift()
+                    overflow--
+                }
+            }
             return
         }
             

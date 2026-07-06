@@ -380,7 +380,3 @@ let cache = {
 }
 
 module.exports = cache
-e.exports = cache
-che
-ports = cache
-che

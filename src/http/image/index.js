@@ -27,8 +27,14 @@ async function isPrivateURL(urlStr) {
             ip = host
         } else {
             try {
-                const lookup = await dns.lookup(host, {family: 4})
-                ip = lookup.address
+                const controller = new AbortController()
+                const timeout = setTimeout(() => controller.abort(), 5000)
+                try {
+                    const lookup = await dns.lookup(host, {family: 4, signal: controller.signal})
+                    ip = lookup.address
+                } finally {
+                    clearTimeout(timeout)
+                }
             } catch {
                 return true
             }
@@ -60,8 +66,14 @@ async function isPrivateURL(urlStr) {
 async function resolveAndPin(host) {
     if (net.isIP(host)) return host
     try {
-        const lookup = await dns.lookup(host, {family: 4})
-        return lookup.address
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 5000)
+        try {
+            const lookup = await dns.lookup(host, {family: 4, signal: controller.signal})
+            return lookup.address
+        } finally {
+            clearTimeout(timeout)
+        }
     } catch {
         return null
     }
@@ -70,8 +82,14 @@ async function resolveAndPin(host) {
 async function checkRebinding(host, pinnedIp) {
     if (net.isIP(host)) return pinnedIp === host
     try {
-        const lookup = await dns.lookup(host, {family: 4})
-        return lookup.address === pinnedIp
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 5000)
+        try {
+            const lookup = await dns.lookup(host, {family: 4, signal: controller.signal})
+            return lookup.address === pinnedIp
+        } finally {
+            clearTimeout(timeout)
+        }
     } catch {
         return false
     }
@@ -197,7 +215,7 @@ module.exports = {
     }
 }
 
-async function fetchAndRespondImage(imageUrl,res,width,height,cacher) {
+async function fetchAndRespondImage(imageUrl,res,width,height,cacher,redirectsRemaining = 5) {
     try {
         if (await isPrivateURL(imageUrl))
             return res.status(400).send({error: 'invalid image url'})
@@ -216,6 +234,8 @@ async function fetchAndRespondImage(imageUrl,res,width,height,cacher) {
         const timeout = setTimeout(() => controller.abort(), 5000)
         let imgFetch = await fetch(fetchUrl, { signal: controller.signal, redirect: 'manual' })
         if (imgFetch.status >= 300 && imgFetch.status < 400) {
+            if (redirectsRemaining <= 0)
+                return res.status(400).send({error: 'too many redirects'})
             const location = imgFetch.headers.get('location')
             if (location) {
                 if (await isPrivateURL(location))
@@ -225,7 +245,7 @@ async function fetchAndRespondImage(imageUrl,res,width,height,cacher) {
                 if (!locPinned || !(await checkRebinding(locParsed.hostname, locPinned)))
                     return res.status(400).send({error: 'dns rebinding detected on redirect'})
                 clearTimeout(timeout)
-                return fetchAndRespondImage(location, res, width, height, cacher)
+                return fetchAndRespondImage(location, res, width, height, cacher, redirectsRemaining - 1)
             }
             return res.status(400).send({error: 'redirect not allowed'})
         }

@@ -229,14 +229,20 @@ let consensus = {
 
                     // processing queued messages for this block
                     for (let i = 0; i < consensus.queue.length; i++) {
-                        if (consensus.queue[i].d.b.hash === possBlock.block.hash) {
-                            // logr.warn('From Queue: '+consensus.queue[i].d.b.hash)
-                            consensus.remoteRoundConfirm(consensus.queue[i])
+                        const msg = consensus.queue[i]
+                        if (!msg || !msg.d || !msg.d.b || !msg.d.b.hash) {
                             consensus.queue.splice(i, 1)
                             i--
                             continue
                         }
-                        if (consensus.queue[i].d.ts + 2*config.blockTime < new Date().getTime()) {
+                        if (msg.d.b.hash === possBlock.block.hash) {
+                            // logr.warn('From Queue: '+msg.d.b.hash)
+                            consensus.remoteRoundConfirm(msg)
+                            consensus.queue.splice(i, 1)
+                            i--
+                            continue
+                        }
+                        if (msg.d.ts + 2*config.blockTime < new Date().getTime()) {
                             consensus.queue.splice(i, 1)
                             i--
                         }

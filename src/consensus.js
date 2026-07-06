@@ -126,6 +126,7 @@ let consensus = {
                     logr.cons('block '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,4)+' got finalized')
 
                     chain.validateAndAddBlock(possBlock.block, false, function(err) {
+                    try {
                     if (err) {
                         logr.error('Consensus block validation failed for '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,8)+' by '+possBlock.block.miner, err)
                         cache.rollback()
@@ -146,6 +147,10 @@ let consensus = {
                     consensus.finalizing = false
                     if (config.forceFinalize)
                         consensus.cancelForceFinalize()
+                    } catch (e) {
+                        logr.error('Unhandled error in validateAndAddBlock callback', e)
+                        consensus.finalizing = false
+                    }
                 })
             }
             // if 2/3+ of any previous round, we try to commit it again
@@ -224,14 +229,20 @@ let consensus = {
 
                     // processing queued messages for this block
                     for (let i = 0; i < consensus.queue.length; i++) {
-                        if (consensus.queue[i].d.b.hash === possBlock.block.hash) {
-                            // logr.warn('From Queue: '+consensus.queue[i].d.b.hash)
-                            consensus.remoteRoundConfirm(consensus.queue[i])
+                        const msg = consensus.queue[i]
+                        if (!msg || !msg.d || !msg.d.b || !msg.d.b.hash) {
                             consensus.queue.splice(i, 1)
                             i--
                             continue
                         }
-                        if (consensus.queue[i].d.ts + 2*config.blockTime < new Date().getTime()) {
+                        if (msg.d.b.hash === possBlock.block.hash) {
+                            // logr.warn('From Queue: '+msg.d.b.hash)
+                            consensus.remoteRoundConfirm(msg)
+                            consensus.queue.splice(i, 1)
+                            i--
+                            continue
+                        }
+                        if (msg.d.ts + 2*config.blockTime < new Date().getTime()) {
                             consensus.queue.splice(i, 1)
                             i--
                         }
@@ -316,32 +327,43 @@ let consensus = {
         if (!consensus.ffProposals) return
         const sender = message.s && message.s.n
         if (!sender || !consensus.getActiveLeaderKey(sender)) return
+        const actives = consensus.activeLeaders()
+        if (actives.indexOf(sender) === -1) return
         if (message.d.height !== consensus.ffProposals.height) return
-        const hashes = message.d.hashes || (message.d.hash ? [message.d.hash] : null)
-        if (!hashes || !hashes.length) return
 
-        // Use the FIRST hash for respondent tracking (backward-compatible with single-hash messages)
-        const respondentHash = hashes[0]
-        if (!respondentHash) return
-
-        // Track this respondent (even if we already have this hash — counts toward quorum)
-        if (consensus.ffProposals.respondents[sender] !== respondentHash) {
-            consensus.ffProposals.respondents[sender] = respondentHash
-            logr.cons('FF respondent: ' + sender + ' for ' + message.d.height + '#' + (respondentHash.substr(0, 8)))
+        // Determine which hash this sender is voting for
+        let hash = message.d.hash
+        if (!hash && Array.isArray(message.d.hashes)) {
+            // Pick best local match from the sender's candidate list
+            const local = consensus.possBlocks.filter(pb =>
+                pb.block._id === message.d.height
+                && message.d.hashes.indexOf(pb.block.hash) !== -1
+            )
+            local.sort((a, b) => {
+                if (a.block.timestamp !== b.block.timestamp)
+                    return a.block.timestamp - b.block.timestamp
+                return a.block.hash < b.block.hash ? -1 : 1
+            })
+            hash = local[0] && local[0].block.hash
         }
+        if (!hash) return
 
-        // Add any candidates we have to proposals
-        for (let h = 0; h < hashes.length; h++) {
-            const hash = hashes[h]
-            if (!consensus.ffProposals.proposals[hash]) {
-                for (let i = 0; i < consensus.possBlocks.length; i++) {
-                    const pb = consensus.possBlocks[i]
-                    if (pb.block.hash === hash && pb.block._id === message.d.height) {
-                        consensus.ffProposals.proposals[hash] = pb
-                        break
-                    }
+        // Only accept votes for blocks we actually have locally
+        if (!consensus.ffProposals.proposals[hash]) {
+            for (let i = 0; i < consensus.possBlocks.length; i++) {
+                const pb = consensus.possBlocks[i]
+                if (pb.block.hash === hash && pb.block._id === message.d.height) {
+                    consensus.ffProposals.proposals[hash] = pb
+                    break
                 }
             }
+        }
+        if (!consensus.ffProposals.proposals[hash]) return
+
+        // Track this respondent
+        if (consensus.ffProposals.respondents[sender] !== hash) {
+            consensus.ffProposals.respondents[sender] = hash
+            logr.cons('FF respondent: ' + sender + ' for ' + message.d.height + '#' + hash.substr(0, 8))
         }
 
         // Re-broadcast the proposal to accelerate convergence
@@ -433,18 +455,18 @@ let consensus = {
             logr.warn('Force finalizing block ' + height + '#' + winner.block.hash.substr(0, 8) + ' by ' + winner.block.miner + ' — selected locally without consensus, fork risk if peers diverge')
         }
 
-        // Anti-fork: broadcast proposal to peers and collect responses before committing
+        // Anti-fork: broadcast ALL candidates to peers and collect responses before committing
         const ownName = process.env.NODE_OWNER
+        const candidateHashes = candidates.map(c => c.block.hash)
         consensus.ffProposals = { height, proposals: {}, respondents: {} }
         candidates.forEach(c => { consensus.ffProposals.proposals[c.block.hash] = c })
-        consensus.ffProposals.proposals[winner.block.hash] = winner
         if (consensus.getActiveLeaderKey(ownName))
             consensus.ffProposals.respondents[ownName] = winner.block.hash
 
         if (p2p && p2p.broadcast) {
             const proposal = consensus.signMessage({
                 t: 7,
-                d: { height, hashes: candidates.map(c => c.block.hash), timestamp: winner.block.timestamp }
+                d: { height, hashes: candidateHashes, timestamp: winner.block.timestamp }
             })
             p2p.broadcast(proposal)
         }
@@ -460,6 +482,12 @@ let consensus = {
         }
 
         const allCandidates = Object.values(consensus.ffProposals.proposals)
+        if (allCandidates.length === 0) {
+            logr.error('FF resolve: no proposals for height ' + height)
+            consensus.ffProposals = null
+            consensus.finalizing = false
+            return
+        }
         allCandidates.sort((a, b) => {
             if (a.block.timestamp !== b.block.timestamp)
                 return a.block.timestamp - b.block.timestamp
@@ -514,6 +542,9 @@ let consensus = {
             const delay = FF_BACKOFF_MS[ffAttempt + 1]
             logr.cons('FF retry ' + (ffAttempt + 1) + '/' + maxAttempts + ' in ' + delay + 'ms for height ' + height)
 
+            // Reset respondents for fresh round
+            consensus.ffProposals.respondents = {}
+
             // Re-broadcast proposal in case peers missed it
             if (p2p && p2p.broadcast) {
                 const winner = allCandidates[0]
@@ -549,15 +580,17 @@ let consensus = {
         }
     },
     _applyForceFinalize: (height, winner, retryCount) => {
-        chain.validateAndAddBlock(winner.block, false, function(err) {
+        chain.validateAndAddBlock(winner.block, true, function(err) {
             if (err) {
                 logr.error('Force finalize failed for ' + height + '#' + winner.block.hash.substr(0, 8), err)
                 consensus.possBlocks = consensus.possBlocks.filter(pb => pb.block.hash !== winner.block.hash)
                 const remaining = consensus.possBlocks.filter(pb => pb.block._id === height)
                 if (remaining.length > 0 && retryCount < 3) {
                     logr.warn('Trying next candidate for height ' + height + ' (retry ' + (retryCount + 1) + '/3)')
-                    consensus.finalizing = false
-                    setImmediate(() => consensus._forceFinalize(height, retryCount + 1))
+                    setImmediate(() => {
+                        consensus.finalizing = false
+                        consensus._forceFinalize(height, retryCount + 1)
+                    })
                     return
                 }
                 if (remaining.length > 0) {

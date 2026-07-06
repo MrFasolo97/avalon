@@ -8,16 +8,18 @@ module.exports = {
          * @apiSuccess {Array} accounts List of accounts ranked by `node_appr` regardless of existence of a valid signing key.
          */
         app.get('/allminers', (req, res) => {
+            const limit = Math.min(parseInt(req.query.limit, 10) || 1000, 10000)
             db.collection('accounts').find({ node_appr: { $gt: 0 } }, {
-                sort: { node_appr: -1 }
+                sort: { node_appr: -1 },
+                limit
             }).toArray(function (err, accounts) {
                 if (err) return res.status(500).send({ error: 'failed to fetch miners' })
                 db.collection('leaders').find({ voters: { $gt: 0 } },{}).toArray((err,leaders) => {
                     if (err) return res.status(500).send({ error: 'failed to fetch leader stats' })
                     let leaderObj = {}
-                    for (let i in leaders)
+                    for (let i = 0; i < leaders.length; i++)
                         leaderObj[leaders[i]._id] = leaders[i]
-                    for (let i in accounts) {
+                    for (let i = 0; i < accounts.length; i++) {
                         accounts[i].subbed = (accounts[i].follows ? accounts[i].follows.length : 0)
                         accounts[i].subs = (accounts[i].followers ? accounts[i].followers.length : 0)
                         delete accounts[i].follows

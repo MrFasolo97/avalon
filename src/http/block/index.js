@@ -34,7 +34,7 @@ module.exports = {
                 return res.send(block)
             }
             db.collection('blocks').findOne({ _id: blockNumber }, function (err, block) {
-                if (err) throw err
+                if (err) { logr.error('block query failed', err); return res.status(500).send({error: 'query failed'}) }
                 if (!block) {
                     res.sendStatus(404)
                     return

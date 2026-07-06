@@ -10,7 +10,7 @@ module.exports = {
             if (!valid)
                 return cb(false,error)
             cache.findOne('accounts', {name: tx.sender}, function(err, account) {
-                if (err) throw err
+                if (err) { logr.error('newAccountWithBw error', err); return cb(false, 'internal error') }
                 let bwBefore = new GrowInt(account.bw, {growth:Math.max(account.baseBwGrowth || 0, account.balance)/(config.bwGrowth)}).grow(ts)
                 if (bwBefore.v < tx.data.amount)
                     cb(false, 'invalid tx not enough bw')
@@ -52,7 +52,7 @@ module.exports = {
                     {name: tx.sender},
                     {$inc: {balance: -eco.accountPrice(tx.data.name)}}, function() {
                         cache.findOne('accounts', {name: tx.sender}, function(err, acc) {
-                            if (err) throw err
+                            if (err) { logr.error('newAccountWithBw error', err); return cb(false, 'internal error') }
                             // update his bandwidth
                             acc.balance += eco.accountPrice(tx.data.name)
                             transaction.updateGrowInts(acc, ts, function() {

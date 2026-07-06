@@ -6,7 +6,7 @@ module.exports = {
         }
 
         cache.findOne('accounts', {name: tx.sender}, function(err, acc) {
-            if (err) throw err
+            if (err) { logr.error('approveNode error', err); return cb(false, 'internal error') }
             if (!acc.approves) acc.approves = []
             if (acc.approves.indexOf(tx.data.target) > -1) {
                 cb(false, 'invalid tx already voting'); return
@@ -32,7 +32,7 @@ module.exports = {
             {$push: {approves: tx.data.target}},
             function() {
                 cache.findOne('accounts', {name: tx.sender}, function(err, acc) {
-                    if (err) throw err
+                    if (err) { logr.error('approveNode error', err); return cb(false, 'internal error') }
                     if (!acc.approves) acc.approves = []
                     let node_appr = Math.floor(acc.balance/acc.approves.length)
                     let node_appr_before = (acc.approves.length === 1 ? 0 : Math.floor(acc.balance/(acc.approves.length-1)))

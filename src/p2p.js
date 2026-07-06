@@ -100,7 +100,7 @@ let p2p = {
         // ensure all peers explicitly listed in PEERS are connected when online
         let peers = process.env.PEERS ? process.env.PEERS.split(',') : []
         let toConnect = []
-        for (let p in peers) {
+        for (let p = 0; p < peers.length; p++) {
             let connected = false
             let colonSplit = peers[p].replace('ws://','').split(':')
             let port = parseInt(colonSplit.pop())
@@ -112,7 +112,7 @@ let p2p = {
                     logr.debug('dns lookup failed for '+address)
                     continue
                 }
-            for (let s in p2p.sockets)
+            for (let s = 0; s < p2p.sockets.length; s++)
                 if (p2p.sockets[s]._socket.remoteAddress.replace('::ffff:','') === address && p2p.sockets[s]._socket.remotePort === port) {
                     connected = true
                     break
@@ -254,7 +254,7 @@ let p2p = {
                             p2p.sockets[i].close()
                         }
 
-                    clearInterval(p2p.sockets[p2p.sockets.indexOf(ws)].pendingDisconnect)
+                    clearTimeout(p2p.sockets[p2p.sockets.indexOf(ws)].pendingDisconnect)
                     delete message.d.sign
                     p2p.sockets[p2p.sockets.indexOf(ws)].node_status = message.d
                 } catch (error) {
@@ -400,6 +400,17 @@ let p2p = {
 
             case MessageType.FORCE_FINALIZE:
                 if (!message.s || !message.s.s || !message.s.n) break
+                // Dedup by height to prevent broadcast amplification
+                const ffH = message.d && message.d.height
+                if (ffH) {
+                    const now = Date.now()
+                    if (ff_amplify_seen[ffH] && now - ff_amplify_seen[ffH] < 120000) break
+                    ff_amplify_seen[ffH] = now
+                }
+                // Expire stale dedup entries
+                for (const hh in ff_amplify_seen)
+                    if (Date.now() - ff_amplify_seen[hh] > 120000)
+                        delete ff_amplify_seen[hh]
                 consensus.verifySignature(message, function(isValid) {
                     if (!isValid) {
                         logr.warn('Received wrong FF signature from ' + message.s.n)
@@ -561,9 +572,10 @@ let p2p = {
         }
         // clean stale blockSenders entries (older than 2 minutes)
         const now = Date.now()
-        for (const hash in p2p.blockSenders)
+        Object.keys(p2p.blockSenders).forEach(hash => {
             if (now - p2p.blockSenders[hash].ts > 120000)
                 delete p2p.blockSenders[hash]
+        })
     }
 }
 

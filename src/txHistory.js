@@ -5,7 +5,7 @@ let txHistory = {
     accounts: process.env.TX_HISTORY_ACCOUNTS ? process.env.TX_HISTORY_ACCOUNTS.split(',') : [],
     processBlock: (block) => {
         if (process.env.TX_HISTORY !== '1') return
-        for (let t in block.txs)
+        for (let t = 0; t < block.txs.length; t++)
             if (txHistory.accounts.length === 0 ||
                 txHistory.accounts.includes(block.txs[t].sender) ||
                 txHistory.accounts.includes(block.txs[t].data.target) ||
@@ -21,7 +21,7 @@ let txHistory = {
     getWriteOps: () => {
         if (process.env.TX_HISTORY !== '1') return []
         let ops = []
-        for (let i in txHistory.indexQueue) {
+        for (let i = 0; i < txHistory.indexQueue.length; i++) {
             let newTx = txHistory.indexQueue[i]
             ops.push((cb) => db.collection('txs').insertOne(newTx,cb))
         }

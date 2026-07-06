@@ -9,7 +9,7 @@ module.exports = {
             cb(false, 'invalid tx data.link'); return
         }
         cache.findOne('contents', {_id: tx.sender+'/'+tx.data.link}, function(err, content) {
-            if (err) throw err
+            if (err) { logr.error('promotedComment error', err); return cb(false, 'internal error') }
             if (content) {
                 cb(false, 'cannot edit and promote'); return
             }
@@ -26,7 +26,7 @@ module.exports = {
                         cb(false, 'invalid tx data.burn'); return
                     }
                     cache.findOne('accounts', {name: tx.sender}, function(err, account) {
-                        if (err) throw err
+                        if (err) { logr.error('promotedComment error', err); return cb(false, 'internal error') }
                         if (dao.availableBalance(account,ts) < tx.data.burn)
                             return cb(false, 'invalid tx not enough balance to burn')
                         cb(true)

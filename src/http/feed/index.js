@@ -144,13 +144,14 @@ module.exports = {
                 else 
                     tags_in.push(tags[i])
 
-            for (let v of authors_in.concat(authors_ex, tags_in, tags_ex))
+            const allVals = authors_in.concat(authors_ex, tags_in, tags_ex).filter(Boolean)
+            for (let v of allVals)
                 if (v !== 'all' && !isValidFilterValue(v))
                     return res.status(400).send({error: 'invalid filter value'})
             let limit = filterMap['limit']
 
-            if(limit === -1 || isNaN(limit)) 
-                limit = Number.MAX_SAFE_INTEGER
+            if (isNaN(limit) || limit < 1 || limit > 100)
+                limit = 50
 
             let tsrange = filterMap['tsrange']
             let tsfrom, tsto

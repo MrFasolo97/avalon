@@ -13,7 +13,9 @@ const blocks = require('./blocks')
 const GrowInt = require('growint')
 const default_replay_output = 100
 const replay_output = process.env.REPLAY_OUTPUT || default_replay_output
-const skip_check_early_blocks = [3889058] // to be removed in case of a fork or new net.
+// Temporal check bypass for specific block heights during migrations/forks.
+// Set via env: SKIP_EARLY_CHECK_BLOCKS=3889058,4000000
+const skip_check_early_blocks = (process.env.SKIP_EARLY_CHECK_BLOCKS || '3889058').split(',').map(Number)
 const max_batch_blocks = 10000
 
 class Block {
@@ -70,6 +72,8 @@ let chain = {
         // grab all transactions and sort by ts
         let txs = []
         let mempool = transaction.pool.sort(function(a,b){return a.ts-b.ts})
+        const maxPerSender = Math.max(1, Math.floor(config.maxTxPerBlock / 10))
+        // pass 1: at most 1 tx per unique sender (fairness)
         loopOne:
         for (let i = 0; i < mempool.length; i++) {
             if (txs.length === config.maxTxPerBlock)
@@ -80,6 +84,8 @@ let chain = {
             txs.push(mempool[i])
         }
 
+        // pass 2: fill remaining slots with a per-sender cap
+        const senderCounts = {}
         loopTwo:
         for (let i = 0; i < mempool.length; i++) {
             if (txs.length === config.maxTxPerBlock)
@@ -87,6 +93,10 @@ let chain = {
             for (let y = 0; y < txs.length; y++)
                 if (txs[y].hash === mempool[i].hash)
                     continue loopTwo
+            const sender = mempool[i].sender || 'unknown'
+            senderCounts[sender] = (senderCounts[sender] || 0) + 1
+            if (senderCounts[sender] > maxPerSender)
+                continue loopTwo
             txs.push(mempool[i])
         }
         txs = txs.sort(function(a,b){return a.ts-b.ts})
@@ -703,11 +713,12 @@ let chain = {
     generateLeaders: (withLeaderPub, withWs, limit, start) => {
         let leaders = []
         let leaderAccs = withLeaderPub ? cache.leaders : cache.accounts
-        for (const key in leaderAccs) {
+        Object.keys(leaderAccs).forEach(key => {
+            if (!leaderAccs.hasOwnProperty || !leaderAccs.hasOwnProperty(key)) return
             if (!cache.accounts[key] || !cache.accounts[key].node_appr || cache.accounts[key].node_appr <= 0)
-                continue
+                return
             if (withLeaderPub && !cache.accounts[key].pub_leader)
-                continue
+                return
             let leader = cache.accounts[key]
             let leaderDetails = {
                 name: leader.name,
@@ -720,7 +731,7 @@ let chain = {
             if (withWs && leader.json && leader.json.node && typeof leader.json.node.ws === 'string')
                 leaderDetails.ws = leader.json.node.ws
             leaders.push(leaderDetails)
-        }
+        })
         leaders = leaders.sort(function(a,b) {
             return b.node_appr - a.node_appr
         })

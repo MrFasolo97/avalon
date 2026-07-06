@@ -16,6 +16,7 @@ let consensus = {
     validating: [],
     processed: [],
     queue: [],
+    maxQueueSize: 5000,
     finalizing: false,
     forceFinalizeTimeout: null,
     ffProposals: null,
@@ -411,9 +412,8 @@ let consensus = {
         const activeCount = Math.max(1, consensus.activeLeaders().length)
         const configThreshold = Math.ceil(config.leaders * 2 / 3)
         const activeThreshold = Math.ceil(activeCount * 2 / 3)
-        // Cap quorum to the lower of config-based and active-based thresholds,
-        // ensuring achievability when few leaders are active.
-        return Math.min(configThreshold, Math.max(activeThreshold, 1))
+        // Require at least 2 respondents so no single node can force-finalize
+        return Math.min(configThreshold, Math.max(activeThreshold, 2))
     },
     _forceFinalize: (height, candidateRetry) => {
         if (consensus.finalizing) return
@@ -456,6 +456,8 @@ let consensus = {
         }
 
         // Anti-fork: broadcast ALL candidates to peers and collect responses before committing
+        // Dedup: skip if we already have an in-flight proposal at the same height
+        if (consensus.ffProposals && consensus.ffProposals.height === height) return
         const ownName = process.env.NODE_OWNER
         const candidateHashes = candidates.map(c => c.block.hash)
         consensus.ffProposals = { height, proposals: {}, respondents: {} }
@@ -542,8 +544,11 @@ let consensus = {
             const delay = FF_BACKOFF_MS[ffAttempt + 1]
             logr.cons('FF retry ' + (ffAttempt + 1) + '/' + maxAttempts + ' in ' + delay + 'ms for height ' + height)
 
-            // Reset respondents for fresh round
-            consensus.ffProposals.respondents = {}
+            // Reset respondents for fresh round — preserve existing votes to prevent vote replay
+            const prevRespondents = {}
+            if (consensus.ffProposals && consensus.ffProposals.respondents)
+                Object.assign(prevRespondents, consensus.ffProposals.respondents)
+            consensus.ffProposals.respondents = prevRespondents
 
             // Re-broadcast proposal in case peers missed it
             if (p2p && p2p.broadcast) {
@@ -604,9 +609,10 @@ let consensus = {
 
             // cleanup P2P blockSenders — delete entries for all finalized blocks
             if (p2p && p2p.blockSenders && winner.block && winner.block.phash)
-                for (const h in p2p.blockSenders)
+                Object.keys(p2p.blockSenders).forEach(h => {
                     if (h === winner.block.hash || h === winner.block.phash)
                         delete p2p.blockSenders[h]
+                })
             let newPossBlocks = []
             for (let y = 0; y < consensus.possBlocks.length; y++)
                 if (height < consensus.possBlocks[y].block._id)
@@ -640,18 +646,20 @@ let consensus = {
             cb(true)
             return
         }
-        // fallback: try the other serialization (supports transition period)
-        if (sigVersion === 2)
-            serialized = JSON.stringify(tmpMess)
-        else
-            serialized = JSON.stringify(Object.keys(tmpMess).sort().reduce((o, k) => { o[k] = tmpMess[k]; return o }, {}))
-        hash = crypto.createHash('sha256').update(serialized).digest('hex')
-        if (pub && secp256k1.ecdsaVerify(
-            bs58.decode(sign),
-            Buffer.from(hash, 'hex'),
-            bs58.decode(pub))) {
-            cb(true)
-            return
+        // Transition fallback: before the hardfork, accept the other serialization too
+        if (!config.forceFinalize) {
+            if (sigVersion === 2)
+                serialized = JSON.stringify(tmpMess)
+            else
+                serialized = JSON.stringify(Object.keys(tmpMess).sort().reduce((o, k) => { o[k] = tmpMess[k]; return o }, {}))
+            hash = crypto.createHash('sha256').update(serialized).digest('hex')
+            if (pub && secp256k1.ecdsaVerify(
+                bs58.decode(sign),
+                Buffer.from(hash, 'hex'),
+                bs58.decode(pub))) {
+                cb(true)
+                return
+            }
         }
         cb(false)
     },

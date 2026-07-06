@@ -128,8 +128,8 @@ module.exports = {
 
             let limit = filterMap['limit']
 
-            if(limit === -1 || isNaN(limit)) 
-                limit = Number.MAX_SAFE_INTEGER
+            if (isNaN(limit) || limit < 1 || limit > 100)
+                limit = 50
 
             let tsrange = filterMap['tsrange']
             let tsfrom, tsto

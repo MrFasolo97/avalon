@@ -25,7 +25,7 @@ module.exports = {
         // array of two-element arrays specifying parameter name and value
         let changesObj = {}
         let groupChanges = []
-        for (let p in tx.data.changes)
+        for (let p = 0; p < tx.data.changes.length; p++)
             if (!validate.array(tx.data.changes[p]) || tx.data.changes[p].length !== 2 || !validate.string(tx.data.changes[p][0]))
                 return cb(false, 'invalid chain update change #'+p)
             else if (!cc.parameters[tx.data.changes[p][0]])
@@ -40,17 +40,19 @@ module.exports = {
         // check for group changes that must be bundled together in the proposal
         for (let p in changesObj)
             if (cc.groupsInv[p] && !groupChanges.includes(cc.groupsInv[p])) {
-                for (let member in cc.groups[cc.groupsInv[p]].members)
-                    if (!changesObj[cc.groups[cc.groupsInv[p]].members[member]])
+                const groupMembers = cc.groups[cc.groupsInv[p]].members
+                for (let m = 0; m < groupMembers.length; m++)
+                    if (!changesObj[groupMembers[m]])
                         return cb(false, 'incomplete parameter group '+cc.groupsInv[p])
                 groupChanges.push(cc.groupsInv[p])
             }
         
         // validate parameter values as a group
-        for (let g in groupChanges) {
+        for (let g = 0; g < groupChanges.length; g++) {
             let memberValues = []
-            for (let p in cc.groups[groupChanges[g]].members)
-                memberValues.push(changesObj[cc.groups[groupChanges[g]].members[p]])
+            const groupMembers = cc.groups[groupChanges[g]].members
+            for (let m = 0; m < groupMembers.length; m++)
+                memberValues.push(changesObj[groupMembers[m]])
             if (!cc.groups[groupChanges[g]].validate(...memberValues))
                 return cb(false, 'validation failed for parameter values in group '+groupChanges[g])
         }

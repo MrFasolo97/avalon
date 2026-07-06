@@ -16,8 +16,14 @@ async function isPrivateURL(urlStr) {
             ip = host
         } else {
             try {
-                const lookup = await dns.lookup(host, {family: 4})
-                ip = lookup.address
+                const controller = new AbortController()
+                const dnsTimeout = setTimeout(() => controller.abort(), 5000)
+                try {
+                    const lookup = await dns.lookup(host, {family: 4, signal: controller.signal})
+                    ip = lookup.address
+                } finally {
+                    clearTimeout(dnsTimeout)
+                }
             } catch {
                 return true
             }
@@ -46,17 +52,55 @@ async function isPrivateURL(urlStr) {
     }
 }
 
+async function resolveAndPin(hostname) {
+    try {
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 5000)
+        try {
+            const lookup = await dns.lookup(hostname, {family: 4, signal: controller.signal})
+            return lookup.address
+        } finally {
+            clearTimeout(timeout)
+        }
+    } catch {
+        return null
+    }
+}
+
+async function checkRebinding(hostname, pinnedIp) {
+    try {
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 5000)
+        try {
+            const lookup = await dns.lookup(hostname, {family: 4, signal: controller.signal})
+            return lookup.address === pinnedIp
+        } finally {
+            clearTimeout(timeout)
+        }
+    } catch {
+        return false
+    }
+}
+
 async function resolveSafeUrl(urlStr) {
     const maxRedirects = 5
     let currentUrl = urlStr
     for (let i = 0; i < maxRedirects; i++) {
         if (await isPrivateURL(currentUrl))
             throw new Error('blocked private URL')
+        const parsed = new URL(currentUrl)
+        const pinnedIp = await resolveAndPin(parsed.hostname)
+        if (!pinnedIp) throw new Error('could not resolve host')
+        if (await isPrivateURL('http://' + pinnedIp)) throw new Error('blocked private URL')
+        if (!(await checkRebinding(parsed.hostname, pinnedIp))) throw new Error('dns rebinding detected')
+        parsed.hostname = pinnedIp
+        const fetchUrl = parsed.toString()
+
         const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 5000)
+        const timeoutF = setTimeout(() => controller.abort(), 5000)
         try {
-            const resp = await fetch(currentUrl, { method: 'HEAD', signal: controller.signal, redirect: 'manual' })
-            clearTimeout(timeout)
+            const resp = await fetch(fetchUrl, { signal: controller.signal, redirect: 'manual' })
+            clearTimeout(timeoutF)
             if (resp.status >= 300 && resp.status < 400) {
                 const location = resp.headers.get('location')
                 if (!location) throw new Error('redirect with no location')
@@ -65,7 +109,7 @@ async function resolveSafeUrl(urlStr) {
             }
             return currentUrl
         } catch (e) {
-            clearTimeout(timeout)
+            clearTimeout(timeoutF)
             throw e
         }
     }

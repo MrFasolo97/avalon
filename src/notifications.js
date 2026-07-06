@@ -79,7 +79,7 @@ notifications = {
                                     }
                                     delete mNotif.tx.data.json
                                     db.collection('notifications').insertOne(mNotif, function(err2) {
-                                        if (err2) throw err2
+                                        if (err2) logr.error('Notification mention insert failed', err2)
                                     })
                                 }
                             })
@@ -110,4 +110,4 @@ notifications = {
     }
 }
 
-module.exports = notifications
+module.exports = notificationsdule.exports = notifications

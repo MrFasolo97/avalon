@@ -85,7 +85,7 @@ module.exports = {
                         filterMap['tags'] = []
                         filterMap['tags'].push('all')
                     } else if (key === 'limit') 
-                        filterMap['limit'] = Number.MAX_SAFE_INTEGER
+                        filterMap['limit'] = 50
             }
 
             let tags = filterMap['tags']
@@ -103,8 +103,8 @@ module.exports = {
                     return res.status(400).send({error: 'invalid filter value'})
             let limit = filterMap['limit']
 
-            if(limit === -1 || isNaN(limit)) 
-                limit = Number.MAX_SAFE_INTEGER
+            if (isNaN(limit) || limit < 1 || limit > 100)
+                limit = 50
             let minTs = new Date().getTime() - rankings.types['hot'].halfLife*rankings.expireFactor
             if (tags.includes('all')) 
                 db.collection('contents').find(

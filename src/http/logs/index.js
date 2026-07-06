@@ -1,4 +1,5 @@
 const logBuffer = require('../../logBuffer')
+const crypto = require('crypto')
 
 const LOG_PAGE_ENABLED = process.env.LOG_PAGE !== '0'
 
@@ -10,7 +11,12 @@ module.exports = {
 
     function isLogAdmin(req) {
       const headerToken = req.headers['authorization'] ? req.headers['authorization'].replace('Bearer ', '') : ''
-      return req.query.token === process.env.LOG_ADMIN_TOKEN || headerToken === process.env.LOG_ADMIN_TOKEN
+      const queryToken = req.query.token || ''
+      const token = headerToken || queryToken
+      if (!token || !process.env.LOG_ADMIN_TOKEN) return false
+      try {
+        return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(process.env.LOG_ADMIN_TOKEN))
+      } catch { return false }
     }
 
     app.get('/logs', (req, res) => {

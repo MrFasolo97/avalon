@@ -1,4 +1,5 @@
 const rateLimit = require('express-rate-limit')
+const crypto = require('crypto')
 
 const debugLimiter = rateLimit({
     windowMs: 60000,
@@ -6,13 +7,19 @@ const debugLimiter = rateLimit({
     message: { error: 'too many debug requests' }
 })
 
+function timingSafeEqual(a, b) {
+    if (typeof a !== 'string' || typeof b !== 'string') return false
+    return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b))
+}
+
 module.exports = {
     init: (app) => {
         // get in-memory data (intensive) - admin only
         app.get('/debug', debugLimiter, (req, res) => {
             if (process.env.DEBUG_TOKEN) {
                 const bearer = req.headers['authorization'] ? req.headers['authorization'].replace('Bearer ', '') : ''
-                if (bearer !== process.env.DEBUG_TOKEN && req.query.token !== process.env.DEBUG_TOKEN)
+                const queryToken = req.query.token
+                if (!timingSafeEqual(bearer || queryToken || '', process.env.DEBUG_TOKEN))
                     return res.sendStatus(401)
             }
             res.send({
@@ -22,7 +29,7 @@ module.exports = {
                 },
                 chain: {
                     recentBlocksCount: chain.recentBlocks.length,
-                    recentTxsCount: chain.recentTxs.length
+                    recentTxsCount: Object.keys(chain.recentTxs).length
                 }
             })
         })

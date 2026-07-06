@@ -69,7 +69,7 @@ module.exports = {
                         })
 
                     parallel(executions, function (err, results) {
-                        if (err) throw err
+                        if (err) { logr.error('content comments query failed', err); return cb() }
                         cb(null, results)
                     })
                 }
@@ -135,7 +135,7 @@ module.exports = {
                         filterMap['tags'] = []
                         filterMap['tags'].push('all')
                     } else if (key === 'limit') 
-                        filterMap['limit'] = Number.MAX_SAFE_INTEGER
+                        filterMap['limit'] = 50
                     else if (key === 'tsrange') {
                         filterMap['tsrange'] = []
                         filterMap['tsrange'].push(0)
@@ -167,8 +167,8 @@ module.exports = {
                     return res.status(400).send({error: 'invalid filter value'})
             let limit = filterMap['limit']
 
-            if(limit === -1 || isNaN(limit)) 
-                limit = Number.MAX_SAFE_INTEGER
+            if (isNaN(limit) || limit < 1 || limit > 100)
+                limit = 50
 
             let tsrange = filterMap['tsrange']
             let tsfrom, tsto

@@ -53,7 +53,7 @@ module.exports = {
                                 _id: content.author+'/'+content.link+'/claim/'+tx.sender
                             }, function() {
                                 cache.findOne('accounts', {name: tx.sender}, function(err, curator) {
-                                    if (err) throw err
+                                    if (err) { logr.error('claimReward error', err); return }
                                     // update his bandwidth
                                     curator.balance -= reward
                                     transaction.updateGrowInts(curator, ts, function() {

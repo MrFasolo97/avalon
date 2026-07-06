@@ -46,7 +46,7 @@ let cache = {
         cache.inserts = []
 
         // reset leader changes
-        for (let i in cache.leaderChanges)
+        for (let i = 0; i < cache.leaderChanges.length; i++)
             if (cache.leaderChanges[i][1] === 0)
                 cache.addLeader(cache.leaderChanges[i][0],true,()=>{})
             else if (cache.leaderChanges[i][1] === 1)
@@ -108,7 +108,8 @@ let cache = {
             if (!cache.copy[collection][obj[key]] && (!chain.restoredBlocks || chain.getLatestBlock()._id >= chain.restoredBlocks))
                 cache.copy[collection][obj[key]] = cloneDeep(cache[collection][obj[key]])
             
-            for (let c in changes) 
+            for (let c in changes) {
+                if (c === '__proto__' || c === 'constructor' || c === 'prototype') continue
                 switch (c) {
                 case '$inc':
                     for (let i in changes[c]) 
@@ -159,6 +160,7 @@ let cache = {
                 default:
                     break
                 }
+            }
             
             cache.changes.push({
                 collection: collection,
@@ -255,7 +257,7 @@ let cache = {
         // if (cache.changes.length) logr.debug(cache.changes.length+' Updates compressed to '+Object.keys(docsToUpdate.accounts).length+' accounts, '+Object.keys(docsToUpdate.contents).length+' contents')
 
         for (const col in docsToUpdate) 
-            for (const i in docsToUpdate[col]) 
+            Object.keys(docsToUpdate[col]).forEach(i => {
                 executions.push(function(callback) {
                     let key = cache.keyByCollection(col)
                     let newDoc = docsToUpdate[col][i]
@@ -266,18 +268,19 @@ let cache = {
                         callback()
                     })
                 })
+            })
 
         // leader stats
         if (process.env.LEADER_STATS === '1') {
             let leaderStatsWriteOps = leaderStats.getWriteOps()
-            for (let op in leaderStatsWriteOps)
+            for (let op = 0; op < leaderStatsWriteOps.length; op++)
                 executions.push(leaderStatsWriteOps[op])
         }
 
         // tx history
         if (process.env.TX_HISTORY === '1') {
             let txHistoryWriteOps = txHistory.getWriteOps()
-            for (let op in txHistoryWriteOps)
+            for (let op = 0; op < txHistoryWriteOps.length; op++)
                 executions.push(txHistoryWriteOps[op])
         }
 
@@ -302,9 +305,9 @@ let cache = {
         }
     },
     processRebuildOps: (cb,writeToDisk) => {
-        for (let i in cache.inserts)
+        for (let i = 0; i < cache.inserts.length; i++)
             cache.rebuild.inserts.push(cache.inserts[i])
-        for (let i in cache.changes)
+        for (let i = 0; i < cache.changes.length; i++)
             cache.rebuild.changes.push(cache.changes[i])
         cache.inserts = []
         cache.changes = []
@@ -366,7 +369,7 @@ let cache = {
             ]
         }).toArray((e,accs) => {
             if (e) throw e
-            for (let i in accs) {
+            for (let i = 0; i < accs.length; i++) {
                 cache.leaders[accs[i].name] = 1
                 if (!cache.accounts[accs[i].name])
                     cache.accounts[accs[i].name] = accs[i]
@@ -377,3 +380,7 @@ let cache = {
 }
 
 module.exports = cache
+e.exports = cache
+che
+ports = cache
+che

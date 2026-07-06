@@ -12,7 +12,7 @@ let mongo = {
             useNewUrlParser: true,
             useUnifiedTopology: true
         }, async function(err, client) {
-            if (err) throw err
+            if (err) { logr.fatal('MongoDB connection failed: ' + err.message); process.exit(1); }
             this.db = client.db(db_name)
             try {
                 await this.db.executeDbAdminCommand({

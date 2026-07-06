@@ -21,7 +21,9 @@ let transaction = {
     maxPoolQueue: 1000,
     processPoolQueue: () => {
         if (transaction.poolQueue.length === 0 || transaction.poolLock) return
-        transaction.addToPool(null, true)
+        const item = transaction.poolQueue.shift()
+        if (!item) return
+        transaction.addToPool(item, true)
     },
     addToPool: (txs, fromQueue) => {
         if (!fromQueue && transaction.poolLock) {

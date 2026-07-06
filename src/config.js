@@ -187,30 +187,34 @@ let config = {
             forceFinalizeFallback: false,
         },
         241600: {
-            forceFinalize: true,
-            consensusSigVersion: 2,
             txLimits: {
                 28: 0
             }
+        },
+        13925000: {
+            forceFinalize: true,
+            consensusSigVersion: 2
         }
     },
     read: (blockNum) => {
         let finalConfig = {}
         let latestHf = 0
-        for (const key in config.history) 
+        const historyKeys = Object.keys(config.history).map(Number)
+        for (let hi = 0; hi < historyKeys.length; hi++) {
+            const key = historyKeys[hi]
             if (blockNum >= key) {
-                if (blockNum === parseInt(key) && blockNum !== 0)
+                if (blockNum === key && blockNum !== 0)
                     logr.info('Hard Fork #'+key)
                 Object.assign(finalConfig, config.history[key])
-                latestHf = parseInt(key)
-            }
-            else {
+                latestHf = key
+            } else {
                 if (config.history[key].ecoBlocks > finalConfig.ecoBlocks
                 && config.history[key].ecoBlocks - finalConfig.ecoBlocks >= key-blockNum)
                     finalConfig.ecoBlocksIncreasesSoon = config.history[key].ecoBlocks
                 
                 break
             }
+        }
         if (typeof cache !== 'undefined' && cache.state && cache.state[1]) {
             let govConfig = cache.state[1]
             for (let k in govConfig)

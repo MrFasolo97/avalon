@@ -10,13 +10,13 @@ module.exports = {
             cb(false, 'invalid tx data.amount'); return
         }
         cache.findOne('accounts', {name: tx.sender}, function(err, account) {
-            if (err) throw err
+            if (err) { logr.error('transferBw error', err); return cb(false, 'internal error') }
             let bwBefore = new GrowInt(account.bw, {growth:account.balance/(config.bwGrowth)}).grow(ts)
             if (bwBefore.v < tx.data.amount) {
                 cb(false, 'invalid tx not enough bw'); return
             }
             cache.findOne('accounts', {name: tx.data.receiver}, function(err, account) {
-                if (err) throw err
+                if (err) { logr.error('transferBw error', err); return cb(false, 'internal error') }
                 if (!account) cb(false, 'invalid tx receiver does not exist')
                 else cb(true)
             })
@@ -26,7 +26,7 @@ module.exports = {
         if (config.burnAccountIsBlackhole && tx.data.receiver === config.burnAccount)
             return cb(true)
         cache.findOne('accounts', {name: tx.data.receiver}, function(err, account) {
-            if (err) throw err
+            if (err) { logr.error('transferBw error', err); return cb(false, 'internal error') }
             account.bw.v += tx.data.amount
             cache.updateOne('accounts', {name: tx.data.receiver}, {$set: {bw: account.bw}}, function() {
                 cb(true)

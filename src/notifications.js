@@ -110,4 +110,4 @@ notifications = {
     }
 }
 
-module.exports = notificationsdule.exports = notifications
+module.exports = notifications

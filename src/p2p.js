@@ -13,6 +13,7 @@ const p2p_host = process.env.P2P_HOST || '::'
 const WebSocket = require('ws')
 const dns = require('dns').promises
 const net = require('net')
+const crypto = require('crypto')
 const { randomBytes } = require('crypto')
 const secp256k1 = require('secp256k1')
 const bs58 = require('base-x')(config.b58Alphabet)
@@ -264,16 +265,18 @@ let p2p = {
 
             case MessageType.QUERY_BLOCK:
                 // a peer wants to see the data in one of our stored blocks
+                const blockId = parseInt(message.d, 10)
+                if (isNaN(blockId) || blockId < 0) break
                 if (blocks.isOpen) {
                     let block = {}
                     try {
-                        block = blocks.read(message.d)
+                        block = blocks.read(blockId)
                     } catch (e) {
                         break
                     }
                     p2p.sendJSON(ws, {t:MessageType.BLOCK, d:block})
                 } else
-                    db.collection('blocks').findOne({_id: message.d}, function(err, block) {
+                    db.collection('blocks').findOne({_id: blockId}, function(err, block) {
                         if (err)
                             throw err
                         if (block)
@@ -313,7 +316,7 @@ let p2p = {
 
                 // track which peer sent this block for failure banning
                 if (block.hash)
-                    p2p.blockSenders[block.hash] = ws
+                    p2p.blockSenders[block.hash] = { ws, ts: Date.now() }
 
                 if (p2p.recovering) return
                 consensus.round(0, block)
@@ -347,8 +350,8 @@ let p2p = {
                 // it should come from one of the elected leaders, so let's verify signature
                 if (p2p.recovering) return
                 if (!message.s || !message.s.s || !message.s.n) return
-                if (!message.d || !message.d.ts || 
-                    typeof message.d.ts != 'number' ||
+                if (!message.d || !Number.isFinite(message.d.ts) ||
+                    !Number.isInteger(message.d.ts) || message.d.ts <= 0 ||
                     message.d.ts + 2*config.blockTime < new Date().getTime() ||
                     message.d.ts - 2*config.blockTime > new Date().getTime()) return
 
@@ -426,7 +429,7 @@ let p2p = {
             return
         }
 
-        let champions = peersAhead.sort(() => Math.random() - 0.5).slice(0, Math.min(3, peersAhead.length))
+        let champions = peersAhead.sort(() => crypto.randomBytes(1).readUInt8() - 128).slice(0, Math.min(3, peersAhead.length))
         let champion = champions[0]
         if (p2p.recovering+1 <= champion.node_status.head_block) {
             p2p.recovering++
@@ -460,9 +463,10 @@ let p2p = {
         logr.debug('a peer disconnected, '+p2p.sockets.length+' peers left')
     },
     recordBlockFailure: (blockHash) => {
-        const ws = p2p.blockSenders[blockHash]
+        const entry = p2p.blockSenders[blockHash]
         delete p2p.blockSenders[blockHash]
-        if (!ws || !ws._socket) return
+        if (!entry || !entry.ws || !entry.ws._socket) return
+        let ws = entry.ws
         let ip = ws._socket.remoteAddress
         if (ip.indexOf('::ffff:') > -1)
             ip = ip.replace('::ffff:', '')
@@ -555,6 +559,11 @@ let p2p = {
                     y--
                 }
         }
+        // clean stale blockSenders entries (older than 2 minutes)
+        const now = Date.now()
+        for (const hash in p2p.blockSenders)
+            if (now - p2p.blockSenders[hash].ts > 120000)
+                delete p2p.blockSenders[hash]
     }
 }
 

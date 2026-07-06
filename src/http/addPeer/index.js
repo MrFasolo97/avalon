@@ -40,8 +40,14 @@ module.exports = {
                     ip = host
                 } else {
                     try {
-                        const lookup = await dns.lookup(host, {family: 4})
-                        ip = lookup.address
+                        const controller = new AbortController()
+                        const timeout = setTimeout(() => controller.abort(), 5000)
+                        try {
+                            const lookup = await dns.lookup(host, {family: 4, signal: controller.signal})
+                            ip = lookup.address
+                        } finally {
+                            clearTimeout(timeout)
+                        }
                     } catch {
                         return res.status(400).send({error: 'cannot resolve peer hostname'})
                     }

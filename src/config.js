@@ -214,7 +214,8 @@ let config = {
         if (typeof cache !== 'undefined' && cache.state && cache.state[1]) {
             let govConfig = cache.state[1]
             for (let k in govConfig)
-                if (k !== '_id' && govConfig[k].effectiveBlock >= latestHf)
+                if (k !== '_id' && k !== '__proto__' && k !== 'constructor' && k !== 'prototype'
+                    && govConfig[k].effectiveBlock >= latestHf)
                     finalConfig[k] = govConfig[k].value
         }
         

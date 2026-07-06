@@ -126,6 +126,7 @@ let consensus = {
                     logr.cons('block '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,4)+' got finalized')
 
                     chain.validateAndAddBlock(possBlock.block, false, function(err) {
+                    try {
                     if (err) {
                         logr.error('Consensus block validation failed for '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,8)+' by '+possBlock.block.miner, err)
                         cache.rollback()
@@ -146,6 +147,10 @@ let consensus = {
                     consensus.finalizing = false
                     if (config.forceFinalize)
                         consensus.cancelForceFinalize()
+                    } catch (e) {
+                        logr.error('Unhandled error in validateAndAddBlock callback', e)
+                        consensus.finalizing = false
+                    }
                 })
             }
             // if 2/3+ of any previous round, we try to commit it again

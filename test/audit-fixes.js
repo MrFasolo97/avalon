@@ -206,7 +206,7 @@ test('block.miner sanitized in output', () => {
 // 11. Rate limiter on /transact
 console.log('\n--- transact/index.js: rate limiter ---')
 test('POST /transact has rate limiter', () => {
-    const content = fs.readFileSync('/test/src/http/transact/index.js', 'utf8')
+    const content = fs.readFileSync(path.join(__dirname, '../src/http/transact/index.js'), 'utf8')
     assert.ok(content.includes("require('express-rate-limit')"))
     assert.ok(content.includes('txLimiter'))
     assert.ok(content.includes("app.post('/transact', txLimiter,"))
@@ -215,7 +215,7 @@ test('POST /transact has rate limiter', () => {
 // 12. auto_resolve_halt.sh MongoDB eval uses env vars
 console.log('\n--- auto_resolve_halt.sh: MongoDB eval injection fix ---')
 test('mongo eval uses process.env instead of bash interpolation', () => {
-    const content = fs.readFileSync('/test/scripts/auto_resolve_halt.sh', 'utf8')
+    const content = fs.readFileSync(path.join(__dirname, '../scripts/auto_resolve_halt.sh'), 'utf8')
     assert.ok(content.includes('process.env.REMOVE_COUNT'))
     assert.ok(content.includes('process.env.DRY_RUN'))
 })
@@ -223,29 +223,29 @@ test('mongo eval uses process.env instead of bash interpolation', () => {
 // 13. File integrity checks
 console.log('\n--- File integrity checks ---')
 test('consensus.js has tryNextStepBusy', () => {
-    const c = fs.readFileSync('/test/src/consensus.js', 'utf8')
+    const c = fs.readFileSync(path.join(__dirname, '../src/consensus.js'), 'utf8')
     assert.ok(c.includes('tryNextStepBusy'))
     assert.ok(c.includes('tryNextStepBusy: false'))
 })
 
 test('consensus.js uses config.leaders for quorum', () => {
-    const c = fs.readFileSync('/test/src/consensus.js', 'utf8')
+    const c = fs.readFileSync(path.join(__dirname, '../src/consensus.js'), 'utf8')
     assert.ok(c.includes('config.leaders * 2 / 3'))
 })
 
 test('consensus.js has empty shuffle guard', () => {
-    const c = fs.readFileSync('/test/src/consensus.js', 'utf8')
+    const c = fs.readFileSync(path.join(__dirname, '../src/consensus.js'), 'utf8')
     assert.ok(c.includes('shuffle.length === 0'))
 })
 
 test('image/index.js has resolveAndPin + checkRebinding', () => {
-    const c = fs.readFileSync('/test/src/http/image/index.js', 'utf8')
+    const c = fs.readFileSync(path.join(__dirname, '../src/http/image/index.js'), 'utf8')
     assert.ok(c.includes('resolveAndPin'))
     assert.ok(c.includes('checkRebinding'))
 })
 
 test('auto_resolve_halt.sh has BSON << 32n', () => {
-    const c = fs.readFileSync('/test/scripts/auto_resolve_halt.sh', 'utf8')
+    const c = fs.readFileSync(path.join(__dirname, '../scripts/auto_resolve_halt.sh'), 'utf8')
     assert.ok(c.includes('<< 32n'))
 })
 

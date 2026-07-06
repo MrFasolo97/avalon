@@ -279,7 +279,7 @@ find_mongo_cmd() {
 run_mongo() {
     local mongo_cmd
     mongo_cmd=$(find_mongo_cmd) || return 1
-    "$mongo_cmd" "$DB_URL/$DB_NAME" --quiet --eval "$1" 2>/dev/null
+    "$mongo_cmd" "$DB_URL/$DB_NAME" --quiet --eval "$1"
 }
 
 # === Block Truncation (MongoDB) ===

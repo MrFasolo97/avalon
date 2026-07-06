@@ -315,7 +315,7 @@ let p2p = {
 
                 // track which peer sent this block for failure banning
                 if (block.hash)
-                    p2p.blockSenders[block.hash] = ws
+                    p2p.blockSenders[block.hash] = { ws, ts: Date.now() }
 
                 if (p2p.recovering) return
                 consensus.round(0, block)
@@ -462,9 +462,10 @@ let p2p = {
         logr.debug('a peer disconnected, '+p2p.sockets.length+' peers left')
     },
     recordBlockFailure: (blockHash) => {
-        const ws = p2p.blockSenders[blockHash]
+        const entry = p2p.blockSenders[blockHash]
         delete p2p.blockSenders[blockHash]
-        if (!ws || !ws._socket) return
+        if (!entry || !entry.ws || !entry.ws._socket) return
+        let ws = entry.ws
         let ip = ws._socket.remoteAddress
         if (ip.indexOf('::ffff:') > -1)
             ip = ip.replace('::ffff:', '')
@@ -557,6 +558,11 @@ let p2p = {
                     y--
                 }
         }
+        // clean stale blockSenders entries (older than 2 minutes)
+        const now = Date.now()
+        for (const hash in p2p.blockSenders)
+            if (now - p2p.blockSenders[hash].ts > 120000)
+                delete p2p.blockSenders[hash]
     }
 }
 

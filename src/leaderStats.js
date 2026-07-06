@@ -103,7 +103,7 @@ let indexer = {
             if (process.env.LEADER_STATS !== '1') return rs()
             db.collection('leaders').find({},{}).toArray((e,leaders) => {
                 if (e) return rj(e)
-                if (leaders) for (let i in leaders) {
+                if (leaders) for (let i = 0; i < leaders.length; i++) {
                     indexer.leaders[leaders[i]._id] = leaders[i]
                     delete indexer.leaders[leaders[i]._id]._id
                 }

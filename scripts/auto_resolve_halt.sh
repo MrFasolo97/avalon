@@ -40,7 +40,7 @@ load_state() {
 }
 
 save_state() {
-    echo "$1" > "$STATE_FILE"
+    echo "$1" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
 }
 
 check_truncation_safety() {

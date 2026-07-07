@@ -8,6 +8,7 @@ module.exports = {
             return cb(false, 'invalid tx data.threshold json')
         
         for (let t in tx.data.thresholds) {
+            if (!Object.hasOwn(tx.data.thresholds, t)) continue
             if (t !== 'default' && (t !== parseInt(t).toString() || !validate.integer(parseInt(t),true,false)))
                 return cb(false, 'invalid tx type ' + t)
 

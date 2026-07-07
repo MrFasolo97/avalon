@@ -237,7 +237,3 @@ let blocks = {
 }
 
 module.exports = blocks
-
-module.exports = blocks
-
-module.exports = blocks

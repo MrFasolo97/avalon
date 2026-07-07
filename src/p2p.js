@@ -21,6 +21,8 @@ const blocks = require('./blocks')
 const dao = require('./dao')
 const daoMaster = require('./daoMaster')
 
+const ff_amplify_seen = {}
+
 const MessageType = {
     QUERY_NODE_STATUS: 0,
     NODE_STATUS: 1,
@@ -244,6 +246,7 @@ let p2p = {
                     if (!isValidSignature) {
                         logr.warn('Wrong NODE_STATUS signature, disconnecting')
                         ws.close()
+                        return
                     }
 
                     for (let i = 0; i < p2p.sockets.length; i++)

@@ -134,7 +134,7 @@ let transaction = {
         return isInPool
     },
     isPublished: (tx) => {
-        if (!tx.hash) return
+        if (!tx.hash) return false
         if (chain.recentTxs[tx.hash])
             return true
         return false

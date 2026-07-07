@@ -298,10 +298,9 @@ let consensus = {
                     }
                 if (alreadyVoted) break
                 
-                // Add the leader to all rounds up to this one
-                for (let r = round; r >= 0; r--)
-                    if (consensus.possBlocks[i][r])
-                        consensus.possBlocks[i][r].push(leader)
+                // Add the leader only to the round they actually confirmed
+                if (consensus.possBlocks[i][round])
+                    consensus.possBlocks[i][round].push(leader)
                 
                 consensus.tryNextStep()
                 break
@@ -479,7 +478,10 @@ let consensus = {
     _resolveForceFinalize: (height, candidateRetry, ffAttempt) => {
         consensus.ffResolveTimeout = null
         if (!consensus.ffProposals) {
-            consensus._applyForceFinalize(height, consensus.possBlocks.filter(pb => pb.block._id === height)[0], candidateRetry)
+            logr.warn('FF resolve: ffProposals cleared without finalization at height ' + height + ', rescheduling')
+            consensus.finalizing = false
+            const retryTimer = setTimeout(() => consensus.scheduleForceFinalize(), 5000)
+            if (retryTimer.unref) retryTimer.unref()
             return
         }
 

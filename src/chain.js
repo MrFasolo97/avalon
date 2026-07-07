@@ -274,7 +274,7 @@ let chain = {
         chain.cleanMemory()
 
         // update the config if an update was scheduled
-        config = require('./config.js').read(block._id)
+        Object.assign(config, require('./config.js').read(block._id))
         chain.applyHardforkPostBlock(block._id)
         eco.appendHistory(block)
         eco.nextBlock()
@@ -936,7 +936,7 @@ let chain = {
                 
                 // update the config if an update was scheduled
                 chain.addRecentTxsInBlock(blockToRebuild.txs)
-                config = require('./config.js').read(blockToRebuild._id)
+                Object.assign(config, require('./config.js').read(blockToRebuild._id))
                 chain.applyHardforkPostBlock(blockToRebuild._id)
                 dao.nextBlock()
                 daoMaster.nextBlock()

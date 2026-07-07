@@ -440,7 +440,7 @@ let p2p = {
             return
         }
 
-        let champions = peersAhead.sort(() => crypto.randomBytes(1).readUInt8() - 128).slice(0, Math.min(3, peersAhead.length))
+        let champions = peersAhead.sort(() => Math.random() - 0.5).slice(0, Math.min(3, peersAhead.length))
         let champion = champions[0]
         if (p2p.recovering+1 <= champion.node_status.head_block) {
             p2p.recovering++

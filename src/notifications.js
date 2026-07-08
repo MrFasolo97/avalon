@@ -28,7 +28,7 @@ notifications = {
                 ts: ts
             }
             db.collection('notifications').insertOne(notif, function(err) {
-                if (err) throw err
+                if (err) logr.error('Notification insert failed', err)
             })
             break
 
@@ -39,7 +39,7 @@ notifications = {
                 ts: ts
             }
             db.collection('notifications').insertOne(notif, function(err) {
-                if (err) throw err
+                if (err) logr.error('Notification transfer insert failed', err)
             })
             break
 
@@ -55,9 +55,9 @@ notifications = {
                     ts: ts
                 }
                 notif.tx.data.json = {}
-                db.collection('notifications').insertOne(notif, function(err) {
-                    if (err) throw err
-                })
+        db.collection('notifications').insertOne(notif, function(err) {
+                if (err) logr.error('Notification insert failed', err)
+            })
             }
         
             /** Find mentions */
@@ -100,7 +100,7 @@ notifications = {
                 ts: ts
             }
             db.collection('notifications').insertOne(notif, function(err) {
-                if (err) throw err
+                if (err) logr.error('Notification vote insert failed', err)
             })
             break
         

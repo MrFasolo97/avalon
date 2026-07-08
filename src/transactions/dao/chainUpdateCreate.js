@@ -38,14 +38,16 @@ module.exports = {
                 changesObj[tx.data.changes[p][0]] = tx.data.changes[p][1]
         
         // check for group changes that must be bundled together in the proposal
-        for (let p in changesObj)
-            if (cc.groupsInv[p] && !groupChanges.includes(cc.groupsInv[p])) {
+        for (let p = 0; p < Object.keys(changesObj).length; p++) {
+            const key = Object.keys(changesObj)[p]
+            if (cc.groupsInv[key] && !groupChanges.includes(cc.groupsInv[key])) {
                 const groupMembers = cc.groups[cc.groupsInv[p]].members
                 for (let m = 0; m < groupMembers.length; m++)
                     if (!changesObj[groupMembers[m]])
                         return cb(false, 'incomplete parameter group '+cc.groupsInv[p])
-                groupChanges.push(cc.groupsInv[p])
+                groupChanges.push(cc.groupsInv[key])
             }
+        }
         
         // validate parameter values as a group
         for (let g = 0; g < groupChanges.length; g++) {

@@ -163,6 +163,8 @@ let chain = {
 
                 possBlock[0].push(process.env.NODE_OWNER)
                 consensus.possBlocks.push(possBlock)
+                if (config.forceFinalize)
+                    consensus.scheduleForceFinalize()
                 consensus.endRound(0, newBlock)
                 cb(null, newBlock)
             })
@@ -704,6 +706,9 @@ let chain = {
             shuffledMiners.push(shuffledMiners[y])
             y++
         }
+
+        // reset observer flag so nodes can re-evaluate their active status
+        consensus.observer = false
 
         return {
             block: block,

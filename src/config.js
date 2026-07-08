@@ -66,7 +66,7 @@ let config = {
             leaderRewardVT: 100,
             leaders: 5,
             // how long of the end of the block hash is used for the leader pseudo random generator shuffle
-            leaderShufflePrecision: 16,
+            leaderShufflePrecision: 6,
             // the maximum number of leaders an account can vote for
             leaderMaxVotes: 5,
             // the "master" account starting stake (total starting supply)
@@ -186,13 +186,15 @@ let config = {
             // partitions. When false, the chain halts until quorum is reached — safer.
             forceFinalizeFallback: false,
         },
+        // 241600: only txLimits change — matches existing new_net deploy
         241600: {
-            forceFinalize: true,
-            consensusSigVersion: 2,
             txLimits: {
                 28: 0
             }
         },
+        // Hard fork at ~13,925,000 (~3 weeks from block 13,320,067):
+        // - forceFinalize: enables anti-fork safety net if consensus stalls
+        // - consensusSigVersion: 2 (sorted keys) prevents key-ordering mismatches
         13925000: {
             forceFinalize: true,
             consensusSigVersion: 2

@@ -13,6 +13,15 @@ const p2p_host = process.env.P2P_HOST || '::'
 const WebSocket = require('ws')
 const dns = require('dns').promises
 const net = require('net')
+
+// Fisher-Yates shuffle using crypto.randomInt (cryptographically secure)
+function secureShuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = crypto.randomInt(0, i + 1);
+        [arr[i], arr[j]] = [arr[j], arr[i]]
+    }
+    return arr
+}
 const crypto = require('crypto')
 const { randomBytes } = require('crypto')
 const secp256k1 = require('secp256k1')
@@ -196,8 +205,8 @@ let p2p = {
             case MessageType.QUERY_NODE_STATUS:
                 // a peer is requesting our node status
                 if (typeof message.d !== 'object'
-                && typeof message.d.nodeId !== 'string'
-                && typeof message.d.random !== 'string')
+                || typeof message.d.nodeId !== 'string'
+                || typeof message.d.random !== 'string')
                     return
                 let wsNodeId = message.d.nodeId
                 if (wsNodeId === p2p.nodeId.pub) {
@@ -443,7 +452,8 @@ let p2p = {
             return
         }
 
-        let champions = peersAhead.sort(() => Math.random() - 0.5).slice(0, Math.min(3, peersAhead.length))
+        secureShuffle(peersAhead)
+        let champions = peersAhead.slice(0, Math.min(3, peersAhead.length))
         let champion = champions[0]
         if (p2p.recovering+1 <= champion.node_status.head_block) {
             p2p.recovering++
@@ -543,8 +553,11 @@ let p2p = {
                 p2p.recoveredBlocks = []
                 p2p.recoveringBlocks = []
                 p2p.recoverAttempt++
-                if (p2p.recoverAttempt > max_recover_attempts)
+                if (p2p.recoverAttempt > max_recover_attempts) {
                     logr.error('Error Replay', newBlock._id)
+                    p2p.recovering = false
+                    p2p.recoverAttempt = 0
+                }
                 else {
                     logr.warn('Recover attempt #'+p2p.recoverAttempt+' for block '+newBlock._id)
                     p2p.recovering = chain.getLatestBlock()._id

@@ -78,6 +78,8 @@ async function main() {
             const r = cli(`account ${m.pub} ${m.name}`)
             if (r) {
                 console.log(`  ✓ ${m.name} created`)
+                // write config early so miner container can start syncing ASAP
+                fs.writeFileSync(`${cfgDir}/${m.name}.json`, JSON.stringify(m, null, 2))
                 break
             }
             console.log(`  retry ${m.name} (block ${attempt})...`)

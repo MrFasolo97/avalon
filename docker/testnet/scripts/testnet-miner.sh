@@ -26,6 +26,16 @@ fi
 
 rm -rf /avalon/blocks/* 2>/dev/null || true
 
+# Patch config for testnet (matches genesis.sh — ensures consistent config across nodes)
+node -e "
+const fs = require('fs');
+let c = fs.readFileSync('/avalon/src/config.js', 'utf8');
+c = c.replace(/masterDaoTxs: \[[^\]]*\]/, 'masterDaoTxs: [0,1,2,3,4,5,6,7,8,10,11,12,13,14,15,17,18,19,20,21,23,24,25,26,27,28,29,30,32]');
+if (!c.includes('100:'))
+  c = c.replace('241600: {', '100: {\\n            forceFinalize: true,\\n        },\\n        241600: {');
+fs.writeFileSync('/avalon/src/config.js', c);
+"
+
 echo "Starting Avalon node..."
 cd /avalon
 exec node --stack-size=65500 src/main

@@ -19,6 +19,17 @@ MongoClient.connect('${DB_URL}', {useNewUrlParser:true, useUnifiedTopology:true}
 
 rm -rf /avalon/genesis/* /avalon/blocks/* 2>/dev/null || true
 
+# Patch config for testnet (replaces Dockerfile sed/patch-config that are lost when src is bind-mounted)
+node -e "
+const fs = require('fs');
+let c = fs.readFileSync('/avalon/src/config.js', 'utf8');
+c = c.replace(/masterDaoTxs: \[[^\]]*\]/, 'masterDaoTxs: [0,1,2,3,4,5,6,7,8,10,11,12,13,14,15,17,18,19,20,21,23,24,25,26,27,28,29,30,32]');
+if (!c.includes('100:'))
+  c = c.replace('241600: {', '100: {\\n            forceFinalize: true,\\n        },\\n        241600: {');
+fs.writeFileSync('/avalon/src/config.js', c);
+console.log('Patched config for testnet');
+"
+
 echo "Starting Avalon node..."
 node --stack-size=65500 src/main &
 AVALON_PID=$!

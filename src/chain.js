@@ -856,9 +856,10 @@ let chain = {
         }
     },
     cleanMemoryTx: () => {
-        for (const hash in chain.recentTxs)
+        Object.keys(chain.recentTxs).forEach(hash => {
             if (chain.recentTxs[hash].ts + config.txExpirationTime < chain.getLatestBlock().timestamp)
                 delete chain.recentTxs[hash]
+        })
     },
     applyHardfork: (block,cb) => {
         // Do something on hardfork block after tx executions and before leader rewards distribution

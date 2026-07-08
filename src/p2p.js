@@ -412,22 +412,21 @@ let p2p = {
 
             case MessageType.FORCE_FINALIZE:
                 if (!message.s || !message.s.s || !message.s.n) break
-                // Dedup by height to prevent broadcast amplification
-                const ffH = message.d && message.d.height
-                if (ffH) {
-                    const now = Date.now()
-                    if (ff_amplify_seen[ffH] && now - ff_amplify_seen[ffH] < 120000) break
-                    ff_amplify_seen[ffH] = now
-                }
-                // Expire stale dedup entries
-                for (const hh in ff_amplify_seen)
-                    if (Date.now() - ff_amplify_seen[hh] > 120000)
-                        delete ff_amplify_seen[hh]
+                // Verify signature before any dedup to prevent unauthenticated poison
                 consensus.verifySignature(message, function(isValid) {
                     if (!isValid) {
                         logr.warn('Received wrong FF signature from ' + message.s.n)
                         return
                     }
+                    // Dedup by sender+signature to prevent broadcast amplification
+                    const ffKey = message.s.n + '_' + message.s.s
+                    const now = Date.now()
+                    if (ff_amplify_seen[ffKey] && now - ff_amplify_seen[ffKey] < 120000) return
+                    ff_amplify_seen[ffKey] = now
+                    // Expire stale dedup entries
+                    for (const kk in ff_amplify_seen)
+                        if (Date.now() - ff_amplify_seen[kk] > 120000)
+                            delete ff_amplify_seen[kk]
                     p2p.broadcastNotSent(message)
                     consensus.handleForceFinalizeProposal(message)
                 })

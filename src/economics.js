@@ -143,6 +143,7 @@ let eco = {
     },
     curation: (author, link, cb) => {
         cache.findOne('contents', {_id: author+'/'+link}, function(err, content) {
+            if (!content || !content.votes || content.votes.length === 0) return cb(0, 0)
             let currentVote = content.votes[content.votes.length-1]
 
             // first loop to calculate the VP of active votes
@@ -323,8 +324,9 @@ let eco = {
         return thNewCoins
     },
     rentability: (ts1, ts2, isDv) => {
+        if (typeof ts1 !== 'number' || typeof ts2 !== 'number' || isNaN(ts1) || isNaN(ts2)) return 0
         let ts = ts2 - ts1
-        if (ts < 0) throw 'Invalid timestamp in rentability calculation'
+        if (ts < 0) return config.ecoBaseRent || 0
 
         // https://imgur.com/a/GTLvs37
         let directionRent = isDv ? config.ecoDvRentFactor : 1
@@ -360,8 +362,14 @@ let eco = {
         rentability = Math.floor(directionRent*rentability*Math.pow(10, config.ecoRentPrecision))/Math.pow(10, config.ecoRentPrecision)
         return rentability
     },
-    round: (val = 0) => Math.round(val*Math.pow(10,config.ecoClaimPrecision))/Math.pow(10,config.ecoClaimPrecision),
-    floor: (val = 0) => Math.floor(val*Math.pow(10,config.ecoClaimPrecision))/Math.pow(10,config.ecoClaimPrecision)
+    round: (val = 0) => {
+        if (typeof val !== 'number' || isNaN(val)) val = 0
+        return Math.round(val*Math.pow(10,config.ecoClaimPrecision))/Math.pow(10,config.ecoClaimPrecision)
+    },
+    floor: (val = 0) => {
+        if (typeof val !== 'number' || isNaN(val)) val = 0
+        return Math.floor(val*Math.pow(10,config.ecoClaimPrecision))/Math.pow(10,config.ecoClaimPrecision)
+    }
 } 
 
 module.exports = eco

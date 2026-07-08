@@ -214,8 +214,15 @@ test('POST /transact has rate limiter', () => {
 
 // 12. auto_resolve_halt.sh MongoDB eval uses env vars
 console.log('\n--- auto_resolve_halt.sh: MongoDB eval injection fix ---')
+function readScript(name) {
+    const hostPath = path.join(__dirname, '../scripts', name)
+    if (fs.existsSync(hostPath)) return fs.readFileSync(hostPath, 'utf8')
+    const dockerPath = path.join(__dirname, '../project-scripts', name)
+    if (fs.existsSync(dockerPath)) return fs.readFileSync(dockerPath, 'utf8')
+    throw new Error('cannot find ' + name)
+}
 test('mongo eval uses process.env instead of bash interpolation', () => {
-    const content = fs.readFileSync(path.join(__dirname, '../scripts/auto_resolve_halt.sh'), 'utf8')
+    const content = readScript('auto_resolve_halt.sh')
     assert.ok(content.includes('process.env.REMOVE_COUNT'))
     assert.ok(content.includes('process.env.DRY_RUN'))
 })
@@ -245,7 +252,7 @@ test('image/index.js has resolveAndPin + checkRebinding', () => {
 })
 
 test('auto_resolve_halt.sh has BSON << 32n', () => {
-    const c = fs.readFileSync(path.join(__dirname, '../scripts/auto_resolve_halt.sh'), 'utf8')
+    const c = readScript('auto_resolve_halt.sh')
     assert.ok(c.includes('<< 32n'))
 })
 

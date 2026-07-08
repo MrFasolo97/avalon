@@ -108,7 +108,7 @@ let blocks = {
             fs.closeSync(fs.openSync(indexPath,'w'))
     },
     reconstructIndex: (currentDocSizeBuf, currentDocPosition, currentBlockHeight) => {
-        if (!blocks.isOpen) { logr.fatal(blocks.notOpenError); process.exit(1); }
+        if (!blocks.isOpen) { logr.fatal(blocks.notOpenError); process.exit(1) }
         logr.info('Reconstructing blocks BSON index file...')
 
         let startTime = new Date().getTime()
@@ -129,8 +129,8 @@ let blocks = {
         logr.info('Index reconstructed up to block #'+blocks.height+' in '+(new Date().getTime()-startTime)+'ms')
     },
     appendBlock: (newBlock) => {
-        if (!blocks.isOpen) { logr.fatal(blocks.notOpenError); process.exit(1); }
-        if (newBlock._id !== blocks.height+1) { logr.fatal('could not append non-next block: expected ' + (blocks.height+1) + ' got ' + newBlock._id); process.exit(1); }
+        if (!blocks.isOpen) { logr.fatal(blocks.notOpenError); process.exit(1) }
+        if (newBlock._id !== blocks.height+1) { logr.fatal('could not append non-next block: expected ' + (blocks.height+1) + ' got ' + newBlock._id); process.exit(1) }
         let serializedBlock = BSON.serialize(newBlock)
         let newBlockSize = BigInt(serializedBlock.length)
         fs.writeSync(blocks.fd,serializedBlock)
@@ -139,7 +139,7 @@ let blocks = {
         blocks.height++
     },
     appendIndex: (pos) => {
-        if (!blocks.isOpen) { logr.fatal(blocks.notOpenError); process.exit(1); }
+        if (!blocks.isOpen) { logr.fatal(blocks.notOpenError); process.exit(1) }
         let indexBuf = Buffer.alloc(8)
         indexBuf.writeUInt32LE(Number(pos >> 8n), 0)
         indexBuf.writeUInt32LE(Number(pos & 0xFFn), 4)
@@ -196,8 +196,7 @@ let blocks = {
         let docPosition = Number(BigInt(indexBuf.readUInt32LE(0)) << 8n) + indexBuf.readUInt32LE(4)
         let docPositionEnd = Number(BigInt(indexBufEnd.readUInt32LE(0)) << 8n) + indexBufEnd.readUInt32LE(4)
         if (BigInt(docPosition) >= blocks.bsonSize || BigInt(docPositionEnd) >= blocks.bsonSize) {
-            logr.fatal('Bson position out of range in readRange')
-            process.exit(1)
+            throw new Error('Bson position out of range in readRange')
         }
 
         // Read blocks BSON from start position to end position of last block

@@ -77,6 +77,9 @@ let consensus = {
         let consensus_size = consensus.activeLeaders().length
         let threshold = Math.ceil(consensus_size * consensus_threshold)
 
+        // Require at least 3 respondents so no 50% partition can reach consensus alone
+        if (threshold < 3) threshold = 3
+
         // if we are observing, we need +1 to pass consensus as we want to manage our own rounds
         if (!consensus.isActive())
             threshold += 1
@@ -289,14 +292,6 @@ let consensus = {
             if (block.hash === consensus.possBlocks[i].block.hash) {
                 if (!consensus.possBlocks[i][round] || consensus.possBlocks[i][round].indexOf(leader) !== -1)
                     break
-                // Verify leader not already in ANY round for this block
-                let alreadyVoted = false
-                for (let r = 0; r < config.consensusRounds; r++)
-                    if (consensus.possBlocks[i][r] && consensus.possBlocks[i][r].indexOf(leader) !== -1) {
-                        alreadyVoted = true
-                        break
-                    }
-                if (alreadyVoted) break
                 
                 // Add the leader only to the round they actually confirmed
                 if (consensus.possBlocks[i][round])
@@ -411,10 +406,11 @@ let consensus = {
         const activeCount = Math.max(1, consensus.activeLeaders().length)
         const configThreshold = Math.ceil(config.leaders * 2 / 3)
         const activeThreshold = Math.ceil(activeCount * 2 / 3)
-        // Require at least 2 respondents so no single node can force-finalize
-        return Math.min(configThreshold, Math.max(activeThreshold, 2))
+        // Require at least 3 respondents so no 50% partition can force-finalize
+        return Math.min(configThreshold, Math.max(activeThreshold, 3))
     },
     _forceFinalize: (height, candidateRetry) => {
+        consensus.forceFinalizeTimeout = null
         if (consensus.finalizing) return
         if (!config.forceFinalize) return
         if (height !== chain.getLatestBlock()._id + 1) return
@@ -429,6 +425,7 @@ let consensus = {
         let candidates = consensus.possBlocks.filter(pb => pb.block._id === height)
         if (candidates.length === 0) {
             logr.warn('Force finalize has no candidates for height ' + height)
+            consensus.finalizing = false
             return
         }
 
@@ -443,16 +440,21 @@ let consensus = {
         if (candidates.length > 1) {
             let details = candidates.map(c => [
                 c.block.miner,
-                c.block._id + '#' + c.block.hash.substr(0, 8),
+                c.block._id + '#' + (c.block.hash || '??').substr(0, 8),
                 c.block.timestamp,
-                c.block.hash.substr(0, 8)
+                (c.block.hash || '??').substr(0, 8)
             ])
             logr.info('Block collision timeout at height ' + height + ', forced selection:', details)
         }
 
         if (candidates.length > 1) {
-            logr.warn('Force finalizing block ' + height + '#' + winner.block.hash.substr(0, 8) + ' by ' + winner.block.miner + ' — selected locally without consensus, fork risk if peers diverge')
+            const winnerHash = (winner.block.hash || '??').substr(0, 8)
+            logr.warn('Force finalizing block ' + height + '#' + winnerHash + ' by ' + winner.block.miner + ' — selected locally without consensus, fork risk if peers diverge')
         }
+
+        // Lock finalizing before ffProposals/broadcast so tryNextStep can't race
+        // and finalize a different block while we're in the anti-fork protocol.
+        consensus.finalizing = true
 
         // Anti-fork: broadcast ALL candidates to peers and collect responses before committing
         // Dedup: skip if we already have an in-flight proposal at the same height
@@ -471,8 +473,6 @@ let consensus = {
             })
             p2p.broadcast(proposal)
         }
-
-        consensus.finalizing = true
         consensus._resolveForceFinalize(height, candidateRetry, 0)
     },
     _resolveForceFinalize: (height, candidateRetry, ffAttempt) => {
@@ -587,10 +587,16 @@ let consensus = {
         }
     },
     _applyForceFinalize: (height, winner, retryCount) => {
+        if (!winner || !winner.block) {
+            logr.error('Force finalize has no valid winner for height ' + height + ', skipping')
+            consensus.finalizing = false
+            return
+        }
         chain.validateAndAddBlock(winner.block, true, function(err) {
             if (err) {
-                logr.error('Force finalize failed for ' + height + '#' + winner.block.hash.substr(0, 8), err)
-                consensus.possBlocks = consensus.possBlocks.filter(pb => pb.block.hash !== winner.block.hash)
+                const blockHash = (winner && winner.block && winner.block.hash) || 'unknown'
+                logr.error('Force finalize failed for ' + height + '#' + blockHash.substr(0, 8), err)
+                consensus.possBlocks = consensus.possBlocks.filter(pb => pb.block.hash !== blockHash)
                 const remaining = consensus.possBlocks.filter(pb => pb.block._id === height)
                 if (remaining.length > 0 && retryCount < 3) {
                     logr.warn('Trying next candidate for height ' + height + ' (retry ' + (retryCount + 1) + '/3)')

@@ -59,13 +59,20 @@ let cache = {
     findOnePromise: function(collection, query, skipClone) {
         return new Promise((rs,rj) => cache.findOne(collection,query,(e,d) => e ? rj(e) : rs(d),skipClone))
     },
+    sanitizeQuery: function(query) {
+        if (!query || typeof query !== 'object' || Array.isArray(query)) return
+        for (const k of Object.keys(query))
+            if (k === '__proto__' || k === 'constructor' || k === 'prototype')
+                delete query[k]
+    },
     findOne: function(collection, query, cb, skipClone) {
         if (!cache.copy[collection])
             return cb('invalid collection')
+        cache.sanitizeQuery(query)
 
         let key = cache.keyByCollection(collection)
         // searching in cache
-        if (cache[collection][query[key]]) {
+        if (query && cache[collection][query[key]]) {
             if (!skipClone)
                 cb(null, cloneDeep(cache[collection][query[key]]))
             else
@@ -98,6 +105,7 @@ let cache = {
         return new Promise((rs,rj) => cache.updateOne(collection,query,changes,(e,d) => e ? rj(e) : rs(true)))
     },
     updateOne: function(collection, query, changes, cb) {
+        cache.sanitizeQuery(query)
         cache.findOne(collection, query, function(err, obj) {
             if (err) throw err
             if (!obj) {

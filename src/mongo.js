@@ -137,7 +137,7 @@ let mongo = {
     },
     fillInMemoryBlocks: (cb,headBlock) => {
         let query = {}
-        if (headBlock && Number.isInteger(headBlock)) query._id = {$lt: headBlock}
+        if (headBlock && Number.isInteger(headBlock) && headBlock > 0) query._id = {$lt: headBlock}
         db.collection('blocks').find(query, {
             sort: {_id: -1},
             limit: config.ecoBlocksIncreasesSoon ? config.ecoBlocksIncreasesSoon : config.ecoBlocks

@@ -1,5 +1,4 @@
 const fs = require('fs')
-const assert = require('assert')
 const BSON = require('bson')
 const logr = require('./logger')
 const mongo = require('./mongo')
@@ -130,8 +129,8 @@ let blocks = {
         logr.info('Index reconstructed up to block #'+blocks.height+' in '+(new Date().getTime()-startTime)+'ms')
     },
     appendBlock: (newBlock) => {
-        assert(blocks.isOpen,blocks.notOpenError)
-        assert(newBlock._id === blocks.height+1,'could not append non-next block')
+        if (!blocks.isOpen) { logr.fatal(blocks.notOpenError); process.exit(1); }
+        if (newBlock._id !== blocks.height+1) { logr.fatal('could not append non-next block: expected ' + (blocks.height+1) + ' got ' + newBlock._id); process.exit(1); }
         let serializedBlock = BSON.serialize(newBlock)
         let newBlockSize = BigInt(serializedBlock.length)
         fs.writeSync(blocks.fd,serializedBlock)
@@ -140,7 +139,7 @@ let blocks = {
         blocks.height++
     },
     appendIndex: (pos) => {
-        assert(blocks.isOpen,blocks.notOpenError)
+        if (!blocks.isOpen) { logr.fatal(blocks.notOpenError); process.exit(1); }
         let indexBuf = Buffer.alloc(8)
         indexBuf.writeUInt32LE(Number(pos >> 8n), 0)
         indexBuf.writeUInt32LE(Number(pos & 0xFFn), 4)

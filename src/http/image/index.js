@@ -3,6 +3,8 @@ const fetch = require('node-fetch-commonjs')
 const { URL } = require('url')
 const dns = require('dns').promises
 const net = require('net')
+const http = require('http')
+const https = require('https')
 logr = require('../../logger.js')
 
 const QUALITY = 95
@@ -227,30 +229,58 @@ async function fetchAndRespondImage(imageUrl,res,width,height,cacher,redirectsRe
             return res.status(400).send({error: 'invalid image url'})
         if (!(await checkRebinding(parsed.hostname, pinnedIp)))
             return res.status(400).send({error: 'dns rebinding detected'})
-        // Use pinned IP for the actual fetch to prevent DNS rebinding TOCTOU
-        parsed.hostname = pinnedIp
-        const fetchUrl = parsed.toString()
+        // Keep original hostname for SNI/TLS; pin IP via custom agent lookup
+        const isHttps = parsed.protocol === 'https:'
+        const pinAgent = isHttps
+            ? new https.Agent({ createConnection: (opts, cb) => {
+                opts.servername = parsed.hostname
+                opts.host = pinnedIp
+                return net.createConnection(opts, cb)
+            }})
+            : new http.Agent({ createConnection: (opts, cb) => {
+                opts.host = pinnedIp
+                return net.createConnection(opts, cb)
+            }})
         const controller = new AbortController()
         const timeout = setTimeout(() => controller.abort(), 5000)
-        let imgFetch = await fetch(fetchUrl, { signal: controller.signal, redirect: 'manual' })
+        let imgFetch
+        try {
+            imgFetch = await fetch(imageUrl, {
+                signal: controller.signal,
+                redirect: 'manual',
+                agent: pinAgent
+            })
+        } catch (e) {
+            clearTimeout(timeout)
+            throw e
+        }
         if (imgFetch.status >= 300 && imgFetch.status < 400) {
-            if (redirectsRemaining <= 0)
+            if (redirectsRemaining <= 0) {
+                clearTimeout(timeout)
                 return res.status(400).send({error: 'too many redirects'})
+            }
             const location = imgFetch.headers.get('location')
             if (location) {
-                if (await isPrivateURL(location))
+                // Resolve relative redirects against the original URL
+                const resolvedLocation = new URL(location, imageUrl).toString()
+                if (await isPrivateURL(resolvedLocation)) {
+                    clearTimeout(timeout)
                     return res.status(400).send({error: 'invalid image url'})
-                const locParsed = new URL(location)
+                }
+                const locParsed = new URL(resolvedLocation)
                 const locPinned = await resolveAndPin(locParsed.hostname)
-                if (!locPinned || !(await checkRebinding(locParsed.hostname, locPinned)))
+                if (!locPinned || !(await checkRebinding(locParsed.hostname, locPinned))) {
+                    clearTimeout(timeout)
                     return res.status(400).send({error: 'dns rebinding detected on redirect'})
+                }
                 clearTimeout(timeout)
-                return fetchAndRespondImage(location, res, width, height, cacher, redirectsRemaining - 1)
+                return fetchAndRespondImage(resolvedLocation, res, width, height, cacher, redirectsRemaining - 1)
             }
+            clearTimeout(timeout)
             return res.status(400).send({error: 'redirect not allowed'})
         }
-        clearTimeout(timeout)
         let buffer = await imgFetch.buffer()
+        clearTimeout(timeout)
         let img = await resizeImage(buffer,width,height)
         imageResponse(res,img)
         await cacher(await img.toJSON())

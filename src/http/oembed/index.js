@@ -107,7 +107,7 @@ async function resolveSafeUrl(urlStr) {
                 currentUrl = new URL(location, currentUrl).href
                 continue
             }
-            return currentUrl
+            return fetchUrl
         } catch (e) {
             clearTimeout(timeoutF)
             throw e

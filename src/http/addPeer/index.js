@@ -31,7 +31,10 @@ module.exports = {
                 if (await isPrivateURL('http://' + pinnedIp))
                     return res.status(400).send({error: 'private peer not allowed'})
 
-                p2p.connect([peer])
+                // Rebuild peer URL with the vetted IP to ensure we connect to the resolved address
+                parsed.hostname = pinnedIp
+                parsed.port = parsed.port || (parsed.protocol === 'wss:' ? 443 : 80)
+                p2p.connect([parsed.toString()])
                 res.send()
             } catch {
                 return res.status(400).send({error: 'invalid peer url'})

@@ -8,7 +8,6 @@ const consensus_threshold = consensus_need/consensus_total
 
 // all p2p.sockets referenced here are verified nodes with a node_status
 
-const FORCE_FINALIZE_WAIT_MS = 600
 const FF_BACKOFF_MS = [600, 1200, 2400, 4800]
 
 let consensus = {
@@ -287,6 +286,10 @@ let consensus = {
         let block = message.d.b
         let round = message.d.r
         let leader = message.s.n
+
+        // Validate round as integer within configured consensus range
+        if (typeof round !== 'number' || round !== Math.floor(round) || round < 0 || round >= config.consensusRounds)
+            return
         
         for (let i = 0; i < consensus.possBlocks.length; i++) 
             if (block.hash === consensus.possBlocks[i].block.hash) {

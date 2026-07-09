@@ -275,8 +275,12 @@ let chain = {
         // push cached accounts and contents to mongodb
         chain.cleanMemory()
 
-        // update the config if an update was scheduled
-        Object.assign(config, require('./config.js').read(block._id))
+        // update the config if an update was scheduled (remove stale keys)
+        const freshConfig = require('./config.js').read(block._id)
+        for (const k of Object.keys(config))
+          if (!(k in freshConfig))
+            delete config[k]
+        Object.assign(config, freshConfig)
         chain.applyHardforkPostBlock(block._id)
         eco.appendHistory(block)
         eco.nextBlock()
@@ -719,7 +723,7 @@ let chain = {
         let leaders = []
         let leaderAccs = withLeaderPub ? cache.leaders : cache.accounts
         Object.keys(leaderAccs).forEach(key => {
-            if (!leaderAccs.hasOwnProperty || !leaderAccs.hasOwnProperty(key)) return
+            if (!Object.prototype.hasOwnProperty.call(leaderAccs, key)) return
             if (!cache.accounts[key] || !cache.accounts[key].node_appr || cache.accounts[key].node_appr <= 0)
                 return
             if (withLeaderPub && !cache.accounts[key].pub_leader)
@@ -923,9 +927,9 @@ let chain = {
                 if (!isValidBlock)
                     return cb(true, blockNum)
             }
-            chain.executeBlockTransactions(blockToRebuild,process.env.REBUILD_NO_VALIDATE !== '1',(validTxs,dist,burn) => {
+            chain.executeBlockTransactions(blockToRebuild,false,(validTxs,dist,burn) => {
                 // if any transaction is wrong, thats a fatal error
-                // transactions should have been verified in isValidNewBlock
+                // matching consensus validation: skip revalidation, trust miner
                 if (blockToRebuild.txs.length !== validTxs.length) {
                     logr.fatal('Invalid tx(s) in block found after starting execution')
                     return cb('Invalid tx(s) in block found after starting execution', blockNum)

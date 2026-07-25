@@ -1,78 +1,81 @@
 const logBuffer = require('../../logBuffer')
 const crypto = require('crypto')
+const { requireAuth, sessions } = require('../auth')
 
 const LOG_PAGE_ENABLED = process.env.LOG_PAGE !== '0'
 
 const VALID_LEVELS = ['TRACE', 'DEBUG', 'PERF', 'ECON', 'CONS', 'INFO', 'WARN', 'ERROR', 'FATAL']
 
-module.exports = {
-  init: (app) => {
-    if (!LOG_PAGE_ENABLED) return
+function isAdmin(req) {
+    const cookie = req.headers['cookie'] || ''
+    const m = cookie.split(';').map(c => c.trim()).find(c => c.startsWith('auth_session='))
+    if (m && sessions.has(m.split('=').slice(1).join('=')))
+        return true
 
-    function isLogAdmin(req) {
-      const headerToken = req.headers['authorization'] ? req.headers['authorization'].replace('Bearer ', '') : ''
-      const queryToken = req.query.token || ''
-      const token = headerToken || queryToken
-      if (!token || !process.env.LOG_ADMIN_TOKEN) return false
-      try {
-        return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(process.env.LOG_ADMIN_TOKEN))
-      } catch { return false }
+    const headerToken = req.headers['authorization'] ? req.headers['authorization'].replace('Bearer ', '') : ''
+    const queryToken = req.query.token || ''
+    const token = headerToken || queryToken
+    const vars = ['ADMIN_TOKEN', 'LOG_ADMIN_TOKEN', 'MINE_TOKEN', 'DEBUG_TOKEN', 'RECOVER_TOKEN']
+    for (const v of vars) {
+        const expected = process.env[v]
+        if (token && expected)
+            try {
+                if (crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expected)))
+                    return true
+            } catch {}
+
     }
-
-    app.get('/logs', (req, res) => {
-      if (!isLogAdmin(req)) {
-        res.set('Content-Type', 'text/html; charset=utf-8')
-        res.send(renderPage(false))
-      } else {
-        res.set('Content-Type', 'text/html; charset=utf-8')
-        res.send(renderPage(true))
-      }
-    })
-
-    app.get('/logs/stream', (req, res) => {
-      const isAdmin = isLogAdmin(req)
-      const levelParam = Array.isArray(req.query.level) ? req.query.level.join(',') : req.query.level
-      const filterLevel = levelParam ? levelParam.split(',') : null
-      const filterSearch = req.query.search || null
-
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-store',
-        'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no'
-      })
-
-      const initial = logBuffer.getLogs({ level: filterLevel, search: filterSearch, full: isAdmin })
-      res.write(`data: ${JSON.stringify({ type: 'init', logs: initial })}\n\n`)
-
-      const onLog = (entry) => {
-        if (filterLevel && !filterLevel.includes(entry.level)) return
-        if (filterSearch && !entry.message.toLowerCase().includes(filterSearch.toLowerCase())) return
-        if (!isAdmin) {
-          const { _raw, ...safe } = entry
-          res.write(`data: ${JSON.stringify({ type: 'log', entry: safe })}\n\n`)
-        } else {
-          res.write(`data: ${JSON.stringify({ type: 'log', entry })}\n\n`)
-        }
-      }
-
-      logBuffer.emitter.on('log', onLog)
-
-      const keepAlive = setInterval(() => res.write(':keepalive\n\n'), 15000)
-
-      req.on('close', () => {
-        logBuffer.emitter.off('log', onLog)
-        clearInterval(keepAlive)
-      })
-    })
-  }
+    return false
 }
 
-let _adminToken = typeof process !== 'undefined' ? (process.env.LOG_ADMIN_TOKEN || '') : ''
+module.exports = {
+    init: (app) => {
+        if (!LOG_PAGE_ENABLED) return
 
-function renderPage(isAdmin) {
-  const adminToken = isAdmin ? _adminToken : ''
-  return `<!DOCTYPE html>
+        app.get('/logs', requireAuth(), (req, res) => {
+            res.set('Content-Type', 'text/html; charset=utf-8')
+            res.send(renderPage())
+        })
+
+        app.get('/logs/stream', (req, res) => {
+            if (!isAdmin(req))
+                return res.sendStatus(401)
+
+            const levelParam = Array.isArray(req.query.level) ? req.query.level.slice(0, VALID_LEVELS.length).join(',') : req.query.level
+            const filterLevel = levelParam ? levelParam.split(',').filter(l => VALID_LEVELS.includes(l)) : null
+            const ss = req.query.search
+            const filterSearch = typeof ss === 'string' && ss.length < 200 ? ss : null
+
+            res.writeHead(200, {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-store',
+                'Connection': 'keep-alive',
+                'X-Accel-Buffering': 'no'
+            })
+
+            const initial = logBuffer.getLogs({ level: filterLevel, search: filterSearch, full: true })
+            res.write(`data: ${JSON.stringify({ type: 'init', logs: initial })}\n\n`)
+
+            const onLog = (entry) => {
+                if (filterLevel && !filterLevel.includes(entry.level)) return
+                if (filterSearch && !entry.message.toLowerCase().includes(filterSearch.toLowerCase())) return
+                res.write(`data: ${JSON.stringify({ type: 'log', entry })}\n\n`)
+            }
+
+            logBuffer.emitter.on('log', onLog)
+
+            const keepAlive = setInterval(() => res.write(':keepalive\n\n'), 15000)
+
+            req.on('close', () => {
+                logBuffer.emitter.off('log', onLog)
+                clearInterval(keepAlive)
+            })
+        })
+    }
+}
+
+function renderPage() {
+    return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -142,7 +145,6 @@ function renderPage(isAdmin) {
 
 <script>
 const levels = ${JSON.stringify(VALID_LEVELS)}
-const admin = ${isAdmin}
 
 let logs = []
 let filtered = []
@@ -244,13 +246,10 @@ container.addEventListener('scroll', () => {
   autoScroll = (container.scrollHeight - container.scrollTop - container.clientHeight) < threshold
 })
 
-// SSE
+// SSE using EventSource with cookie-based auth (set by middleware)
 let es
 function connect() {
-  const params = new URLSearchParams()
-  if (admin) params.set('token', ${JSON.stringify(adminToken)})
-  const qs = params.toString()
-  es = new EventSource('/logs/stream' + (qs ? '?' + qs : ''))
+  es = new EventSource('/logs/stream')
 
   es.onopen = () => { connStatus.textContent = '(connected)' }
 

@@ -8,7 +8,7 @@ module.exports = {
          * @apiSuccess {Array} accounts List of accounts ranked by `node_appr` regardless of existence of a valid signing key.
          */
         app.get('/allminers', (req, res) => {
-            const limit = Math.min(parseInt(req.query.limit, 10) || 1000, 10000)
+            const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100)
             db.collection('accounts').find({ node_appr: { $gt: 0 } }, {
                 sort: { node_appr: -1 },
                 limit

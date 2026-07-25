@@ -60,6 +60,7 @@ module.exports = {
                                 pa: posts[i].author,
                                 pp: posts[i].link
                             }).toArray(function (err, comments) {
+                                if (err) { callback(err); return }
                                 for (let y = 0; y < comments.length; y++)
                                     post.comments[comments[y].author + '/' + comments[y].link] = comments[y]
                                 fillComments(comments, function () {

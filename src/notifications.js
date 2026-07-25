@@ -49,15 +49,16 @@ notifications = {
                 
             /** Find replies */
             if (tx.data.pa && tx.data.pa !== tx.sender) {
+                const txClone = JSON.parse(JSON.stringify(tx))
                 notif = {
                     u: tx.data.pa,
-                    tx: tx,
+                    tx: txClone,
                     ts: ts
                 }
-                notif.tx.data.json = {}
-        db.collection('notifications').insertOne(notif, function(err) {
-                if (err) logr.error('Notification insert failed', err)
-            })
+                delete notif.tx.data.json
+                db.collection('notifications').insertOne(notif, function(err) {
+                    if (err) logr.error('Notification insert failed', err)
+                })
             }
         
             /** Find mentions */
@@ -70,7 +71,7 @@ notifications = {
                     if (config.allowedUsernameChars.indexOf(words[i][y]) === -1) {
                         if (y > 0) {
                             let candidate = words[i].substring(0,y)
-                            db.collection('accounts').findOne({name: candidate}, function(err, account) {
+                            cache.findOne('accounts', {name: candidate}, function(err, account) {
                                 if (!err && account) {
                                     let mNotif = {
                                         u: candidate,

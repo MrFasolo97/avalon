@@ -20,7 +20,8 @@ done
 
 # Wait for a few blocks so we can create accounts
 echo "Waiting for blocks to accumulate..."
-while true; do
+DEADLINE=$(( $(date +%s) + 120 ))
+while [ $(date +%s) -lt $DEADLINE ]; do
     COUNT=$(curl -sf "$API/count" 2>/dev/null | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).count))" 2>/dev/null || echo "0")
     if [ "$COUNT" -ge 5 ] 2>/dev/null; then
         echo "Enough blocks mined ($COUNT), starting account creation"
@@ -28,6 +29,10 @@ while true; do
     fi
     sleep 3
 done
+if [ "$COUNT" -lt 5 ] 2>/dev/null; then
+    echo "TIMEOUT: waited 120s for 5 blocks, check chain health"
+    exit 1
+fi
 
 # Run the setup script using the bootstrap's CLI (need node + src)
 cd /avalon

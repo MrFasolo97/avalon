@@ -48,7 +48,7 @@ done
 echo "Kickstarting block production..."
 for i in $(seq 1 20); do
     sleep 3
-    HEIGHT=$(curl -sf "http://localhost:3001/count" 2>/dev/null || echo "0")
+    HEIGHT=$(curl -sf "http://localhost:3001/count" 2>/dev/null | grep -oP '"count":\K\d+' || echo "0")
     echo "Block height: $HEIGHT"
     if [ "$HEIGHT" -ge 5 ] 2>/dev/null; then
         echo "Chain is producing blocks autonomously"

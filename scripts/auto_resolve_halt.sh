@@ -55,7 +55,8 @@ check_truncation_safety() {
     total_removed=$(echo "$state" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).total_removed||0))")
 
     # Prevent removing blocks that were already truncated before (no forward progress)
-    if [ "$current_height" -le "$last_height" ]; then
+    # Skip this check when current_height is 0 (node was offline, height unknown)
+    if [ "$current_height" -gt 0 ] && [ "$current_height" -le "$last_height" ]; then
         err "Chain height ($current_height) has not progressed since last truncation ($last_height). Refusing to truncate again."
         err "This prevents a loop that could wipe the entire chain."
         err "Manual intervention required."
@@ -384,9 +385,13 @@ cleanup_mongodb_state() {
             }
             print('Preserved ' + kept + ' blocks (0 - #' + newHeight + ')');
 
-            // Drop everything
-            db.dropDatabase();
-            print('Database dropped');
+            // Drop everything except temp collection
+            db.getCollectionNames().forEach(function(c) {
+                if (c !== tmpColl) {
+                    db.getCollection(c).drop();
+                }
+            });
+            print('Collections dropped (except temp)');
 
             // Restore blocks from temp
             db.getCollection(tmpColl).aggregate([
@@ -627,9 +632,11 @@ do_force_remove() {
         fi
     fi
 
-    # Safety check
+    # Safety check (enforced even when node is offline)
     if [ "$current_height" -gt 0 ]; then
         check_truncation_safety "$current_height" "$remove_count" || exit 1
+    else
+        check_truncation_safety 0 "$remove_count" || exit 1
     fi
 
     stop_node
@@ -657,7 +664,7 @@ do_auto_resolve() {
         exit 1
     fi
 
-    check_halt
+    check_halt || true
     local rc=$?
     if [ "$rc" = "2" ]; then
         exit 1

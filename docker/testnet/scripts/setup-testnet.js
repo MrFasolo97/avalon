@@ -15,7 +15,8 @@ function run(cmd) {
         return execSync(cmd, { cwd: '/avalon', timeout: 60000 }).toString().trim()
     } catch (e) {
         const err = e.stderr ? e.stderr.toString().trim() : e.message
-        console.error('FAILED:', cmd, err)
+        const redacted = cmd.replace(/-K\s+\S+/g, '-K [REDACTED]')
+        console.error('FAILED:', redacted, err)
         return null
     }
 }
@@ -32,8 +33,8 @@ function genKeypair() {
     let priv, pub
     do {
         priv = randomBytes(32)
-        pub = secp256k1.publicKeyCreate(priv)
     } while (!secp256k1.privateKeyVerify(priv))
+    pub = secp256k1.publicKeyCreate(priv)
     return { priv: bs58.encode(priv), pub: bs58.encode(pub) }
 }
 
@@ -48,11 +49,13 @@ function getBlockCount() {
 
 function waitBlocks(n) {
     const target = getBlockCount() + n
-    while (true) {
+    const deadline = Date.now() + 120000
+    while (Date.now() < deadline) {
         const h = getBlockCount()
-        if (h >= target) break
+        if (h >= target) return
         execSync('sleep 2')
     }
+    console.error('TIMEOUT: waited 120s for ' + n + ' block(s), giving up')
 }
 
 async function main() {

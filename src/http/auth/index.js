@@ -1,6 +1,16 @@
 const crypto = require('crypto')
+const rateLimit = require('express-rate-limit')
 
 const sessions = new Map()
+
+const SESSION_TTL = 24 * 60 * 60 * 1000
+
+setInterval(() => {
+    const now = Date.now()
+    for (const [sid, data] of sessions)
+        if (now - data.ts > SESSION_TTL)
+            sessions.delete(sid)
+}, 60000)
 
 function safeEqual(a, b) {
     if (typeof a !== 'string' || typeof b !== 'string') return false
@@ -37,8 +47,10 @@ function adminTokens() {
 function requireAuth(...tokenEnvVars) {
     return (req, res, next) => {
         const sid = getSessionId(req)
-        if (sid && sessions.has(sid))
+        if (sid && sessions.has(sid)) {
+            sessions.get(sid).ts = Date.now()
             return next()
+        }
 
         const token = getToken(req)
         if (token) {
@@ -46,7 +58,7 @@ function requireAuth(...tokenEnvVars) {
             for (const expected of candidates)
                 if (safeEqual(token, expected)) {
                     const newSid = crypto.randomBytes(16).toString('hex')
-                    sessions.set(newSid, true)
+                    sessions.set(newSid, { ts: Date.now() })
                     setSessionCookie(res, newSid)
                     return next()
                 }
@@ -66,7 +78,12 @@ function renderPopup() {
 
 module.exports = {
     init: (app) => {
-        app.post('/auth/login', (req, res) => {
+        const authLimiter = rateLimit({
+            windowMs: 60000,
+            max: 5,
+            message: { error: 'too many auth attempts' }
+        })
+        app.post('/auth/login', authLimiter, (req, res) => {
             const code = req.body && req.body.code
             const tokens = adminTokens()
             if (!code || !tokens.length)
@@ -77,7 +94,7 @@ module.exports = {
             if (!ok)
                 return res.status(401).json({ error: 'invalid code' })
             const sid = crypto.randomBytes(16).toString('hex')
-            sessions.set(sid, true)
+            sessions.set(sid, { ts: Date.now() })
             setSessionCookie(res, sid)
             res.json({ ok: true })
         })

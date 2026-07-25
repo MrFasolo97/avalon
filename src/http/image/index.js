@@ -6,7 +6,7 @@ const net = require('net')
 const http = require('http')
 const https = require('https')
 const tls = require('tls')
-logr = require('../../logger.js')
+const logr = require('../../logger.js')
 
 const QUALITY = 95
 const AVATAR_WIDTH = {
@@ -106,6 +106,7 @@ let imageCache = {
     },
     cover: {}
 }
+let imageCacheBytes = 0
 
 module.exports = {
     init: (app) => {
@@ -156,11 +157,14 @@ module.exports = {
 
                 fetchAndRespondImage(imageUrl,res,AVATAR_WIDTH[size],AVATAR_WIDTH[size],(imgJson) => {
                     if (isDefault) {
-                        imageCache.avatar[size][req.params.name] = { t: new Date().getTime() }
-                        imageCache.avatar['default_'+size] = imgJson
-                    } else if (JSON.stringify(imageCache).length < CACHE_SIZE) imageCache.avatar[size][req.params.name] = {
-                        t: new Date().getTime(),
-                        d: imgJson
+                        const key = 'default_'+size
+                        if (!imageCache.avatar[key])
+                            imageCacheBytes += JSON.stringify(imgJson).length
+                        imageCache.avatar[key] = imgJson
+                    } else if (imageCacheBytes < CACHE_SIZE) {
+                        const entry = { t: new Date().getTime(), d: imgJson }
+                        imageCache.avatar[size][req.params.name] = entry
+                        imageCacheBytes += JSON.stringify(entry).length
                     }
                 })
             })
@@ -193,27 +197,32 @@ module.exports = {
                     return res.status(404).send({error: 'invalid cover image url'})
 
                 fetchAndRespondImage(imageUrl,res,2048,512,(imgJson) => {
-                    if (JSON.stringify(imageCache).length < CACHE_SIZE) imageCache.cover[req.params.name] = {
-                        t: new Date().getTime(),
-                        d: imgJson
+                    if (imageCacheBytes < CACHE_SIZE) {
+                        const entry = { t: new Date().getTime(), d: imgJson }
+                        imageCache.cover[req.params.name] = entry
+                        imageCacheBytes += JSON.stringify(entry).length
                     }
                 })
             })
         })
 
         app.get('/image/cachesize',(req,res) => {
-            res.send({size: JSON.stringify(imageCache).length})
+            res.send({size: imageCacheBytes})
         })
 
         // cleanup cache
         setInterval(() => {
             let timeNow = new Date().getTime()
             for (let s in imageCache.avatar) if (!s.startsWith('default_')) for (let u in imageCache.avatar[s])
-                if (timeNow - imageCache.avatar[s][u].t > CACHE_TIME)
+                if (timeNow - imageCache.avatar[s][u].t > CACHE_TIME) {
+                    imageCacheBytes -= JSON.stringify(imageCache.avatar[s][u]).length
                     delete imageCache.avatar[s][u]
+                }
             for (let u in imageCache.cover)
-                if (timeNow - imageCache.cover[u].t > CACHE_TIME)
+                if (timeNow - imageCache.cover[u].t > CACHE_TIME) {
+                    imageCacheBytes -= JSON.stringify(imageCache.cover[u]).length
                     delete imageCache.cover[u]
+                }
         },30000)
     }
 }

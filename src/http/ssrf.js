@@ -9,16 +9,16 @@ async function isPrivateURL(urlStr) {
             return true
 
         let ip
-        if (net.isIP(host)) {
+        if (net.isIP(host)) 
             ip = host
-        } else {
+        else 
             try {
                 const lookup = await dns.lookup(host, {family: 4})
                 ip = lookup.address
             } catch {
                 return true
             }
-        }
+        
         if (!ip) return false
 
         if (net.isIPv4(ip)) {

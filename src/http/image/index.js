@@ -5,6 +5,7 @@ const dns = require('dns').promises
 const net = require('net')
 const http = require('http')
 const https = require('https')
+const tls = require('tls')
 logr = require('../../logger.js')
 
 const QUALITY = 95
@@ -25,9 +26,9 @@ async function isPrivateURL(urlStr) {
             return true
 
         let ip
-        if (net.isIP(host)) {
+        if (net.isIP(host)) 
             ip = host
-        } else {
+        else 
             try {
                 const controller = new AbortController()
                 const timeout = setTimeout(() => controller.abort(), 5000)
@@ -40,7 +41,7 @@ async function isPrivateURL(urlStr) {
             } catch {
                 return true
             }
-        }
+        
         if (!ip) return false
 
         if (net.isIPv4(ip)) {
@@ -123,7 +124,7 @@ module.exports = {
             if (!req.params.name)
                 return res.status(400).send({error: 'username is required'})
             let size = req.params.size || 'medium'
-            if (!imageCache.avatar[size] || size.startsWith('default_') || size == '')
+            if (!imageCache.avatar[size] || size.startsWith('default_') || size === '')
                 size = 'medium'
 
             // Return cached image if available
@@ -235,7 +236,7 @@ async function fetchAndRespondImage(imageUrl,res,width,height,cacher,redirectsRe
             ? new https.Agent({ createConnection: (opts, cb) => {
                 opts.servername = parsed.hostname
                 opts.host = pinnedIp
-                return net.createConnection(opts, cb)
+                return tls.connect(opts, cb)
             }})
             : new http.Agent({ createConnection: (opts, cb) => {
                 opts.host = pinnedIp
@@ -250,42 +251,35 @@ async function fetchAndRespondImage(imageUrl,res,width,height,cacher,redirectsRe
                 redirect: 'manual',
                 agent: pinAgent
             })
-        } catch (e) {
+        } finally {
             clearTimeout(timeout)
-            throw e
         }
         if (imgFetch.status >= 300 && imgFetch.status < 400) {
-            if (redirectsRemaining <= 0) {
-                clearTimeout(timeout)
+            if (redirectsRemaining <= 0) 
                 return res.status(400).send({error: 'too many redirects'})
-            }
+            
             const location = imgFetch.headers.get('location')
             if (location) {
                 // Resolve relative redirects against the original URL
                 const resolvedLocation = new URL(location, imageUrl).toString()
-                if (await isPrivateURL(resolvedLocation)) {
-                    clearTimeout(timeout)
+                if (await isPrivateURL(resolvedLocation)) 
                     return res.status(400).send({error: 'invalid image url'})
-                }
+                
                 const locParsed = new URL(resolvedLocation)
                 const locPinned = await resolveAndPin(locParsed.hostname)
-                if (!locPinned || !(await checkRebinding(locParsed.hostname, locPinned))) {
-                    clearTimeout(timeout)
+                if (!locPinned || !(await checkRebinding(locParsed.hostname, locPinned))) 
                     return res.status(400).send({error: 'dns rebinding detected on redirect'})
-                }
-                clearTimeout(timeout)
+                
                 return fetchAndRespondImage(resolvedLocation, res, width, height, cacher, redirectsRemaining - 1)
             }
-            clearTimeout(timeout)
             return res.status(400).send({error: 'redirect not allowed'})
         }
         let buffer = await imgFetch.buffer()
-        clearTimeout(timeout)
         let img = await resizeImage(buffer,width,height)
         imageResponse(res,img)
         await cacher(await img.toJSON())
     } catch (e) {
-        logr.debug(e);
+        logr.debug(e)
         res.status(500).send({error: 'errored while retrieving avatar'})
     }
 }

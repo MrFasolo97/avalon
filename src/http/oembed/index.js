@@ -12,9 +12,9 @@ async function isPrivateURL(urlStr) {
             return true
 
         let ip
-        if (net.isIP(host)) {
+        if (net.isIP(host)) 
             ip = host
-        } else {
+        else 
             try {
                 const controller = new AbortController()
                 const dnsTimeout = setTimeout(() => controller.abort(), 5000)
@@ -27,7 +27,7 @@ async function isPrivateURL(urlStr) {
             } catch {
                 return true
             }
-        }
+        
         if (!ip) return false
 
         if (net.isIPv4(ip)) {

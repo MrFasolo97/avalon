@@ -41,6 +41,7 @@ let transaction = {
         transaction.poolLock = true
         try {
             for (let y = 0; y < txs.length; y++) {
+                if (transaction.isPoolFull()) break
                 let exists = false
                 for (let i = 0; i < transaction.pool.length; i++)
                     if (transaction.pool[i].hash === txs[y].hash)
@@ -51,8 +52,13 @@ let transaction = {
             }
             // drain queue while we hold the lock
             while (transaction.poolQueue.length > 0) {
+                if (transaction.isPoolFull()) {
+                    transaction.poolQueue = []
+                    break
+                }
                 const qItem = transaction.poolQueue.shift()
                 for (let y = 0; y < qItem.length; y++) {
+                    if (transaction.isPoolFull()) break
                     let exists = false
                     for (let i = 0; i < transaction.pool.length; i++)
                         if (transaction.pool[i].hash === qItem[y].hash)

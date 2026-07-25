@@ -98,7 +98,7 @@ let cmds = {
     },
 
     promotedComment: (privKey, sender, uri, pa, pp, content, weight, tag, burn) => {
-        let tx = {type: 13, data: {link: uri, pa, pp, vt: parseInt(weight), tag, burn, json: typeof content === 'string' ? JSON.parse(content) : content}}
+        let tx = {type: 13, data: {link: uri, pa, pp, vt: parseInt(weight), tag, burn: parseInt(burn), json: typeof content === 'string' ? JSON.parse(content) : content}}
         return sign(privKey, sender, JSON.stringify(tx))
     },
 
@@ -136,7 +136,7 @@ let cmds = {
     },
 
     newWeightedKey: (privKey, sender, id, pub, types, weight) => {
-        let tx = {type: 20, data: {id, pub, types: typeof types === 'string' ? JSON.parse(types) : types, weight}}
+        let tx = {type: 20, data: {id, pub, types: typeof types === 'string' ? JSON.parse(types) : types, weight: parseInt(weight)}}
         return sign(privKey, sender, JSON.stringify(tx))
     },
 
@@ -146,7 +146,7 @@ let cmds = {
     },
 
     setPasswordWeight: (privKey, sender, weight) => {
-        let tx = {type: 22, data: {weight}}
+        let tx = {type: 22, data: {weight: parseInt(weight)}}
         return sign(privKey, sender, JSON.stringify(tx))
     },
 
@@ -191,12 +191,12 @@ let cmds = {
     },
 
     fundRequestCreate: (privKey, sender, title, description, url, requested, receiver) => {
-        let tx = {type: 31, data: {title, description, url, requested, receiver}}
+        let tx = {type: 31, data: {title, description, url, requested: parseInt(requested), receiver}}
         return sign(privKey, sender, JSON.stringify(tx))
     },
 
     fundRequestContrib: (privKey, sender, id, amount) => {
-        let tx = {type: 32, data: {id, amount}}
+        let tx = {type: 32, data: {id: parseInt(id), amount: parseInt(amount)}}
         return sign(privKey, sender, JSON.stringify(tx))
     },
 
@@ -206,12 +206,12 @@ let cmds = {
     },
 
     fundRequestWorkReview: (privKey, sender, id, approve, memo) => {
-        let tx = {type: 34, data: {id, approve, memo}}
+        let tx = {type: 34, data: {id: parseInt(id), approve: approve === 'true' || approve === '1' ? true : approve === 'false' || approve === '0' ? false : approve, memo}}
         return sign(privKey, sender, JSON.stringify(tx))
     },
 
     proposalVote: (privKey, sender, id, amount) => {
-        let tx = {type: 35, data: {id, amount}}
+        let tx = {type: 35, data: {id: parseInt(id), amount: parseInt(amount)}}
         return sign(privKey, sender, JSON.stringify(tx))
     },
 
@@ -226,7 +226,7 @@ let cmds = {
     },
 
     mdQueue: (privKey, sender, txtype, payload) => {
-        let tx = {type: 38, data: {txtype, payload: typeof payload === 'string' ? JSON.parse(payload) : payload}}
+        let tx = {type: 38, data: {txtype: parseInt(txtype), payload: typeof payload === 'string' ? JSON.parse(payload) : payload}}
         return sign(privKey, sender, JSON.stringify(tx))
     },
 

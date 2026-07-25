@@ -1,4 +1,4 @@
-const dao = require("../../dao")
+const dao = require('../../dao')
 
 module.exports = {
     fields: ['id','amount'],

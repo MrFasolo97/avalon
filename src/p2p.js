@@ -32,6 +32,13 @@ const daoMaster = require('./daoMaster')
 
 const ff_amplify_seen = {}
 
+setInterval(() => {
+    const now = Date.now()
+    for (const k in ff_amplify_seen)
+        if (now - ff_amplify_seen[k] > 120000)
+            delete ff_amplify_seen[k]
+}, 60000)
+
 const MessageType = {
     QUERY_NODE_STATUS: 0,
     NODE_STATUS: 1,
@@ -375,16 +382,13 @@ let p2p = {
                     p2p.sockets[p2p.sockets.indexOf(ws)].sentUs.push([message.s.s,new Date().getTime()])
                 }
 
-                for (let i = 0; i < consensus.processed.length; i++) {
-                    if (consensus.processed[i][1] + 2*config.blockTime < new Date().getTime()) {
-                        consensus.processed.splice(i, 1)
-                        i--
-                        continue
-                    }
+                const now = Date.now()
+                const blockTime2x = 2 * config.blockTime
+                consensus.processed = consensus.processed.filter(p => p[1] + blockTime2x >= now)
+                for (let i = 0; i < consensus.processed.length; i++)
                     if (consensus.processed[i][0].s.s === message.s.s)
                         return
-                }
-                consensus.processed.push([message, new Date().getTime()])
+                consensus.processed.push([message, now])
 
                 consensus.verifySignature(message, function(isValid) {
                     if (!isValid && !p2p.recovering) {
@@ -401,7 +405,10 @@ let p2p = {
                             // logr.trace('Ignored BLOCK_CONF_ROUND')
                         } else if (validationStep === 0) {
                             // block is being validated, we queue the message
-                            consensus.queue.push(message)
+                            if (consensus.queue.length >= consensus.maxQueueSize)
+                                logr.warn('Consensus queue at capacity, dropping message')
+                            else
+                                consensus.queue.push(message)
                             logr.debug('Added to queue')
                         } else
                             // process the message inside the consensus

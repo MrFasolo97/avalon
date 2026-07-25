@@ -43,7 +43,6 @@ let blocks = {
         blocks.isOpen = true
 
         // Determine if resumption of index creation is required
-        let resumeIndex = false
         if (indexSize > 0) {
             if (indexSize % 8 !== 0) {
                 logr.fatal('Corrupted index file at ' + indexPath + ': size ' + indexSize + ' is not multiple of 8')
@@ -64,7 +63,6 @@ let blocks = {
             let docSize = BigInt(docSizeBuf.readInt32LE(0))
             docPosition += docSize
             if (docPosition < blocks.bsonSize) {
-                resumeIndex = true
                 logr.info('Resuming index creation from block',blocks.height)
                 blocks.reconstructIndex(docSizeBuf,docPosition,blocks.height+1)
             }
@@ -195,9 +193,9 @@ let blocks = {
         fs.readSync(blocks.fdIndex,indexBufEnd,{offset: 0, position: end*8, length: 8})
         let docPosition = Number(BigInt(indexBuf.readUInt32LE(0)) << 8n) + indexBuf.readUInt32LE(4)
         let docPositionEnd = Number(BigInt(indexBufEnd.readUInt32LE(0)) << 8n) + indexBufEnd.readUInt32LE(4)
-        if (BigInt(docPosition) >= blocks.bsonSize || BigInt(docPositionEnd) >= blocks.bsonSize) {
+        if (BigInt(docPosition) >= blocks.bsonSize || BigInt(docPositionEnd) >= blocks.bsonSize) 
             throw new Error('Bson position out of range in readRange')
-        }
+        
 
         // Read blocks BSON from start position to end position of last block
         let docSizeBufEnd = Buffer.alloc(4)

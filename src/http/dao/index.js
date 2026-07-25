@@ -1,4 +1,4 @@
-const dao = require("../../dao")
+const dao = require('../../dao')
 const daoMaster = require('../../daoMaster')
 
 module.exports = {
@@ -39,28 +39,28 @@ module.exports = {
             const query = {$and: []}
             const sort = {}
             switch (status) {
-                case 'queued':
-                    query.$and.push({executed: {$exists: false}})
-                    query.$and.push({expiration: {$gt: new Date().getTime()}})
-                    sort.ts = -1
-                    break
-                case 'expired':
-                    query.$and.push({executed: {$exists: false}})
-                    query.$and.push({expiration: {$lte: new Date().getTime()}})
-                    sort.ts = -1
-                    break
-                case 'executed':
-                    query.$and.push({executed: {$exists: true}})
-                    query.$and.push({error: {$exists: false}})
-                    sort.executed = -1
-                    break
-                case 'errored':
-                    query.$and.push({executed: {$exists: true}})
-                    query.$and.push({error: {$exists: true}})
-                    sort.executed = -1
-                    break
-                default:
-                    return res.status(400).send({error: 'invalid status'})
+            case 'queued':
+                query.$and.push({executed: {$exists: false}})
+                query.$and.push({expiration: {$gt: new Date().getTime()}})
+                sort.ts = -1
+                break
+            case 'expired':
+                query.$and.push({executed: {$exists: false}})
+                query.$and.push({expiration: {$lte: new Date().getTime()}})
+                sort.ts = -1
+                break
+            case 'executed':
+                query.$and.push({executed: {$exists: true}})
+                query.$and.push({error: {$exists: false}})
+                sort.executed = -1
+                break
+            case 'errored':
+                query.$and.push({executed: {$exists: true}})
+                query.$and.push({error: {$exists: true}})
+                sort.executed = -1
+                break
+            default:
+                return res.status(400).send({error: 'invalid status'})
             }
             try {
                 res.send(await db.collection('masterdao').find(query,{limit: 50, skip: parseInt(req.params.skip) || 0, sort: sort}).toArray())

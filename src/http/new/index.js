@@ -60,9 +60,9 @@ module.exports = {
             let filter = filterParam.split(':')
             let filterBy = filter[1]
             let filterAttrs = []
-            if (filterBy !== null) {
+            if (filterBy !== null) 
                 filterAttrs = filterBy.split('&')
-            }
+            
 
             let filterMap = {}
             let defaultKeys = ['authors', 'tags', 'limit', 'tsrange']

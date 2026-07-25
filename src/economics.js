@@ -86,9 +86,9 @@ let eco = {
         let distributed = 0
         let votes = 0
         if (!eco.startRewardPool) {
-            if (!eco.history || eco.history.length === 0) {
+            if (!eco.history || eco.history.length === 0) 
                 return { theo: theoricalPool, burn: 0, dist: 0, votes: 0, avail: theoricalPool }
-            }
+            
             distributed = eco.history[eco.history.length-1].cDist
             burned = eco.history[eco.history.length-1].cBurn
             let firstBlockIndex = eco.history.length - config.ecoBlocks

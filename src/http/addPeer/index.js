@@ -1,11 +1,4 @@
-const { URL } = require('url')
-const dns = require('dns/promises')
-const net = require('net')
 const { isPrivateURL, resolveAndPin, checkRebinding } = require('../ssrf')
-
-async function isPrivateIP(ip) {
-    return isPrivateURL('http://' + ip)
-}
 
 module.exports = {
     init: (app) => {

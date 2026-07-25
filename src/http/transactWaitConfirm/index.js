@@ -1,5 +1,3 @@
-const timeout_transact_async = 7500
-
 module.exports = {
     init: (app) => {
         /*
@@ -9,7 +7,7 @@ module.exports = {
          * @apiDeprecated Use /transact instead
          */
         app.post('/transactWaitConfirm', (req, res) => {
-            res.redirect(307, "/transact")
+            res.redirect(307, '/transact')
         })
     }
 }

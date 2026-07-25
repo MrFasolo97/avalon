@@ -1,5 +1,3 @@
-const dao = require("../../dao")
-
 module.exports = {
     init: (app) => {
         app.get('/proposal/:id', async (req,res) => {

@@ -68,99 +68,99 @@ let consensus = {
     tryNextStepBusy: false,
     tryNextStep: () => {
         if (consensus.finalizing || consensus.tryNextStepBusy) {
-            setImmediate(() => consensus.tryNextStep())
+            setTimeout(() => consensus.tryNextStep(), 100)
             return
         }
         consensus.tryNextStepBusy = true
         try {
-        let consensus_size = consensus.activeLeaders().length
-        let threshold = Math.ceil(consensus_size * consensus_threshold)
+            let consensus_size = consensus.activeLeaders().length
+            let threshold = Math.ceil(consensus_size * consensus_threshold)
 
-        // Require at least 3 respondents so no 50% partition can reach consensus alone
-        if (threshold < 3) threshold = 3
+            // Require at least 3 respondents so no 50% partition can reach consensus alone
+            if (threshold < 3) threshold = 3
 
-        // if we are observing, we need +1 to pass consensus as we want to manage our own rounds
-        if (!consensus.isActive())
-            threshold += 1
+            // if we are observing, we need +1 to pass consensus as we want to manage our own rounds
+            if (!consensus.isActive())
+                threshold += 1
 
-        // identify block collisions between blocks of same _id produced by:
-        // 1. only one leader (double production)
-        // 2. more than one leader (latency issues between leaders)
-        // resolution: apply the earliest valid block, or in case of same timestamp the lowest hash
-        // todo: add leader slashing for double production and other possible malicious behaviour
-        let possBlocksById = {}
-        if (consensus.possBlocks.length > 1) {
-            for (let i = 0; i < consensus.possBlocks.length; i++) {
-                if (possBlocksById[consensus.possBlocks[i].block._id])
-                    possBlocksById[consensus.possBlocks[i].block._id].push(consensus.possBlocks[i])
-                else
-                    possBlocksById[consensus.possBlocks[i].block._id] = [consensus.possBlocks[i]]
-            }
-            consensus.possBlocks.sort((a,b) => {
+            // identify block collisions between blocks of same _id produced by:
+            // 1. only one leader (double production)
+            // 2. more than one leader (latency issues between leaders)
+            // resolution: apply the earliest valid block, or in case of same timestamp the lowest hash
+            // todo: add leader slashing for double production and other possible malicious behaviour
+            let possBlocksById = {}
+            if (consensus.possBlocks.length > 1) {
+                for (let i = 0; i < consensus.possBlocks.length; i++) 
+                    if (possBlocksById[consensus.possBlocks[i].block._id])
+                        possBlocksById[consensus.possBlocks[i].block._id].push(consensus.possBlocks[i])
+                    else
+                        possBlocksById[consensus.possBlocks[i].block._id] = [consensus.possBlocks[i]]
+            
+                consensus.possBlocks.sort((a,b) => {
                 // valid blocks with different _id must have a different timestamp
-                if (a.block.timestamp !== b.block.timestamp)
-                    return a.block.timestamp - b.block.timestamp
-                else
-                    return a.block.hash < b.block.hash ? -1 : 1
-            })
-        }
+                    if (a.block.timestamp !== b.block.timestamp)
+                        return a.block.timestamp - b.block.timestamp
+                    else
+                        return a.block.hash < b.block.hash ? -1 : 1
+                })
+            }
 
-        for (let i = 0; i < consensus.possBlocks.length; i++) {
-            const possBlock = consensus.possBlocks[i]
-            logr.cons('T'+Math.ceil(threshold)+' R0-'+(possBlock[0]?possBlock[0].length:'?')+' R1-'+(possBlock[1]?possBlock[1].length:'?'))
-            // if 2/3+ of the final round and not already finalizing another block
-            if (possBlock[config.consensusRounds-1].length >= threshold 
+            for (let i = 0; i < consensus.possBlocks.length; i++) {
+                const possBlock = consensus.possBlocks[i]
+                logr.cons('T'+Math.ceil(threshold)+' R0-'+(possBlock[0]?possBlock[0].length:'?')+' R1-'+(possBlock[1]?possBlock[1].length:'?'))
+                // if 2/3+ of the final round and not already finalizing another block
+                if (possBlock[config.consensusRounds-1].length >= threshold 
             && !consensus.finalizing 
             && possBlock.block._id === chain.getLatestBlock()._id+1
             && possBlock[0] && possBlock[0].indexOf(process.env.NODE_OWNER) !== -1) {
                 // block becomes valid, we can move forward !
-                consensus.finalizing = true
+                    consensus.finalizing = true
 
-                // log which block got applied if collision exists
-                if (possBlocksById[possBlock.block._id] && possBlocksById[possBlock.block._id].length > 1) {
-                    let collisions = []
-                    let collisionBlocks = possBlocksById[possBlock.block._id]
-                    for (let j = 0; j < collisionBlocks.length; j++)
-                        collisions.push([collisionBlocks[j].block.miner, collisionBlocks[j].block.timestamp])
-                    logr.info('Block collision detected at height '+possBlock.block._id+', the leaders are:',collisions)
-                    logr.cons('Poss blocks',possBlocksById[possBlock.block._id])
-                    logr.info('Applying block '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,4)+' by '+possBlock.block.miner+' with timestamp '+possBlock.block.timestamp)
-                } else
-                    logr.cons('block '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,4)+' got finalized')
+                    // log which block got applied if collision exists
+                    if (possBlocksById[possBlock.block._id] && possBlocksById[possBlock.block._id].length > 1) {
+                        let collisions = []
+                        let collisionBlocks = possBlocksById[possBlock.block._id]
+                        for (let j = 0; j < collisionBlocks.length; j++)
+                            collisions.push([collisionBlocks[j].block.miner, collisionBlocks[j].block.timestamp])
+                        logr.info('Block collision detected at height '+possBlock.block._id+', the leaders are:',collisions)
+                        logr.cons('Poss blocks',possBlocksById[possBlock.block._id])
+                        logr.info('Applying block '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,4)+' by '+possBlock.block.miner+' with timestamp '+possBlock.block.timestamp)
+                    } else
+                        logr.cons('block '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,4)+' got finalized')
 
                     chain.validateAndAddBlock(possBlock.block, false, function(err) {
-                    try {
-                    if (err) {
-                        logr.error('Consensus block validation failed for '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,8)+' by '+possBlock.block.miner, err)
-                        cache.rollback()
-                        dao.resetID()
-                        daoMaster.resetID()
-                        consensus.possBlocks = consensus.possBlocks.filter(pb => pb.block.hash !== possBlock.block.hash)
-                        consensus.finalizing = false
-                        return
-                    }
+                        try {
+                            if (err) {
+                                logr.error('Consensus block validation failed for '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,8)+' by '+possBlock.block.miner, err)
+                                cache.rollback()
+                                dao.resetID()
+                                daoMaster.resetID()
+                                consensus.possBlocks = consensus.possBlocks.filter(pb => pb.block.hash !== possBlock.block.hash)
+                                consensus.finalizing = false
+                                return
+                            }
 
-                    // clean up old possible blocks
-                    let newPossBlocks = []
-                    for (let y = 0; y < consensus.possBlocks.length; y++) 
-                        if (possBlock.block._id < consensus.possBlocks[y].block._id)
-                            newPossBlocks.push(consensus.possBlocks[y])
+                            // clean up old possible blocks
+                            let newPossBlocks = []
+                            for (let y = 0; y < consensus.possBlocks.length; y++) 
+                                if (possBlock.block._id < consensus.possBlocks[y].block._id)
+                                    newPossBlocks.push(consensus.possBlocks[y])
                     
-                    consensus.possBlocks = newPossBlocks
-                    consensus.finalizing = false
-                    if (config.forceFinalize)
-                        consensus.cancelForceFinalize()
-                    } catch (e) {
-                        logr.error('Unhandled error in validateAndAddBlock callback', e)
-                        consensus.finalizing = false
-                    }
-                })
+                            consensus.possBlocks = newPossBlocks
+                            consensus.finalizing = false
+                            if (config.forceFinalize)
+                                consensus.cancelForceFinalize()
+                        } catch (e) {
+                            logr.error('Unhandled error in validateAndAddBlock callback', e)
+                            consensus.finalizing = false
+                        }
+                    })
+                }
+                // if 2/3+ of any previous round, we try to commit it again
+                else for (let y = 0; y < config.consensusRounds-1; y++)
+                    if (possBlock[y].length >= threshold)
+                        consensus.round(y+1, possBlock.block) 
             }
-            // if 2/3+ of any previous round, we try to commit it again
-            else for (let y = 0; y < config.consensusRounds-1; y++)
-                if (possBlock[y].length >= threshold)
-                    consensus.round(y+1, possBlock.block) 
-        }
         } finally {
             consensus.tryNextStepBusy = false
         }
@@ -347,7 +347,7 @@ let consensus = {
         if (!hash) return
 
         // Only accept votes for blocks we actually have locally
-        if (!consensus.ffProposals.proposals[hash]) {
+        if (!consensus.ffProposals.proposals[hash]) 
             for (let i = 0; i < consensus.possBlocks.length; i++) {
                 const pb = consensus.possBlocks[i]
                 if (pb.block.hash === hash && pb.block._id === message.d.height) {
@@ -355,7 +355,7 @@ let consensus = {
                     break
                 }
             }
-        }
+        
         if (!consensus.ffProposals.proposals[hash]) return
 
         // Track this respondent
@@ -508,9 +508,9 @@ let consensus = {
 
         // Count votes per hash among respondents
         const hashVotes = {}
-        for (const hash of Object.values(respondents)) {
+        for (const hash of Object.values(respondents)) 
             hashVotes[hash] = (hashVotes[hash] || 0) + 1
-        }
+        
 
         const bestHash = Object.keys(hashVotes).length > 0
             ? Object.keys(hashVotes).reduce((a, b) => hashVotes[a] > hashVotes[b] ? a : b)
@@ -522,23 +522,23 @@ let consensus = {
         for (const [name, hash] of Object.entries(respondents))
             (respondentsByHash[hash] = respondentsByHash[hash] || []).push(name)
 
-        if (hasQuorum) {
+        if (hasQuorum) 
             logr.cons('FF quorum reached: ' + bestVotes + '/' + quorumThreshold + ' for ' + height + '#' + bestHash.substr(0, 8))
-        } else {
+        else {
             const totalLeaders = activeLeadersCount || respondents.length
             logr.cons('FF quorum not met: ' + bestVotes + '/' + quorumThreshold + ' (' + respondentCount + '/' + totalLeaders + ' respondents)')
         }
 
         // Find the block for bestHash
         const bestBlock = allCandidates.find(c => c.block.hash === bestHash)
-        if (!bestBlock) {
+        if (!bestBlock) 
             logr.error('FF resolve: best hash ' + bestHash.substr(0, 8) + ' not found among candidates, using local winner')
-        }
+        
 
         if (hasQuorum) {
-            if (bestBlock && bestBlock.block.hash !== allCandidates[0].block.hash) {
+            if (bestBlock && bestBlock.block.hash !== allCandidates[0].block.hash) 
                 logr.info('Anti-fork: quorum selected ' + height + '#' + bestBlock.block.hash.substr(0, 8) + ' by ' + bestBlock.block.miner + ' (local was ' + allCandidates[0].block.miner + ')')
-            }
+            
             consensus.ffProposals = null
             consensus._applyForceFinalize(height, bestBlock || allCandidates[0], candidateRetry)
             return
@@ -580,11 +580,11 @@ let consensus = {
                 return
             }
             const collisionRisk = Object.keys(hashVotes).length > 1
-            if (collisionRisk) {
+            if (collisionRisk) 
                 logr.fatal('FF backoff exhausted with ' + Object.keys(hashVotes).length + ' conflicting hashes for height ' + height + '. FORK RISK. Respondents:', respondentsByHash)
-            } else {
+            else 
                 logr.warn('FF backoff exhausted without quorum for height ' + height + ' (' + respondentCount + '/' + quorumThreshold + ' respondents). Proceeding with best candidate.')
-            }
+            
             consensus.ffProposals = null
             consensus._applyForceFinalize(height, bestBlock || allCandidates[0], candidateRetry)
         }
@@ -609,11 +609,11 @@ let consensus = {
                     })
                     return
                 }
-                if (remaining.length > 0) {
+                if (remaining.length > 0) 
                     logr.fatal('Force finalize: retry limit exceeded for height ' + height + '. All candidates failed. Manual intervention required.')
-                } else {
+                else 
                     logr.fatal('Force finalize: no remaining candidates for height ' + height + ' after eviction. Chain stalled.')
-                }
+                
                 consensus.finalizing = false
                 return
             }

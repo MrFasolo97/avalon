@@ -17,8 +17,7 @@ let config = {
             b58Alphabet: '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz',
             // the block #0 genesis timestamp
             block0ts: 1601477849000,
-            // the block hash serialization revision
-            blockHashSerialization: 1,
+            // the block hash serialization revision (overridden below)
             // the consensus message serialization version
             // 1: insertion order (no sort) — legacy
             // 2: sorted keys — prevents key-ordering mismatches
@@ -55,7 +54,7 @@ let config = {
             // the maximum number of follows a single account can do
             followsMax: 2000,
             // F
-            hotfix1: false,
+            // overridden below
             // the max size of a stringified json input (content / user profile)
             // best if kept slightly lower than bwMax
             jsonMaxBytes: 60000,
@@ -89,8 +88,7 @@ let config = {
             masterNoPreloadAcc: true,
             // the maximum time drift in ms before a block is invalid
             maxDrift: 200,
-            // the maximum number of transactions in a single block
-            maxTxPerBlock: 20,
+            // the maximum number of transactions in a single block (overridden below)
             // the max length of a transfer memo
             memoMaxLength: 250,
             // defines how long it takes for a notification to get deleted, and how often the purge happens
@@ -221,13 +219,15 @@ let config = {
         }
         if (typeof cache !== 'undefined' && cache.state && cache.state[1]) {
             let govConfig = cache.state[1]
-            let allowedKeys = Object.keys(config.history[latestHf] || {})
+            let allowedKeys = Object.values(config.history).flatMap(h => Object.keys(h))
             allowedKeys.push('_id')
-            for (let k in govConfig)
-                if (k !== '__proto__' && k !== 'constructor' && k !== 'prototype'
-                    && govConfig[k].effectiveBlock >= latestHf
+            Object.keys(govConfig).forEach(k => {
+                const override = govConfig[k]
+                if (override && typeof override === 'object' && typeof override.effectiveBlock === 'number' && Object.prototype.hasOwnProperty.call(override, 'value')
+                    && override.effectiveBlock >= latestHf
                     && allowedKeys.indexOf(k) !== -1)
-                    finalConfig[k] = govConfig[k].value
+                    finalConfig[k] = override.value
+            })
         }
         
         return finalConfig

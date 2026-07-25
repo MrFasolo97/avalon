@@ -221,7 +221,10 @@ let consensus = {
                     logr.cons('Precommitting block '+block._id+'#'+block.hash.substr(0,4))
 
                     // adding to possible blocks
-                    consensus.possBlocks.push(possBlock)
+                    if (consensus.possBlocks.length >= consensus.activeLeaders().length * 2)
+                        logr.warn('possBlocks at capacity, not adding new block')
+                    else
+                        consensus.possBlocks.push(possBlock)
                     if (config.forceFinalize)
                         consensus.scheduleForceFinalize()
                     // adding ourselves to precommit list

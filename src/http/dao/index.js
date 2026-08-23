@@ -26,7 +26,8 @@ module.exports = {
             try {
                 op = await db.collection('masterdao').findOne({_id: parseInt(id)})
             } catch (e) {
-                return res.status(500).send({error: e.toString()})
+                logr.error('master dao op query failed', e)
+                return res.status(500).send({error: 'query failed'})
             }
             if (!op)
                 return res.status(404).send({error: 'master dao operation not found'})
@@ -65,7 +66,8 @@ module.exports = {
             try {
                 res.send(await db.collection('masterdao').find(query,{limit: 50, skip: parseInt(req.params.skip) || 0, sort: sort}).toArray())
             } catch (e) {
-                res.status(500).send({error: e.toString()})
+                logr.error('master dao ops query failed', e)
+                res.status(500).send({error: 'query failed'})
             }
         })
 
@@ -85,7 +87,8 @@ module.exports = {
             try {
                 res.send(await db.collection('proposals').find(query,{sort:{_id:sort}}).toArray())
             } catch (e) {
-                res.status(500).send({error: e.toString()})
+                logr.error('proposals query failed', e)
+                res.status(500).send({error: 'query failed'})
             }
         })
     }

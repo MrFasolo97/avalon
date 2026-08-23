@@ -29,7 +29,8 @@ module.exports = {
                 try {
                     block = blocks.read(blockNumber)
                 } catch (e) {
-                    return res.status(404).send({error: e.toString()})
+                    logr.error('block read failed', e)
+                    return res.status(500).send({error: 'block read failed'})
                 }
                 return res.send(block)
             }

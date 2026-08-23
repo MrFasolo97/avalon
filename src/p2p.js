@@ -62,7 +62,7 @@ let p2p = {
     nodeId: null,
     init: () => {
         p2p.generateNodeId()
-        let server = new WebSocket.Server({host:p2p_host, port: p2p_port})
+        let server = new WebSocket.Server({host:p2p_host, port: p2p_port, maxPayload: 10 * 1024 * 1024})
         server.on('connection', ws => p2p.handshake(ws))
         logr.info('Listening websocket p2p port on: ' + p2p_port)
         logr.info('Version:',version)
@@ -120,7 +120,7 @@ let p2p = {
         let toConnect = []
         for (let p = 0; p < peers.length; p++) {
             let connected = false
-            let colonSplit = peers[p].replace('ws://','').split(':')
+            let colonSplit = peers[p].replace(/^wss?:\/\//,'').split(':')
             let port = parseInt(colonSplit.pop())
             let address = colonSplit.join(':').replace('[','').replace(']','')
             if (!net.isIP(address))

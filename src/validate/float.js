@@ -1,9 +1,9 @@
 // floating point
 
 module.exports = (value, canBeZero, canBeNegative, max, min) => {
-    if (!max)
+    if (typeof max === 'undefined')
         max = Math.pow(2,33)-1
-    if (!min)
+    if (typeof min === 'undefined')
         if (canBeNegative)
             min = -Math.pow(2,33)+1
         else

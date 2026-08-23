@@ -308,7 +308,10 @@ let cache = {
             })
         } else {
             logr.debug(executions.length+' mongo ops queued')
-            cache.writerQueue.push((callback) => parallel(executions,() => callback()))
+            cache.writerQueue.push((callback) => parallel(executions,(err) => {
+                if (err) logr.error('mongo write queue error', err)
+                callback(err)
+            }))
             cache.clear()
         }
     },

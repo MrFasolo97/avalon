@@ -8,7 +8,12 @@ const SECRET_ENV_KEYS = [
     'NODE_OWNER',
     'NODE_OWNER_PUB',
     'DB_URL',
-    'DB_NAME'
+    'DB_NAME',
+    'ADMIN_TOKEN',
+    'LOG_ADMIN_TOKEN',
+    'MINE_TOKEN',
+    'DEBUG_TOKEN',
+    'RECOVER_TOKEN'
 ]
 
 const IPV4 = /\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b/g

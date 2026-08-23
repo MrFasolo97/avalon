@@ -55,6 +55,8 @@ module.exports = {
             let filterParam = req.params.filter
             let filter = filterParam.split(':')
             let filterBy = filter[1]
+            if (!filterBy)
+                return res.status(400).send({error: 'invalid filter'})
             let filterAttrs = filterBy.split('&')
 
             let filterMap = {}
@@ -108,7 +110,7 @@ module.exports = {
 
             let minTs = new Date().getTime() - rankings.types['trending'].halfLife*rankings.expireFactor
 
-            if (tags.includes('all')) 
+            if (tags.includes('all'))
                 db.collection('contents').find(
                     {
                         $and: [
@@ -118,7 +120,7 @@ module.exports = {
                             { ts: {'$gt': minTs} }
                         ]
                     },
-                    {sort: {ts: -1}}).toArray(function(err, contents) {
+                    {sort: {ts: -1}, limit: 5000}).toArray(function(err, contents) {
                     for (let i = 0; i < contents.length; i++) {
                         contents[i].score = 0
                         contents[i].ups = 0
@@ -135,6 +137,7 @@ module.exports = {
                     contents = contents.sort(function(a,b) {
                         return b.score - a.score
                     })
+                    //rankings.contents['hot'] = contents
                     res.send(contents.slice(0, limit))
                 })
             else 

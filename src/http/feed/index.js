@@ -81,6 +81,8 @@ module.exports = {
             let filterParam = req.params.filter
             let filter = filterParam.split(':')
             let filterBy = filter[1]
+            if (!filterBy)
+                return res.status(400).send({error: 'invalid filter'})
             let filterAttrs = filterBy.split('&')
 
             let filterMap = {}
@@ -158,8 +160,8 @@ module.exports = {
             if (tsrange.length === 2) {
                 tsfrom = parseInt(tsrange[0]) * 1000
                 tsto = parseInt(tsrange[1]) * 1000
-            } else 
-                return
+            } else
+                return res.status(400).send({error: 'invalid tsrange'})
 
             if (authors.includes('all') && !tags.includes('all')) 
                 db.collection('accounts').findOne({ name: req.params.username }, function (err, account) {

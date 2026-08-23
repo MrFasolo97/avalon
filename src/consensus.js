@@ -464,7 +464,10 @@ let consensus = {
 
         // Anti-fork: broadcast ALL candidates to peers and collect responses before committing
         // Dedup: skip if we already have an in-flight proposal at the same height
-        if (consensus.ffProposals && consensus.ffProposals.height === height) return
+        if (consensus.ffProposals && consensus.ffProposals.height === height) {
+            consensus.finalizing = false
+            return
+        }
         const ownName = process.env.NODE_OWNER
         const candidateHashes = candidates.map(c => c.block.hash)
         consensus.ffProposals = { height, proposals: {}, respondents: {} }

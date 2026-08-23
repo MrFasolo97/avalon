@@ -93,7 +93,7 @@ let rankings = {
             for (let i = 0; i < rankings.contents[key].length; i++)
                 if (rankings.contents[key][i].author === author && rankings.contents[key][i].link === link) {
                     let ts = rankings.contents[key][i].ts
-                    if (ts < new Date().getTime() - rankings.types[key].halfTime*expireFactor)
+                    if (ts < new Date().getTime() - rankings.types[key].halfLife*expireFactor)
                         return
                     
                     for (let y = 0; y < rankings.contents[key][i].votes.length; y++)

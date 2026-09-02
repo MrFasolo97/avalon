@@ -2,6 +2,7 @@ const fs = require('fs')
 const BSON = require('bson')
 const logr = require('./logger')
 const mongo = require('./mongo')
+const config = require('./config')
 const isRebuild = process.env.REBUILD_STATE === '1'
 
 let blocks = {
@@ -12,6 +13,7 @@ let blocks = {
     dataDir: process.env.BLOCKS_DIR ? process.env.BLOCKS_DIR.replace(/\/$/,''): '',
     isOpen: false,
     notOpenError: 'Blockchain is not open',
+    maxDocSize: () => Math.max(10*1024*1024, (config.maxTxPerBlock || 200) * (config.jsonMaxBytes || 60000) * 4),
     init: async (state) => {
         if (!process.env.BLOCKS_DIR) return
 
@@ -162,6 +164,8 @@ let blocks = {
         let docSizeBuf = Buffer.alloc(4)
         fs.readSync(blocks.fd,docSizeBuf,{offset: 0, position: docPosition, length: 4})
         let docSize = docSizeBuf.readInt32LE(0)
+        if (docSize < 1 || docSize > blocks.maxDocSize())
+            throw new Error('Invalid BSON doc size ' + docSize + ' at position ' + docPosition)
         let docBuf = Buffer.alloc(docSize)
         fs.readSync(blocks.fd,docBuf,{offset: 0, position: docPosition, length: docSize})
         try {
@@ -201,7 +205,11 @@ let blocks = {
         let docSizeBufEnd = Buffer.alloc(4)
         fs.readSync(blocks.fd,docSizeBufEnd,{offset: 0, position: docPositionEnd, length: 4})
         let docSizeEnd = docSizeBufEnd.readInt32LE(0)
+        if (docSizeEnd < 1 || docSizeEnd > blocks.maxDocSize())
+            throw new Error('Invalid BSON doc size in readRange: ' + docSizeEnd)
         let rangeSize = docPositionEnd-docPosition+docSizeEnd
+        if (rangeSize < 1 || rangeSize > 2*1024*1024*1024)
+            throw new Error('Read range too large: ' + rangeSize + ' bytes')
         let docBuf = Buffer.alloc(rangeSize)
         let docArr = []
         fs.readSync(blocks.fd,docBuf,{offset: 0, position: docPosition, length: rangeSize})

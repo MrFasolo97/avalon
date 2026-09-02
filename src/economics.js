@@ -65,10 +65,8 @@ let eco = {
     cleanHistory: () => {
         if (config.ecoBlocksIncreasesSoon) return
         let extraBlocks = eco.history.length - config.ecoBlocks
-        while (extraBlocks > 0) {
-            eco.history.shift()
-            extraBlocks--
-        }
+        if (extraBlocks > 0)
+            eco.history.splice(0, extraBlocks)
     },
     tallyVotes: (txs = []) => {
         let votes = 0

@@ -29,6 +29,8 @@ module.exports = {
                         if (err) { logr.error('promotedComment error', err); return cb(false, 'internal error') }
                         if (dao.availableBalance(account,ts) < tx.data.burn)
                             return cb(false, 'invalid tx not enough balance to burn')
+                        if (!Number.isSafeInteger(tx.data.vt + (tx.data.burn * config.vtPerBurn)))
+                            return cb(false, 'vt overflow')
                         cb(true)
                     })
                 } else

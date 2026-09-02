@@ -2,7 +2,6 @@ const fs = require('fs')
 const BSON = require('bson')
 const logr = require('./logger')
 const mongo = require('./mongo')
-const config = require('./config')
 const isRebuild = process.env.REBUILD_STATE === '1'
 
 let blocks = {
@@ -13,7 +12,7 @@ let blocks = {
     dataDir: process.env.BLOCKS_DIR ? process.env.BLOCKS_DIR.replace(/\/$/,''): '',
     isOpen: false,
     notOpenError: 'Blockchain is not open',
-    maxDocSize: () => Math.max(10*1024*1024, (config.maxTxPerBlock || 200) * (config.jsonMaxBytes || 60000) * 4),
+    maxDocSize: () => Math.min(512*1024*1024, Math.max(10*1024*1024, (config.maxTxPerBlock || 200) * (config.jsonMaxBytes || 60000) * 4)),
     init: async (state) => {
         if (!process.env.BLOCKS_DIR) return
 

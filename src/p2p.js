@@ -598,6 +598,14 @@ let p2p = {
             if (now - p2p.blockSenders[hash].ts > 120000)
                 delete p2p.blockSenders[hash]
         })
+        // cap total size to bound memory under hostile block bursts
+        const maxBlockSenders = 10000
+        const keys = Object.keys(p2p.blockSenders)
+        if (keys.length > maxBlockSenders) {
+            const sorted = keys.sort((a,b) => p2p.blockSenders[a].ts - p2p.blockSenders[b].ts)
+            for (let i = 0; i < sorted.length - maxBlockSenders; i++)
+                delete p2p.blockSenders[sorted[i]]
+        }
     }
 }
 

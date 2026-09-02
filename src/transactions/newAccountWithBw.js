@@ -12,7 +12,7 @@ module.exports = {
             cache.findOne('accounts', {name: tx.sender}, function(err, account) {
                 if (err) { logr.error('newAccountWithBw error', err); return cb(false, 'internal error') }
                 let bwBefore = new GrowInt(account.bw, {growth:Math.max(account.baseBwGrowth || 0, account.balance)/(config.bwGrowth)}).grow(ts)
-                if (bwBefore.v < tx.data.amount)
+                if (bwBefore.v < tx.data.bw)
                     cb(false, 'invalid tx not enough bw')
                 else
                     cb(true)

@@ -11,7 +11,7 @@ module.exports = (value, canBeZero, canBeNegative, max, min) => {
     
     if (typeof value !== 'number')
         return false
-    if (isNaN(value))
+    if (isNaN(value) || !isFinite(value))
         return false
     let parts = value.toString().split('.')
     if (parts.length > 2)

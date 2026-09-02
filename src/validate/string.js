@@ -3,9 +3,9 @@
 // key identifier
 
 module.exports = (value, maxLength, minLength, allowedChars, allowedCharsMiddle) => {
-    if (!maxLength)
+    if (typeof maxLength === 'undefined')
         maxLength = Number.MAX_SAFE_INTEGER
-    if (!minLength)
+    if (typeof minLength === 'undefined')
         minLength = 0
     if (typeof value !== 'string')
         return false

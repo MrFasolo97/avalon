@@ -6,7 +6,7 @@ module.exports = {
         }
 
         cache.findOne('accounts', {name: tx.sender}, function(err, acc) {
-            if (err) throw err
+            if (err) { logr.error('disaproveNode error', err); return cb(false, 'internal error') }
             if (!acc.approves) acc.approves = []
             if (acc.approves.indexOf(tx.data.target) === -1) {
                 cb(false, 'invalid tx already unvoted'); return
@@ -26,7 +26,7 @@ module.exports = {
             {$pull: {approves: tx.data.target}},
             function() {
                 cache.findOne('accounts', {name: tx.sender}, function(err, acc) {
-                    if (err) throw err
+                    if (err) { logr.error('disaproveNode error', err); return cb(false, 'internal error') }
                     if (!acc.approves) acc.approves = []
                     let node_appr = (acc.approves.length === 0 ? 0 : Math.floor(acc.balance/acc.approves.length))
                     let node_appr_before = Math.floor(acc.balance/(acc.approves.length+1))

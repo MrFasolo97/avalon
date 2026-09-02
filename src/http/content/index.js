@@ -47,8 +47,9 @@ module.exports = {
                     return
                 }
                 post.comments = {}
-                function fillComments(posts, cb) {
-                    if (!posts || posts.length === 0) {
+                function fillComments(posts, cb, depth) {
+                    if (depth === undefined) depth = 0
+                    if (!posts || posts.length === 0 || depth > 10) {
                         cb()
                         return
                     }
@@ -58,18 +59,18 @@ module.exports = {
                             db.collection('contents').find({
                                 pa: posts[i].author,
                                 pp: posts[i].link
-                            }).toArray(function (err, comments) {
+                            }, {limit: 1000}).toArray(function (err, comments) {
+                                if (err) { callback(err); return }
                                 for (let y = 0; y < comments.length; y++)
                                     post.comments[comments[y].author + '/' + comments[y].link] = comments[y]
                                 fillComments(comments, function () {
                                     callback(null, true)
-                                })
+                                }, depth + 1)
                             })
-                            i++
                         })
 
                     parallel(executions, function (err, results) {
-                        if (err) throw err
+                        if (err) { logr.error('content comments query failed', err); return cb() }
                         cb(null, results)
                     })
                 }
@@ -91,10 +92,16 @@ module.exports = {
          * 
          * @apiSuccess {Array} contents List of filtered contents authored by username
          */
+        function isValidFilterValue(val) {
+            return /^[a-zA-Z0-9_\-.\u00C0-\u024F]+$/.test(val)
+        }
+
         app.get('/content/:filter', (req, res) => {
             let filterParam = req.params.filter
             let filter = filterParam.split(':')
             let filterBy = filter[1]
+            if (!filterBy)
+                return res.status(400).send({error: 'invalid filter'})
             let filterAttrs = filterBy.split('&')
 
             let filterMap = {}
@@ -131,7 +138,7 @@ module.exports = {
                         filterMap['tags'] = []
                         filterMap['tags'].push('all')
                     } else if (key === 'limit') 
-                        filterMap['limit'] = Number.MAX_SAFE_INTEGER
+                        filterMap['limit'] = 50
                     else if (key === 'tsrange') {
                         filterMap['tsrange'] = []
                         filterMap['tsrange'].push(0)
@@ -157,18 +164,22 @@ module.exports = {
                     tags_ex.push(tags[i].substring(1, tags[i].length))
                 else 
                     tags_in.push(tags[i])
+
+            for (let v of authors_in.concat(authors_ex, tags_in, tags_ex))
+                if (v !== 'all' && !isValidFilterValue(v))
+                    return res.status(400).send({error: 'invalid filter value'})
             let limit = filterMap['limit']
 
-            if(limit === -1 || isNaN(limit)) 
-                limit = Number.MAX_SAFE_INTEGER
+            if (isNaN(limit) || limit < 1 || limit > 100)
+                limit = 50
 
             let tsrange = filterMap['tsrange']
             let tsfrom, tsto
             if (tsrange.length === 2) {
                 tsfrom = parseInt(tsrange[0]) * 1000
                 tsto = parseInt(tsrange[1]) * 1000
-            } else 
-                return
+            } else
+                return res.status(400).send({error: 'invalid tsrange'})
 
             if (authors.includes('all') && !tags.includes('all')) 
                 db.collection('contents').find({

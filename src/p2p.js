@@ -13,12 +13,31 @@ const p2p_host = process.env.P2P_HOST || '::'
 const WebSocket = require('ws')
 const dns = require('dns').promises
 const net = require('net')
+
+// Fisher-Yates shuffle using crypto.randomInt (cryptographically secure)
+function secureShuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = crypto.randomInt(0, i + 1);
+        [arr[i], arr[j]] = [arr[j], arr[i]]
+    }
+    return arr
+}
+const crypto = require('crypto')
 const { randomBytes } = require('crypto')
 const secp256k1 = require('secp256k1')
 const bs58 = require('base-x')(config.b58Alphabet)
 const blocks = require('./blocks')
 const dao = require('./dao')
 const daoMaster = require('./daoMaster')
+
+const ff_amplify_seen = {}
+
+setInterval(() => {
+    const now = Date.now()
+    for (const k in ff_amplify_seen)
+        if (now - ff_amplify_seen[k] > 120000)
+            delete ff_amplify_seen[k]
+}, 60000)
 
 const MessageType = {
     QUERY_NODE_STATUS: 0,
@@ -27,11 +46,15 @@ const MessageType = {
     BLOCK: 3,
     NEW_BLOCK: 4,
     NEW_TX: 5,
-    BLOCK_CONF_ROUND: 6
+    BLOCK_CONF_ROUND: 6,
+    FORCE_FINALIZE: 7
 }
 
 let p2p = {
     sockets: [],
+    bannedPeers: {},
+    peerFailures: {},
+    blockSenders: {},
     recoveringBlocks: [],
     recoveredBlocks: [],
     recovering: false,
@@ -39,7 +62,7 @@ let p2p = {
     nodeId: null,
     init: () => {
         p2p.generateNodeId()
-        let server = new WebSocket.Server({host:p2p_host, port: p2p_port})
+        let server = new WebSocket.Server({host:p2p_host, port: p2p_port, maxPayload: 10 * 1024 * 1024})
         server.on('connection', ws => p2p.handshake(ws))
         logr.info('Listening websocket p2p port on: ' + p2p_port)
         logr.info('Version:',version)
@@ -95,9 +118,9 @@ let p2p = {
         // ensure all peers explicitly listed in PEERS are connected when online
         let peers = process.env.PEERS ? process.env.PEERS.split(',') : []
         let toConnect = []
-        for (let p in peers) {
+        for (let p = 0; p < peers.length; p++) {
             let connected = false
-            let colonSplit = peers[p].replace('ws://','').split(':')
+            let colonSplit = peers[p].replace(/^wss?:\/\//,'').split(':')
             let port = parseInt(colonSplit.pop())
             let address = colonSplit.join(':').replace('[','').replace(']','')
             if (!net.isIP(address))
@@ -107,7 +130,7 @@ let p2p = {
                     logr.debug('dns lookup failed for '+address)
                     continue
                 }
-            for (let s in p2p.sockets)
+            for (let s = 0; s < p2p.sockets.length; s++)
                 if (p2p.sockets[s]._socket.remoteAddress.replace('::ffff:','') === address && p2p.sockets[s]._socket.remotePort === port) {
                     connected = true
                     break
@@ -134,6 +157,14 @@ let p2p = {
         }
         if (p2p.sockets.length >= max_peers) {
             logr.warn('Incoming handshake refused because already peered enough '+p2p.sockets.length+'/'+max_peers)
+            ws.close(); return
+        }
+        // refuse connection from banned peers
+        let remoteIp = ws._socket.remoteAddress
+        if (remoteIp.indexOf('::ffff:') > -1)
+            remoteIp = remoteIp.replace('::ffff:', '')
+        if (p2p.isBanned(remoteIp)) {
+            logr.warn('Refused handshake from banned peer ' + remoteIp)
             ws.close(); return
         }
         // close connection if we already have this peer ip in our connected sockets
@@ -181,8 +212,8 @@ let p2p = {
             case MessageType.QUERY_NODE_STATUS:
                 // a peer is requesting our node status
                 if (typeof message.d !== 'object'
-                && typeof message.d.nodeId !== 'string'
-                && typeof message.d.random !== 'string')
+                || typeof message.d.nodeId !== 'string'
+                || typeof message.d.random !== 'string')
                     return
                 let wsNodeId = message.d.nodeId
                 if (wsNodeId === p2p.nodeId.pub) {
@@ -212,57 +243,59 @@ let p2p = {
 
             case MessageType.NODE_STATUS:
                 // we received a peer node status
-                if (typeof message.d.sign === 'string') {
-                    let nodeId = p2p.sockets[p2p.sockets.indexOf(ws)].node_status.nodeId
-                    if (!message.d.nodeId || message.d.nodeId !== nodeId)
-                        return
-                    let challengeHash = p2p.sockets[p2p.sockets.indexOf(ws)].challengeHash
-                    if (!challengeHash)
-                        return
-                    if (message.d.origin_block !== config.originHash) {
-                        logr.debug('Different chain id, disconnecting')
-                        return ws.close()
-                    }
-                    try {
-                        let isValidSignature = secp256k1.ecdsaVerify(
-                            bs58.decode(message.d.sign),
-                            Buffer.from(challengeHash, 'hex'),
-                            bs58.decode(nodeId))
-                        if (!isValidSignature) {
-                            logr.warn('Wrong NODE_STATUS signature, disconnecting')
-                            ws.close()
-                        }
-                        
-                        for (let i = 0; i < p2p.sockets.length; i++)
-                            if (i !== p2p.sockets.indexOf(ws)
-                            && p2p.sockets[i].node_status
-                            && p2p.sockets[i].node_status.nodeId === nodeId) {
-                                logr.debug('Peer disconnected because duplicate connections')
-                                p2p.sockets[i].close()
-                            }
-    
-                        clearInterval(p2p.sockets[p2p.sockets.indexOf(ws)].pendingDisconnect)
-                        delete message.d.sign
-                        p2p.sockets[p2p.sockets.indexOf(ws)].node_status = message.d
-                    } catch (error) {
-                        logr.error('Error during NODE_STATUS verification', error)
-                    }
+                if (typeof message.d !== 'object' || typeof message.d.sign !== 'string') break
+                let nodeId = p2p.sockets[p2p.sockets.indexOf(ws)].node_status.nodeId
+                if (!message.d.nodeId || message.d.nodeId !== nodeId)
+                    return
+                let challengeHash = p2p.sockets[p2p.sockets.indexOf(ws)].challengeHash
+                if (!challengeHash)
+                    return
+                if (message.d.origin_block !== config.originHash) {
+                    logr.debug('Different chain id, disconnecting')
+                    return ws.close()
                 }
-                
+                try {
+                    let isValidSignature = secp256k1.ecdsaVerify(
+                        bs58.decode(message.d.sign),
+                        Buffer.from(challengeHash, 'hex'),
+                        bs58.decode(nodeId))
+                    if (!isValidSignature) {
+                        logr.warn('Wrong NODE_STATUS signature, disconnecting')
+                        ws.close()
+                        return
+                    }
+
+                    for (let i = 0; i < p2p.sockets.length; i++)
+                        if (i !== p2p.sockets.indexOf(ws)
+                        && p2p.sockets[i].node_status
+                        && p2p.sockets[i].node_status.nodeId === nodeId) {
+                            logr.debug('Peer disconnected because duplicate connections')
+                            p2p.sockets[i].close()
+                        }
+
+                    clearTimeout(p2p.sockets[p2p.sockets.indexOf(ws)].pendingDisconnect)
+                    delete message.d.sign
+                    p2p.sockets[p2p.sockets.indexOf(ws)].node_status = message.d
+                } catch (error) {
+                    logr.error('Error during NODE_STATUS verification', error)
+                }
+
                 break
 
             case MessageType.QUERY_BLOCK:
                 // a peer wants to see the data in one of our stored blocks
+                const blockId = parseInt(message.d, 10)
+                if (isNaN(blockId) || blockId < 0) break
                 if (blocks.isOpen) {
                     let block = {}
                     try {
-                        block = blocks.read(message.d)
+                        block = blocks.read(blockId)
                     } catch (e) {
                         break
                     }
                     p2p.sendJSON(ws, {t:MessageType.BLOCK, d:block})
                 } else
-                    db.collection('blocks').findOne({_id: message.d}, function(err, block) {
+                    db.collection('blocks').findOne({_id: blockId}, function(err, block) {
                         if (err)
                             throw err
                         if (block)
@@ -300,6 +333,10 @@ let p2p = {
                 p2p.sockets[p2p.sockets.indexOf(ws)].node_status.head_block_hash = block.hash
                 p2p.sockets[p2p.sockets.indexOf(ws)].node_status.previous_block_hash = block.phash
 
+                // track which peer sent this block for failure banning
+                if (block.hash)
+                    p2p.blockSenders[block.hash] = { ws, ts: Date.now() }
+
                 if (p2p.recovering) return
                 consensus.round(0, block)
                 break
@@ -332,8 +369,8 @@ let p2p = {
                 // it should come from one of the elected leaders, so let's verify signature
                 if (p2p.recovering) return
                 if (!message.s || !message.s.s || !message.s.n) return
-                if (!message.d || !message.d.ts || 
-                    typeof message.d.ts != 'number' ||
+                if (!message.d || !Number.isFinite(message.d.ts) ||
+                    !Number.isInteger(message.d.ts) || message.d.ts <= 0 ||
                     message.d.ts + 2*config.blockTime < new Date().getTime() ||
                     message.d.ts - 2*config.blockTime > new Date().getTime()) return
 
@@ -345,16 +382,13 @@ let p2p = {
                     p2p.sockets[p2p.sockets.indexOf(ws)].sentUs.push([message.s.s,new Date().getTime()])
                 }
 
-                for (let i = 0; i < consensus.processed.length; i++) {
-                    if (consensus.processed[i][1] + 2*config.blockTime < new Date().getTime()) {
-                        consensus.processed.splice(i, 1)
-                        i--
-                        continue
-                    }
+                const now = Date.now()
+                const blockTime2x = 2 * config.blockTime
+                consensus.processed = consensus.processed.filter(p => p[1] + blockTime2x >= now)
+                for (let i = 0; i < consensus.processed.length; i++)
                     if (consensus.processed[i][0].s.s === message.s.s)
                         return
-                }
-                consensus.processed.push([message, new Date().getTime()])
+                consensus.processed.push([message, now])
 
                 consensus.verifySignature(message, function(isValid) {
                     if (!isValid && !p2p.recovering) {
@@ -371,12 +405,37 @@ let p2p = {
                             // logr.trace('Ignored BLOCK_CONF_ROUND')
                         } else if (validationStep === 0) {
                             // block is being validated, we queue the message
-                            consensus.queue.push(message)
+                            if (consensus.queue.length >= consensus.maxQueueSize)
+                                logr.warn('Consensus queue at capacity, dropping message')
+                            else
+                                consensus.queue.push(message)
                             logr.debug('Added to queue')
                         } else
                             // process the message inside the consensus
                             consensus.remoteRoundConfirm(message)
                     })
+                })
+                break
+
+            case MessageType.FORCE_FINALIZE:
+                if (!message.s || !message.s.s || !message.s.n) break
+                // Verify signature before any dedup to prevent unauthenticated poison
+                consensus.verifySignature(message, function(isValid) {
+                    if (!isValid) {
+                        logr.warn('Received wrong FF signature from ' + message.s.n)
+                        return
+                    }
+                    // Dedup by sender+signature to prevent broadcast amplification
+                    const ffKey = message.s.n + '_' + message.s.s
+                    const now = Date.now()
+                    if (ff_amplify_seen[ffKey] && now - ff_amplify_seen[ffKey] < 120000) return
+                    ff_amplify_seen[ffKey] = now
+                    // Expire stale dedup entries
+                    for (const kk in ff_amplify_seen)
+                        if (Date.now() - ff_amplify_seen[kk] > 120000)
+                            delete ff_amplify_seen[kk]
+                    p2p.broadcastNotSent(message)
+                    consensus.handleForceFinalizeProposal(message)
                 })
                 break
             }
@@ -399,10 +458,13 @@ let p2p = {
             return
         }
 
-        let champion = peersAhead[Math.floor(Math.random()*peersAhead.length)]
+        secureShuffle(peersAhead)
+        let champions = peersAhead.slice(0, Math.min(3, peersAhead.length))
+        let champion = champions[0]
         if (p2p.recovering+1 <= champion.node_status.head_block) {
             p2p.recovering++
-            p2p.sendJSON(champion, {t: MessageType.QUERY_BLOCK, d:p2p.recovering})
+            for (let i = 0; i < champions.length; i++)
+                p2p.sendJSON(champions[i], {t: MessageType.QUERY_BLOCK, d:p2p.recovering})
             p2p.recoveringBlocks.push(p2p.recovering)
             logr.debug('query block #'+p2p.recovering+' -- head block: '+champion.node_status.head_block)
             if (p2p.recovering%2) p2p.recover()
@@ -425,8 +487,40 @@ let p2p = {
         ws.on('error', () => p2p.closeConnection(ws))
     },
     closeConnection: (ws) => {
-        p2p.sockets.splice(p2p.sockets.indexOf(ws), 1)
+        const idx = p2p.sockets.indexOf(ws)
+        if (idx !== -1)
+            p2p.sockets.splice(idx, 1)
         logr.debug('a peer disconnected, '+p2p.sockets.length+' peers left')
+    },
+    recordBlockFailure: (blockHash) => {
+        const entry = p2p.blockSenders[blockHash]
+        delete p2p.blockSenders[blockHash]
+        if (!entry || !entry.ws || !entry.ws._socket) return
+        let ws = entry.ws
+        let ip = ws._socket.remoteAddress
+        if (ip.indexOf('::ffff:') > -1)
+            ip = ip.replace('::ffff:', '')
+        // cap peerFailures to prevent memory leak from IP cycling
+        if (Object.keys(p2p.peerFailures).length >= 1000)
+            return
+        if (!p2p.peerFailures[ip])
+            p2p.peerFailures[ip] = 0
+        p2p.peerFailures[ip]++
+        if (p2p.peerFailures[ip] >= 5) {
+            const banSeconds = 300 // 5 minutes
+            logr.warn('Banning peer ' + ip + ' for ' + banSeconds + 's (' + p2p.peerFailures[ip] + ' failures)')
+            p2p.bannedPeers[ip] = Date.now() + banSeconds * 1000
+            delete p2p.peerFailures[ip]
+            ws.close()
+        }
+    },
+    isBanned: (ip) => {
+        if (!p2p.bannedPeers[ip]) return false
+        if (Date.now() > p2p.bannedPeers[ip]) {
+            delete p2p.bannedPeers[ip]
+            return false
+        }
+        return true
     },
     sendJSON: (ws, d) => {
         try {
@@ -465,8 +559,11 @@ let p2p = {
                 p2p.recoveredBlocks = []
                 p2p.recoveringBlocks = []
                 p2p.recoverAttempt++
-                if (p2p.recoverAttempt > max_recover_attempts)
+                if (p2p.recoverAttempt > max_recover_attempts) {
                     logr.error('Error Replay', newBlock._id)
+                    p2p.recovering = false
+                    p2p.recoverAttempt = 0
+                }
                 else {
                     logr.warn('Recover attempt #'+p2p.recoverAttempt+' for block '+newBlock._id)
                     p2p.recovering = chain.getLatestBlock()._id
@@ -494,6 +591,20 @@ let p2p = {
                     p2p.sockets[i].sentUs.splice(y,1)
                     y--
                 }
+        }
+        // clean stale blockSenders entries (older than 2 minutes)
+        const now = Date.now()
+        Object.keys(p2p.blockSenders).forEach(hash => {
+            if (now - p2p.blockSenders[hash].ts > 120000)
+                delete p2p.blockSenders[hash]
+        })
+        // cap total size to bound memory under hostile block bursts
+        const maxBlockSenders = 10000
+        const keys = Object.keys(p2p.blockSenders)
+        if (keys.length > maxBlockSenders) {
+            const sorted = keys.sort((a,b) => p2p.blockSenders[a].ts - p2p.blockSenders[b].ts)
+            for (let i = 0; i < sorted.length - maxBlockSenders; i++)
+                delete p2p.blockSenders[sorted[i]]
         }
     }
 }

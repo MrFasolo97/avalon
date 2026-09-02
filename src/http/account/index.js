@@ -25,8 +25,8 @@ module.exports = {
          * @apiSuccess {String} [pub_leader] Leader signing public key of account
          */
         app.get('/account/:name', (req, res) => {
-            if (!req.params.name) {
-                res.sendStatus(500)
+            if (!validate.string(req.params.name, config.accountMaxLength, config.accountMinLength, config.allowedUsernameChars)) {
+                res.sendStatus(404)
                 return
             }
             db.collection('accounts').findOne({ name: req.params.name }, function (err, account) {

@@ -65,10 +65,8 @@ let eco = {
     cleanHistory: () => {
         if (config.ecoBlocksIncreasesSoon) return
         let extraBlocks = eco.history.length - config.ecoBlocks
-        while (extraBlocks > 0) {
-            eco.history.shift()
-            extraBlocks--
-        }
+        if (extraBlocks > 0)
+            eco.history.splice(0, extraBlocks)
     },
     tallyVotes: (txs = []) => {
         let votes = 0
@@ -86,6 +84,9 @@ let eco = {
         let distributed = 0
         let votes = 0
         if (!eco.startRewardPool) {
+            if (!eco.history || eco.history.length === 0) 
+                return { theo: theoricalPool, burn: 0, dist: 0, votes: 0, avail: theoricalPool }
+            
             distributed = eco.history[eco.history.length-1].cDist
             burned = eco.history[eco.history.length-1].cBurn
             let firstBlockIndex = eco.history.length - config.ecoBlocks
@@ -140,6 +141,7 @@ let eco = {
     },
     curation: (author, link, cb) => {
         cache.findOne('contents', {_id: author+'/'+link}, function(err, content) {
+            if (!content || !content.votes || content.votes.length === 0) return cb(0, 0)
             let currentVote = content.votes[content.votes.length-1]
 
             // first loop to calculate the VP of active votes
@@ -305,7 +307,7 @@ let eco = {
         // otherwise we proportionally reduce based on recent votes weight
         // and how much is available for printing
         else
-            thNewCoins = stats.avail * Math.abs((vt) / stats.votes)
+            thNewCoins = Math.min(stats.avail * Math.abs((vt) / stats.votes), Number.MAX_SAFE_INTEGER)
 
         // rounding down
         thNewCoins = eco.floor(thNewCoins)
@@ -320,8 +322,9 @@ let eco = {
         return thNewCoins
     },
     rentability: (ts1, ts2, isDv) => {
+        if (typeof ts1 !== 'number' || typeof ts2 !== 'number' || isNaN(ts1) || isNaN(ts2)) return 0
         let ts = ts2 - ts1
-        if (ts < 0) throw 'Invalid timestamp in rentability calculation'
+        if (ts < 0) return config.ecoBaseRent || 0
 
         // https://imgur.com/a/GTLvs37
         let directionRent = isDv ? config.ecoDvRentFactor : 1
@@ -357,8 +360,14 @@ let eco = {
         rentability = Math.floor(directionRent*rentability*Math.pow(10, config.ecoRentPrecision))/Math.pow(10, config.ecoRentPrecision)
         return rentability
     },
-    round: (val = 0) => Math.round(val*Math.pow(10,config.ecoClaimPrecision))/Math.pow(10,config.ecoClaimPrecision),
-    floor: (val = 0) => Math.floor(val*Math.pow(10,config.ecoClaimPrecision))/Math.pow(10,config.ecoClaimPrecision)
+    round: (val = 0) => {
+        if (typeof val !== 'number' || isNaN(val)) val = 0
+        return Math.round(val*Math.pow(10,config.ecoClaimPrecision))/Math.pow(10,config.ecoClaimPrecision)
+    },
+    floor: (val = 0) => {
+        if (typeof val !== 'number' || isNaN(val)) val = 0
+        return Math.floor(val*Math.pow(10,config.ecoClaimPrecision))/Math.pow(10,config.ecoClaimPrecision)
+    }
 } 
 
 module.exports = eco

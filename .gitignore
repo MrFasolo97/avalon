@@ -10,3 +10,5 @@ dump
 genesis
 apidoc
 .DS_Store
+.commandcode
+opencode.bash

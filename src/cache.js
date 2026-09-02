@@ -46,7 +46,7 @@ let cache = {
         cache.inserts = []
 
         // reset leader changes
-        for (let i in cache.leaderChanges)
+        for (let i = 0; i < cache.leaderChanges.length; i++)
             if (cache.leaderChanges[i][1] === 0)
                 cache.addLeader(cache.leaderChanges[i][0],true,()=>{})
             else if (cache.leaderChanges[i][1] === 1)
@@ -59,13 +59,20 @@ let cache = {
     findOnePromise: function(collection, query, skipClone) {
         return new Promise((rs,rj) => cache.findOne(collection,query,(e,d) => e ? rj(e) : rs(d),skipClone))
     },
+    sanitizeQuery: function(query) {
+        if (!query || typeof query !== 'object' || Array.isArray(query)) return
+        for (const k of Object.keys(query))
+            if (k === '__proto__' || k === 'constructor' || k === 'prototype')
+                delete query[k]
+    },
     findOne: function(collection, query, cb, skipClone) {
         if (!cache.copy[collection])
             return cb('invalid collection')
+        cache.sanitizeQuery(query)
 
         let key = cache.keyByCollection(collection)
         // searching in cache
-        if (cache[collection][query[key]]) {
+        if (query && cache[collection][query[key]]) {
             if (!skipClone)
                 cb(null, cloneDeep(cache[collection][query[key]]))
             else
@@ -74,7 +81,9 @@ let cache = {
         }
         
         // no match, searching in mongodb
-        db.collection(collection).findOne(query, function(err, obj) {
+        let sanitizedQuery = {}
+        sanitizedQuery[key] = query[key]
+        db.collection(collection).findOne(sanitizedQuery, function(err, obj) {
             if (err) logr.debug('error cache')
             else {
                 if (!obj) {
@@ -93,9 +102,10 @@ let cache = {
         })
     },
     updateOnePromise: function (collection, query, changes) {
-        return new Promise((rs,rj) => cache.updateOne(collection,query,changes,(e,d) => e ? rj(e) : rs(true)))
+        return new Promise((rs,rj) => cache.updateOne(collection,query,changes,(e) => e ? rj(e) : rs(true)))
     },
     updateOne: function(collection, query, changes, cb) {
+        cache.sanitizeQuery(query)
         cache.findOne(collection, query, function(err, obj) {
             if (err) throw err
             if (!obj) {
@@ -106,7 +116,8 @@ let cache = {
             if (!cache.copy[collection][obj[key]] && (!chain.restoredBlocks || chain.getLatestBlock()._id >= chain.restoredBlocks))
                 cache.copy[collection][obj[key]] = cloneDeep(cache[collection][obj[key]])
             
-            for (let c in changes) 
+            for (let c in changes) {
+                if (c === '__proto__' || c === 'constructor' || c === 'prototype') continue
                 switch (c) {
                 case '$inc':
                     for (let i in changes[c]) 
@@ -157,6 +168,7 @@ let cache = {
                 default:
                     break
                 }
+            }
             
             cache.changes.push({
                 collection: collection,
@@ -253,7 +265,7 @@ let cache = {
         // if (cache.changes.length) logr.debug(cache.changes.length+' Updates compressed to '+Object.keys(docsToUpdate.accounts).length+' accounts, '+Object.keys(docsToUpdate.contents).length+' contents')
 
         for (const col in docsToUpdate) 
-            for (const i in docsToUpdate[col]) 
+            Object.keys(docsToUpdate[col]).forEach(i => {
                 executions.push(function(callback) {
                     let key = cache.keyByCollection(col)
                     let newDoc = docsToUpdate[col][i]
@@ -264,18 +276,19 @@ let cache = {
                         callback()
                     })
                 })
+            })
 
         // leader stats
         if (process.env.LEADER_STATS === '1') {
             let leaderStatsWriteOps = leaderStats.getWriteOps()
-            for (let op in leaderStatsWriteOps)
+            for (let op = 0; op < leaderStatsWriteOps.length; op++)
                 executions.push(leaderStatsWriteOps[op])
         }
 
         // tx history
         if (process.env.TX_HISTORY === '1') {
             let txHistoryWriteOps = txHistory.getWriteOps()
-            for (let op in txHistoryWriteOps)
+            for (let op = 0; op < txHistoryWriteOps.length; op++)
                 executions.push(txHistoryWriteOps[op])
         }
 
@@ -295,14 +308,17 @@ let cache = {
             })
         } else {
             logr.debug(executions.length+' mongo ops queued')
-            cache.writerQueue.push((callback) => parallel(executions,() => callback()))
+            cache.writerQueue.push((callback) => parallel(executions,(err) => {
+                if (err) logr.error('mongo write queue error', err)
+                callback(err)
+            }))
             cache.clear()
         }
     },
     processRebuildOps: (cb,writeToDisk) => {
-        for (let i in cache.inserts)
+        for (let i = 0; i < cache.inserts.length; i++)
             cache.rebuild.inserts.push(cache.inserts[i])
-        for (let i in cache.changes)
+        for (let i = 0; i < cache.changes.length; i++)
             cache.rebuild.changes.push(cache.changes[i])
         cache.inserts = []
         cache.changes = []
@@ -364,7 +380,7 @@ let cache = {
             ]
         }).toArray((e,accs) => {
             if (e) throw e
-            for (let i in accs) {
+            for (let i = 0; i < accs.length; i++) {
                 cache.leaders[accs[i].name] = 1
                 if (!cache.accounts[accs[i].name])
                     cache.accounts[accs[i].name] = accs[i]

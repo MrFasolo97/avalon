@@ -1,5 +1,15 @@
+const rateLimit = require('express-rate-limit')
+
+const p2pLimiter = rateLimit({
+    windowMs: 1000,
+    max: 20,
+    message: { error: 'too many requests' }
+})
+
 module.exports = {
     init: (app) => {
+        app.use('/p2p', p2pLimiter)
+
         /**
          * @api {get} /p2p P2PVideos
          * @apiName p2p
@@ -8,7 +18,7 @@ module.exports = {
          * @apiSuccess {Object[]} contents List of new p2p contents
          */
         app.get('/p2p', (req, res) => {
-            db.collection('contents').find({$and: [{pa: null }, {$or: [{"json.files.ipfs": {$ne: null}},{"json.files.btfs": {$ne: null}}, {"json.files.sia": { $ne: null}}]}]}, { sort: { ts: -1 }, limit: 50 }).toArray(function (err, contents) {
+            db.collection('contents').find({$and: [{pa: null }, {$or: [{'json.files.ipfs': {$ne: null}},{'json.files.btfs': {$ne: null}}, {'json.files.sia': { $ne: null}}]}]}, { sort: { ts: -1 }, limit: 50 }).toArray(function (err, contents) {
                 res.send(contents)
             })
         })
@@ -37,7 +47,7 @@ module.exports = {
                 db.collection('contents').find({
                     $and: [
                         { pa: null },
-                        {$or: [{"json.files.ipfs": {$ne: null}},{"json.files.btfs": {$ne: null}}, {"json.files.sia": { $ne: null}}]},
+                        {$or: [{'json.files.ipfs': {$ne: null}},{'json.files.btfs': {$ne: null}}, {'json.files.sia': { $ne: null}}]},
                         { ts: { $lte: content.ts } }
                     ]
                 }, { sort: { ts: -1 }, limit: 50 }).toArray(function (err, contents) {
@@ -60,10 +70,12 @@ module.exports = {
             let filterParam = req.params.filter
             let filter = filterParam.split(':')
             let filterBy = filter[1]
+            if (!filterBy)
+                return res.status(400).send({error: 'invalid filter'})
             let filterAttrs = []
-            if (filterBy !== null) {
+            if (filterBy !== null)
                 filterAttrs = filterBy.split('&')
-            }
+            
 
             let filterMap = {}
             let defaultKeys = ['authors', 'tags', 'limit', 'tsrange']
@@ -129,23 +141,23 @@ module.exports = {
 
             let limit = filterMap['limit']
 
-            if(limit === -1 || isNaN(limit)) 
-                limit = Number.MAX_SAFE_INTEGER
+            if (isNaN(limit) || limit < 1 || limit > 100)
+                limit = 50
 
             let tsrange = filterMap['tsrange']
             let tsfrom, tsto
             if (tsrange.length === 2) {
                 tsfrom = parseInt(tsrange[0]) * 1000
                 tsto = parseInt(tsrange[1]) * 1000
-            } else 
-                return
+            } else
+                return res.status(400).send({error: 'invalid tsrange'})
 
             if (authors.includes('all') && !tags.includes('all')) 
                 db.collection('contents').find({
                     $and: [
                         { pa: null },
                         { author: { $nin : authors_ex } },
-                        {$or: [{"json.files.ipfs": {$ne: null}},{"json.files.btfs": {$ne: null}}, {"json.files.sia": { $ne: null}}]},
+                        {$or: [{'json.files.ipfs': {$ne: null}},{'json.files.btfs': {$ne: null}}, {'json.files.sia': { $ne: null}}]},
                         {
                             $or: [
                                 {
@@ -174,7 +186,7 @@ module.exports = {
                         { pa: null },
                         { author: { $in : authors_in } },
                         { author: { $nin : authors_ex } },
-                        {$or: [{"json.files.ipfs": {$ne: null}},{"json.files.btfs": {$ne: null}}, {"json.files.sia": { $ne: null}}]},
+                        {$or: [{'json.files.ipfs': {$ne: null}},{'json.files.btfs': {$ne: null}}, {'json.files.sia': { $ne: null}}]},
                         {
                             $or: [
                                 {
@@ -201,7 +213,7 @@ module.exports = {
                 db.collection('contents').find({
                     $and: [
                         { pa: null },
-                        {$or: [{"json.files.ipfs": {$ne: null}},{"json.files.btfs": {$ne: null}}, {"json.files.sia": {$ne: null}}]},
+                        {$or: [{'json.files.ipfs': {$ne: null}},{'json.files.btfs': {$ne: null}}, {'json.files.sia': {$ne: null}}]},
                         { author: { $nin : authors_ex } },
                         { 'json.tag': { $nin: tags_ex } },
                         { votes: { $elemMatch: { tag: { $nin: tags_ex } } } },
@@ -217,7 +229,7 @@ module.exports = {
                         { pa: null },
                         { author: { $in : authors_in } },
                         { author: { $nin : authors_ex } },
-                        {$or: [{"json.files.ipfs": {$ne: null}},{"json.files.btfs": {$ne: null}}, {"json.files.sia": { $ne: null}}]},
+                        {$or: [{'json.files.ipfs': {$ne: null}},{'json.files.btfs': {$ne: null}}, {'json.files.sia': { $ne: null}}]},
                         { 'json.tag': { $nin: tags_ex } },
                         { votes: { $elemMatch: { tag: { $nin: tags_ex } } } },
                         { ts: { $gte: tsfrom } },

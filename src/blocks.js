@@ -1,5 +1,4 @@
 const fs = require('fs')
-const assert = require('assert')
 const BSON = require('bson')
 const logr = require('./logger')
 const mongo = require('./mongo')
@@ -13,6 +12,7 @@ let blocks = {
     dataDir: process.env.BLOCKS_DIR ? process.env.BLOCKS_DIR.replace(/\/$/,''): '',
     isOpen: false,
     notOpenError: 'Blockchain is not open',
+    maxDocSize: () => Math.min(512*1024*1024, Math.max(10*1024*1024, (config.maxTxPerBlock || 200) * (config.jsonMaxBytes || 60000) * 4)),
     init: async (state) => {
         if (!process.env.BLOCKS_DIR) return
 
@@ -44,20 +44,26 @@ let blocks = {
         blocks.isOpen = true
 
         // Determine if resumption of index creation is required
-        let resumeIndex = false
         if (indexSize > 0) {
-            assert(indexSize % 8 === 0, 'Size of index file should be in multiple of 8')
+            if (indexSize % 8 !== 0) {
+                logr.fatal('Corrupted index file at ' + indexPath + ': size ' + indexSize + ' is not multiple of 8')
+                blocks.close()
+                process.exit(1)
+            }
             let docPosition = BigInt(0)
             let docSizeBuf = Buffer.alloc(4)
             let docIndexBuf = Buffer.alloc(8)
             fs.readSync(blocks.fdIndex,docIndexBuf,{offset: 0, position: indexSize-8, length: 8})
             docPosition = BigInt(Number(BigInt(docIndexBuf.readUInt32LE(0)) << 8n) + docIndexBuf.readUInt32LE(4))
-            assert(docPosition < blocks.bsonSize, 'Latest indexed position greater than or equal to blocks.bson size')
+            if (docPosition >= blocks.bsonSize) {
+                logr.fatal('Indexed position ' + docPosition + ' exceeds blocks.bson size ' + blocks.bsonSize)
+                blocks.close()
+                process.exit(1)
+            }
             fs.readSync(blocks.fd,docSizeBuf,{offset: 0, position: docPosition, length: 4})
             let docSize = BigInt(docSizeBuf.readInt32LE(0))
             docPosition += docSize
             if (docPosition < blocks.bsonSize) {
-                resumeIndex = true
                 logr.info('Resuming index creation from block',blocks.height)
                 blocks.reconstructIndex(docSizeBuf,docPosition,blocks.height+1)
             }
@@ -94,14 +100,14 @@ let blocks = {
     },
     touch: () => {
         let bsonPath = blocks.dataDir+'/blocks.bson'
-        let indexPath = blocks.dataDir+'/blocks.bson'
+        let indexPath = blocks.dataDir+'/blocks.index'
         if (!fs.existsSync(bsonPath))
             fs.closeSync(fs.openSync(bsonPath,'w'))
         if (!fs.existsSync(indexPath))
             fs.closeSync(fs.openSync(indexPath,'w'))
     },
     reconstructIndex: (currentDocSizeBuf, currentDocPosition, currentBlockHeight) => {
-        assert(blocks.isOpen,blocks.notOpenError)
+        if (!blocks.isOpen) { logr.fatal(blocks.notOpenError); process.exit(1) }
         logr.info('Reconstructing blocks BSON index file...')
 
         let startTime = new Date().getTime()
@@ -122,8 +128,8 @@ let blocks = {
         logr.info('Index reconstructed up to block #'+blocks.height+' in '+(new Date().getTime()-startTime)+'ms')
     },
     appendBlock: (newBlock) => {
-        assert(blocks.isOpen,blocks.notOpenError)
-        assert(newBlock._id === blocks.height+1,'could not append non-next block')
+        if (!blocks.isOpen) { logr.fatal(blocks.notOpenError); process.exit(1) }
+        if (newBlock._id !== blocks.height+1) { logr.fatal('could not append non-next block: expected ' + (blocks.height+1) + ' got ' + newBlock._id); process.exit(1) }
         let serializedBlock = BSON.serialize(newBlock)
         let newBlockSize = BigInt(serializedBlock.length)
         fs.writeSync(blocks.fd,serializedBlock)
@@ -132,7 +138,7 @@ let blocks = {
         blocks.height++
     },
     appendIndex: (pos) => {
-        assert(blocks.isOpen,blocks.notOpenError)
+        if (!blocks.isOpen) { logr.fatal(blocks.notOpenError); process.exit(1) }
         let indexBuf = Buffer.alloc(8)
         indexBuf.writeUInt32LE(Number(pos >> 8n), 0)
         indexBuf.writeUInt32LE(Number(pos & 0xFFn), 4)
@@ -150,15 +156,22 @@ let blocks = {
         let indexBuf = Buffer.alloc(8)
         fs.readSync(blocks.fdIndex,indexBuf,{offset: 0, position: blockNum*8, length: 8})
         let docPosition = Number(BigInt(indexBuf.readUInt32LE(0)) << 8n) + indexBuf.readUInt32LE(4)
-        assert(BigInt(docPosition) < blocks.bsonSize,'Bson position out of range')
+        if (BigInt(docPosition) >= blocks.bsonSize)
+            throw new Error('Bson position ' + docPosition + ' out of range (size ' + blocks.bsonSize + ')')
 
         // Read blocks BSON at position of block
         let docSizeBuf = Buffer.alloc(4)
         fs.readSync(blocks.fd,docSizeBuf,{offset: 0, position: docPosition, length: 4})
         let docSize = docSizeBuf.readInt32LE(0)
+        if (docSize < 1 || docSize > blocks.maxDocSize())
+            throw new Error('Invalid BSON doc size ' + docSize + ' at position ' + docPosition)
         let docBuf = Buffer.alloc(docSize)
         fs.readSync(blocks.fd,docBuf,{offset: 0, position: docPosition, length: docSize})
-        return BSON.deserialize(docBuf)
+        try {
+            return BSON.deserialize(docBuf)
+        } catch (e) {
+            throw new Error('Failed to deserialize block #' + blockNum + ': ' + e.message)
+        }
     },
     readRange: (start,end) => {
         if (!blocks.isOpen)
@@ -183,21 +196,34 @@ let blocks = {
         fs.readSync(blocks.fdIndex,indexBufEnd,{offset: 0, position: end*8, length: 8})
         let docPosition = Number(BigInt(indexBuf.readUInt32LE(0)) << 8n) + indexBuf.readUInt32LE(4)
         let docPositionEnd = Number(BigInt(indexBufEnd.readUInt32LE(0)) << 8n) + indexBufEnd.readUInt32LE(4)
-        assert(BigInt(docPosition) < blocks.bsonSize && BigInt(docPositionEnd) < blocks.bsonSize,'Bson position out of range')
+        if (BigInt(docPosition) >= blocks.bsonSize || BigInt(docPositionEnd) >= blocks.bsonSize) 
+            throw new Error('Bson position out of range in readRange')
+        
 
         // Read blocks BSON from start position to end position of last block
         let docSizeBufEnd = Buffer.alloc(4)
         fs.readSync(blocks.fd,docSizeBufEnd,{offset: 0, position: docPositionEnd, length: 4})
         let docSizeEnd = docSizeBufEnd.readInt32LE(0)
+        if (docSizeEnd < 1 || docSizeEnd > blocks.maxDocSize())
+            throw new Error('Invalid BSON doc size in readRange: ' + docSizeEnd)
         let rangeSize = docPositionEnd-docPosition+docSizeEnd
+        if (rangeSize < 1 || rangeSize > 2*1024*1024*1024)
+            throw new Error('Read range too large: ' + rangeSize + ' bytes')
         let docBuf = Buffer.alloc(rangeSize)
         let docArr = []
         fs.readSync(blocks.fd,docBuf,{offset: 0, position: docPosition, length: rangeSize})
-        BSON.deserializeStream(docBuf,0,end-start+1,docArr,0)
+        try {
+            BSON.deserializeStream(docBuf,0,end-start+1,docArr,0)
+        } catch (e) {
+            throw new Error('Failed to deserialize blocks ' + start + '-' + end + ': ' + e.message)
+        }
         return docArr
     },
     fillInMemoryBlocks: (headBlock = blocks.height+1) => {
-        assert(blocks.isOpen,blocks.notOpenError)
+        if (!blocks.isOpen) {
+            logr.fatal(blocks.notOpenError)
+            process.exit(1)
+        }
         let end = headBlock-1
         let start = end - (config.ecoBlocksIncreasesSoon ? config.ecoBlocksIncreasesSoon : config.ecoBlocks) + 1
         chain.recentBlocks = blocks.readRange(start,end)

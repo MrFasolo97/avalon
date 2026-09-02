@@ -1,17 +1,23 @@
+const rateLimit = require('express-rate-limit')
+const { requireAuth } = require('../auth')
+
+const debugLimiter = rateLimit({
+    windowMs: 60000,
+    max: 5,
+    message: { error: 'too many debug requests' }
+})
+
 module.exports = {
     init: (app) => {
-        // get in-memory data (intensive)
-        app.get('/debug', (req, res) => {
+        app.get('/debug', debugLimiter, requireAuth(), (req, res) => {
             res.send({
-                mempool: transaction.pool,
                 consensus: {
-                    possBlocks: consensus.possBlocks,
-                    processed: consensus.processed,
-                    validating: consensus.validating,
+                    height: chain.getLatestBlock()._id,
+                    possBlocksCount: consensus.possBlocks.length,
                 },
                 chain: {
-                    recentBlocks: chain.recentBlocks,
-                    recentTxs: chain.recentTxs
+                    recentBlocksCount: chain.recentBlocks.length,
+                    recentTxsCount: Object.keys(chain.recentTxs).length
                 }
             })
         })

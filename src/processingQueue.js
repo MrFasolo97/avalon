@@ -14,12 +14,13 @@ class ProcessingQueue {
 
     execute() {
         let first = this.queue.shift()
-        first(() => {
+        let cb = () => {
             if (this.queue.length > 0)
                 this.execute()
             else
                 this.processing = false
-        })
+        }
+        try { first(cb) } catch(e) { logr.error('queue error', e); cb() }
     }
 }
 

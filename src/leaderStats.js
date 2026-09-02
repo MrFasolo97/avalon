@@ -89,13 +89,14 @@ let indexer = {
     getWriteOps: () => {
         if (process.env.LEADER_STATS !== '1') return []
         let ops = []
-        for (let acc in indexer.updates.leaders) {
-            let updatedLeader = indexer.updates.leaders[acc]
+        const updates = indexer.updates.leaders.slice()
+        indexer.updates.leaders = []
+        for (let a = 0; a < updates.length; a++) {
+            let updatedLeader = updates[a]
             ops.push((cb) => db.collection('leaders').updateOne({_id: updatedLeader },{
                 $set: indexer.leaders[updatedLeader]
             },{ upsert: true },() => cb(null,true)))
         }
-        indexer.updates.leaders = []
         return ops
     },
     loadIndex: () => {
@@ -103,7 +104,7 @@ let indexer = {
             if (process.env.LEADER_STATS !== '1') return rs()
             db.collection('leaders').find({},{}).toArray((e,leaders) => {
                 if (e) return rj(e)
-                if (leaders) for (let i in leaders) {
+                if (leaders) for (let i = 0; i < leaders.length; i++) {
                     indexer.leaders[leaders[i]._id] = leaders[i]
                     delete indexer.leaders[leaders[i]._id]._id
                 }

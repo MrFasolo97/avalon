@@ -1,4 +1,4 @@
-const dao = require("../../dao")
+const dao = require('../../dao')
 
 module.exports = {
     fields: ['id','amount'],
@@ -19,7 +19,7 @@ module.exports = {
         if (proposal.votingEnds < ts)
             return cb(false, 'proposal voting period already ended')
         if (voter.proposalVotes)
-            for (let v in voter.proposalVotes)
+            for (let v = 0; v < voter.proposalVotes.length; v++)
                 if (voter.proposalVotes[v].id === tx.data.id)
                     return cb(false, 'already voted on proposal')
         

@@ -13,7 +13,7 @@ module.exports = {
             return cb(false, 'invalid array of sequences to be removed')
 
         // validate playlist sequence number to be deleted
-        for (let s in tx.data.seq)
+        for (let s = 0; s < tx.data.seq.length; s++)
             if (!validate.integer(tx.data.seq[s],true,false,config.playlistSequenceIdMax))
                 return cb(false,'invalid playlist sequence '+s)
 
@@ -22,7 +22,7 @@ module.exports = {
     execute: (tx, ts, cb) => {
         cache.findOne('playlists',{_id: tx.sender+'/'+tx.data.link},(e,p) => {
             let newPlaylist = p.playlist
-            for (let s in tx.data.seq)
+            for (let s = 0; s < tx.data.seq.length; s++)
                 delete newPlaylist[tx.data.seq[s]]
             cache.updateOne('playlists',{_id: tx.sender+'/'+tx.data.link}, {
                 $set: { playlist: newPlaylist }

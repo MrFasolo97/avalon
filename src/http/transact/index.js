@@ -1,3 +1,11 @@
+const rateLimit = require('express-rate-limit')
+
+const txLimiter = rateLimit({
+    windowMs: 1000,
+    max: 5,
+    message: { error: 'too many requests' }
+})
+
 module.exports = {
     init: (app) => {
         /**
@@ -10,7 +18,7 @@ module.exports = {
          * @apiSuccess {Integer} _id The current block height
          * @apiError (Invalid Transaction Error) {String} error Error message of the invalid transaction
          */
-        app.post('/transact', (req, res) => {
+        app.post('/transact', txLimiter, (req, res) => {
             let tx = req.body
             if (!tx) {
                 res.sendStatus(500)

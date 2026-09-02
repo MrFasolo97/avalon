@@ -55,7 +55,7 @@ module.exports = {
     },
     execute: (tx, ts, cb) => {
         cache.findOne('contents', {_id: tx.sender+'/'+tx.data.link}, function(err, content) {
-            if (err) throw err
+            if (err) { logr.error('comment error', err); return cb(false, 'internal error') }
             if (content && process.env.CONTENTS === '1')
                 // existing content being edited
                 cache.updateOne('contents', {_id: tx.sender+'/'+tx.data.link}, {

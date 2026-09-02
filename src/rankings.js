@@ -4,6 +4,7 @@ const hotHalfTime = 43200 // 12 hours
 const trendingHalfTime = 302400 // 3.5 days
 const expireFactor = 5000 // disappears after 5 half times
 const isEnabled = process.env.RANKINGS || false
+const MAX_RANKINGS = 5000
 
 let rankings = {
     expireFactor: expireFactor,
@@ -33,7 +34,8 @@ let rankings = {
         if (!isEnabled || chain.getLatestBlock()._id < chain.restoredBlocks) return
         for (const key in rankings.types) {
             let minTs = new Date().getTime() - rankings.types[key].halfLife*expireFactor
-            db.collection('contents').find({pa: null, ts: {'$gt': minTs}}, {sort: {ts: -1}}).toArray(function(err, contents) {
+            db.collection('contents').find({pa: null, ts: {'$gt': minTs}}, {sort: {ts: -1}, limit: MAX_RANKINGS}).toArray(function(err, contents) {
+                if (err) { logr.error('Rankings generate failed', err); return }
                 for (let i = 0; i < contents.length; i++) {
                     contents[i].score = 0
                     contents[i].ups = 0
@@ -69,7 +71,7 @@ let rankings = {
                     break
                 }
             
-            if (alreadyAdded) return
+            if (alreadyAdded) continue
     
             content._id = content.author+'/'+content.link
             content.score = 0
@@ -81,6 +83,8 @@ let rankings = {
             if (content.votes[0] && content.votes[0].vt < 0)
                 content.downs += Math.abs(content.votes[0].vt)
             rankings.contents[key].push(JSON.parse(JSON.stringify(content)))
+            if (rankings.contents[key].length > MAX_RANKINGS)
+                rankings.contents[key].splice(MAX_RANKINGS)
         }
     },
     update: function(author, link, vote, dist) {
@@ -89,7 +93,7 @@ let rankings = {
             for (let i = 0; i < rankings.contents[key].length; i++)
                 if (rankings.contents[key][i].author === author && rankings.contents[key][i].link === link) {
                     let ts = rankings.contents[key][i].ts
-                    if (ts < new Date().getTime() - rankings.types[key].halfTime*expireFactor)
+                    if (ts < new Date().getTime() - rankings.types[key].halfLife*expireFactor)
                         return
                     
                     for (let y = 0; y < rankings.contents[key][i].votes.length; y++)

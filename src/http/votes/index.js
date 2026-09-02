@@ -29,7 +29,7 @@ module.exports = {
                 query['$and'].push({ ts: { $lt: lastTs } })
 
             db.collection('contents').find(query, { sort: { ts: -1 }, limit: 50 }).toArray(function (err, contents) {
-                if (err) throw err
+                if (err) { logr.error('Votes query failed', err); return res.status(500).send({error: 'query failed'}) }
                 let votes = []
                 for (let i = 0; i < contents.length; i++) 
                     for (let y = 0; y < contents[i].votes.length; y++) 
@@ -61,7 +61,7 @@ module.exports = {
                 query['$and'].push({ ts: { $lt: lastTs } })
 
             db.collection('contents').find(query, { sort: { ts: -1 }, limit: 50 }).toArray(function (err, contents) {
-                if (err) throw err
+                if (err) { logr.error('Votes query failed', err); return res.status(500).send({error: 'query failed'}) }
                 let votes = []
                 for (let i = 0; i < contents.length; i++) 
                     for (let y = 0; y < contents[i].votes.length; y++) 
@@ -114,7 +114,7 @@ module.exports = {
                 query['$and'].push({ ts: { $lt: lastTs } })
 
             db.collection('contents').find(query, { sort: { ts: -1 }, limit: 50 }).toArray(function (err, contents) {
-                if (err) throw err
+                if (err) { logr.error('Votes query failed', err); return res.status(500).send({error: 'query failed'}) }
                 let votes = []
                 for (let i = 0; i < contents.length; i++) 
                     for (let y = 0; y < contents[i].votes.length; y++) 
@@ -168,7 +168,7 @@ module.exports = {
             if (lastTs > 0)
                 query['$and'].push({ ts: { $lt: lastTs } })
             db.collection('contents').find(query, { sort: { ts: -1 }, limit: 50 }).toArray(function (err, contents) {
-                if (err) throw err
+                if (err) { logr.error('Votes query failed', err); return res.status(500).send({error: 'query failed'}) }
                 let votes = []
                 for (let i = 0; i < contents.length; i++) 
                     for (let y = 0; y < contents[i].votes.length; y++) 
@@ -221,7 +221,7 @@ module.exports = {
             if (lastTs > 0)
                 query['$and'].push({ ts: { $lt: lastTs } })
             db.collection('contents').find(query, { sort: { ts: -1 }, limit: 50 }).toArray(function (err, contents) {
-                if (err) throw err
+                if (err) { logr.error('Votes query failed', err); return res.status(500).send({error: 'query failed'}) }
                 let votes = []
                 for (let i = 0; i < contents.length; i++) 
                     for (let y = 0; y < contents[i].votes.length; y++) 

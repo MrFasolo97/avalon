@@ -12,7 +12,7 @@ let mongo = {
             useNewUrlParser: true,
             useUnifiedTopology: true
         }, async function(err, client) {
-            if (err) throw err
+            if (err) { logr.fatal('MongoDB connection failed: ' + err.message); process.exit(1) }
             this.db = client.db(db_name)
             try {
                 await this.db.executeDbAdminCommand({
@@ -20,7 +20,7 @@ let mongo = {
                     internalQueryExecMaxBlockingSortBytes: 335544320
                 })
             } catch (e) {}
-            logr.info('Connected to '+db_url+'/'+this.db.databaseName)
+            logr.info('Connected to '+db_url.replace(/\/\/[^@/]*@/, '//[REDACTED]@')+'/'+this.db.databaseName)
 
             let state = await this.db.collection('state').findOne({_id: 0})
 
@@ -137,7 +137,7 @@ let mongo = {
     },
     fillInMemoryBlocks: (cb,headBlock) => {
         let query = {}
-        if (headBlock) query._id = {$lt: headBlock}
+        if (headBlock && Number.isInteger(headBlock) && headBlock > 0) query._id = {$lt: headBlock}
         db.collection('blocks').find(query, {
             sort: {_id: -1},
             limit: config.ecoBlocksIncreasesSoon ? config.ecoBlocksIncreasesSoon : config.ecoBlocks

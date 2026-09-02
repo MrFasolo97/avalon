@@ -18,7 +18,7 @@ module.exports = (value, max) => {
     if (hasInvalidKeys(value))
         return false
     try {
-        if (JSON.stringify(value).length > max)
+        if (Buffer.byteLength(JSON.stringify(value), 'utf8') > max)
             return false
     } catch (error) {
         return false

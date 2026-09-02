@@ -41,7 +41,10 @@ function sanitizeMessageFull(msg) {
     if (typeof msg !== 'string') return String(msg)
     if (msg.length > MAX_MESSAGE_LENGTH) msg = msg.slice(0, MAX_MESSAGE_LENGTH) + '...[truncated]'
     msg = msg.replace(MONGO_CREDS, '$1[REDACTED]@')
+    msg = msg.replace(IPV4, '[IP]')
+    msg = msg.replace(IPV6_BASIC, '[IP]')
     for (const re of SECRET_PATTERNS) msg = msg.replace(re, (m) => m.replace(/=.*/, '=[REDACTED]'))
+    msg = msg.replace(STACK_LINE, '    at [stack]')
     return msg
 }
 

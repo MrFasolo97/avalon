@@ -22,6 +22,10 @@ function safeEqual(a, b) {
     }
 }
 
+function clientIp(req) {
+    return (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || (req.socket && req.socket.remoteAddress) || ''
+}
+
 function getSessionId(req) {
     const cookie = req.headers['cookie'] || ''
     const m = cookie.split(';').map(c => c.trim()).find(c => c.startsWith('auth_session='))
@@ -48,7 +52,10 @@ function requireAuth(...tokenEnvVars) {
     return (req, res, next) => {
         const sid = getSessionId(req)
         if (sid && sessions.has(sid)) {
-            sessions.get(sid).ts = Date.now()
+            const sess = sessions.get(sid)
+            if (sess.ip && sess.ip !== clientIp(req))
+                return res.status(401).json({ error: 'authentication required' })
+            sess.ts = Date.now()
             return next()
         }
 
@@ -58,7 +65,7 @@ function requireAuth(...tokenEnvVars) {
             for (const expected of candidates)
                 if (safeEqual(token, expected)) {
                     const newSid = crypto.randomBytes(16).toString('hex')
-                    sessions.set(newSid, { ts: Date.now() })
+                    sessions.set(newSid, { ts: Date.now(), ip: clientIp(req) })
                     setSessionCookie(res, newSid)
                     return next()
                 }
@@ -94,7 +101,7 @@ module.exports = {
             if (!ok)
                 return res.status(401).json({ error: 'invalid code' })
             const sid = crypto.randomBytes(16).toString('hex')
-            sessions.set(sid, { ts: Date.now() })
+            sessions.set(sid, { ts: Date.now(), ip: clientIp(req) })
             setSessionCookie(res, sid)
             res.json({ ok: true })
         })

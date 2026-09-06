@@ -224,7 +224,7 @@ document.getElementById('search').addEventListener('input', (e) => {
 // Pause
 document.getElementById('btn-pause').addEventListener('click', () => {
   paused = !paused
-  document.getElementById('btn-pause').textContent = paused ? '&#9654;&#65039; Resume' : '&#9654;&#65039; Pause'
+  document.getElementById('btn-pause').textContent = paused ? '\u25B6\uFE0F Resume' : '\u25B6\uFE0F Pause'
   container.classList.toggle('paused', paused)
   if (!paused) render()
 })

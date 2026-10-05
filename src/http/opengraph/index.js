@@ -1,131 +1,106 @@
 const ogs = require('open-graph-scraper')
 const { URL } = require('url')
-const dns = require('dns').promises
 const net = require('net')
+const http = require('http')
+const https = require('https')
+const tls = require('tls')
 const fetch = require('node-fetch-commonjs')
+const rateLimit = require('express-rate-limit')
+const { isPrivateURL, isPrivateIP, resolveAndPin } = require('../ssrf')
 
-async function isPrivateURL(urlStr) {
-    try {
-        const parsed = new URL(urlStr)
-        const host = parsed.hostname
-        if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '[::1]')
-            return true
+const ogLimiter = rateLimit({
+    windowMs: 60000,
+    max: 20,
+    message: { error: 'too many requests' }
+})
 
-        let ip
-        if (net.isIP(host)) 
-            ip = host
-        else 
-            try {
-                const controller = new AbortController()
-                const dnsTimeout = setTimeout(() => controller.abort(), 5000)
-                try {
-                    const lookup = await dns.lookup(host, {family: 4, signal: controller.signal})
-                    ip = lookup.address
-                } finally {
-                    clearTimeout(dnsTimeout)
-                }
-            } catch {
-                return true
-            }
-        
-        if (!ip) return false
+const MAX_REDIRECTS = 5
+const TIMEOUT = 5000
 
-        if (net.isIPv4(ip)) {
-            const parts = ip.split('.').map(Number)
-            if (parts[0] === 10) return true
-            if (parts[0] === 127) return true
-            if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true
-            if (parts[0] === 192 && parts[1] === 168) return true
-            if (parts[0] === 169 && parts[1] === 254) return true
-            if (parts[0] === 0) return true
-        }
-
-        if (net.isIPv6(ip)) {
-            const lower = ip.toLowerCase()
-            if (lower === '::1' || lower === '0:0:0:0:0:0:0:1') return true
-            if (lower.startsWith('fd') || lower.startsWith('fc')) return true
-            if (lower.startsWith('fe80')) return true
-        }
-        return false
-    } catch {
-        return true
+// got (used internally by open-graph-scraper) requires the agent to be an object
+// keyed by protocol. Both agents dial the already-validated IP while keeping the
+// original hostname for the Host header and TLS SNI, so certificate validation
+// keeps working (rewriting the URL host to the IP would break every HTTPS site).
+function pinnedAgents(pinnedIp, hostname) {
+    return {
+        http: new http.Agent({ createConnection: (opts, cb) => {
+            opts.host = pinnedIp
+            return net.createConnection(opts, cb)
+        } }),
+        https: new https.Agent({ createConnection: (opts, cb) => {
+            opts.host = pinnedIp
+            // SNI/cert validation must still see the real hostname
+            opts.servername = hostname
+            return tls.connect(opts, cb)
+        } })
     }
 }
 
-async function resolveAndPin(hostname) {
-    try {
-        const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 5000)
-        try {
-            const lookup = await dns.lookup(hostname, {family: 4, signal: controller.signal})
-            return lookup.address
-        } finally {
-            clearTimeout(timeout)
-        }
-    } catch {
-        return null
-    }
-}
-
-async function checkRebinding(hostname, pinnedIp) {
-    try {
-        const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 5000)
-        try {
-            const lookup = await dns.lookup(hostname, {family: 4, signal: controller.signal})
-            return lookup.address === pinnedIp
-        } finally {
-            clearTimeout(timeout)
-        }
-    } catch {
-        return false
-    }
-}
-
-async function resolveSafeUrl(urlStr) {
-    const maxRedirects = 5
+// Walks the redirect chain manually so every hop is validated and IP-pinned,
+// then hands the final URL to ogs with followRedirect:false. Without that flag
+// the scraper could chase a redirect our validation never saw (e.g. a
+// UA-dependent 302 to http://169.254.169.254/ that only appears on a re-request).
+// Returns { url, agent } ready to be passed to ogs.
+async function resolveSafeTarget(urlStr) {
     let currentUrl = urlStr
-    for (let i = 0; i < maxRedirects; i++) {
+    let lastAgent = null
+    for (let i = 0; i <= MAX_REDIRECTS; i++) {
         if (await isPrivateURL(currentUrl))
             throw new Error('blocked private URL')
         const parsed = new URL(currentUrl)
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
+            throw new Error('blocked protocol')
         const pinnedIp = await resolveAndPin(parsed.hostname)
         if (!pinnedIp) throw new Error('could not resolve host')
-        if (await isPrivateURL('http://' + pinnedIp)) throw new Error('blocked private URL')
-        if (!(await checkRebinding(parsed.hostname, pinnedIp))) throw new Error('dns rebinding detected')
-        parsed.hostname = pinnedIp
-        const fetchUrl = parsed.toString()
+        if (isPrivateIP(pinnedIp)) throw new Error('blocked private URL')
+        const agents = pinnedAgents(pinnedIp, parsed.hostname)
+        lastAgent = agents
 
+        // node-fetch takes a single agent; got (inside ogs) takes the
+        // {http,https} object. Hence both shapes are kept.
+        const singleAgent = parsed.protocol === 'https:' ? agents.https : agents.http
         const controller = new AbortController()
-        const timeoutF = setTimeout(() => controller.abort(), 5000)
+        const timeout = setTimeout(() => controller.abort(), TIMEOUT)
+        let resp
         try {
-            const resp = await fetch(fetchUrl, { signal: controller.signal, redirect: 'manual' })
-            clearTimeout(timeoutF)
-            if (resp.status >= 300 && resp.status < 400) {
-                const location = resp.headers.get('location')
-                if (!location) throw new Error('redirect with no location')
-                currentUrl = new URL(location, currentUrl).href
-                continue
-            }
-            return fetchUrl
-        } catch (e) {
-            clearTimeout(timeoutF)
-            throw e
+            resp = await fetch(currentUrl, {
+                signal: controller.signal,
+                redirect: 'manual',
+                agent: singleAgent,
+                headers: { 'user-agent': 'facebookexternalhit/1.1 (+https://d.tube)' }
+            })
+        } finally {
+            clearTimeout(timeout)
         }
+
+        if (resp.status >= 300 && resp.status < 400) {
+            if (i === MAX_REDIRECTS) throw new Error('too many redirects')
+            const location = resp.headers.get('location')
+            if (!location) throw new Error('redirect with no location')
+            currentUrl = new URL(location, currentUrl).href
+            continue
+        }
+        return { url: currentUrl, agent: lastAgent }
     }
     throw new Error('too many redirects')
 }
 
 module.exports = {
     init: (app) => {
-        app.get('/opengraph/:url', async (req, res) => {
+        app.get('/opengraph/:url', ogLimiter, async (req, res) => {
             if (!req.params.url) {
                 res.sendStatus(500)
                 return
             }
             try {
-                const finalUrl = await resolveSafeUrl(req.params.url)
-                ogs({ url: finalUrl, timeout: 5000, headers: { 'user-agent': 'facebookexternalhit/1.1 (+https://d.tube)' } }, function (error, results) {
+                const target = await resolveSafeTarget(req.params.url)
+                ogs({
+                    url: target.url,
+                    agent: target.agent,
+                    timeout: TIMEOUT,
+                    followRedirect: false,
+                    headers: { 'user-agent': 'facebookexternalhit/1.1 (+https://d.tube)' }
+                }, function (error, results) {
                     if (error) res.sendStatus(404)
                     else res.send(results)
                 })

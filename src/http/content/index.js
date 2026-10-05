@@ -1,4 +1,20 @@
-const parallel = require('run-parallel')
+const rateLimit = require('express-rate-limit')
+
+const contentLimiter = rateLimit({
+    windowMs: 60000,
+    max: 60,
+    message: { error: 'too many requests' }
+})
+
+// Bounds the comment-tree expansion performed for /content/:author/:link so a
+// crafted deep/wide comment tree cannot fan out into thousands of concurrent
+// Mongo queries (depth alone was capped, total volume was not).
+const MAX_COMMENT_DEPTH = 10
+const MAX_COMMENT_NODES = parseInt(process.env.CONTENT_MAX_COMMENTS) || 2000
+// also bound the size of the response body: the query budget alone still allows
+// budget * comments_per_query entries on a wide tree
+const MAX_COMMENT_RESULTS = parseInt(process.env.CONTENT_MAX_RESULTS) || 10000
+const CONTENT_QUERY_LIMIT = Math.min(1000, MAX_COMMENT_NODES)
 
 module.exports = {
     init: (app) => {
@@ -29,7 +45,7 @@ module.exports = {
          * @apiSuccess {Double} dist Total curation rewards distributed in terms of 0.01 DTUBE
          * @apiSuccess {Object} comments Details of all comments
          */
-        app.get('/content/:author/:link', (req, res) => {
+        app.get('/content/:author/:link', contentLimiter, (req, res) => {
             if (!req.params.author || typeof req.params.link !== 'string') {
                 res.sendStatus(500)
                 return
@@ -47,36 +63,53 @@ module.exports = {
                     return
                 }
                 post.comments = {}
-                function fillComments(posts, cb, depth) {
-                    if (depth === undefined) depth = 0
-                    if (!posts || posts.length === 0 || depth > 10) {
-                        cb()
-                        return
-                    }
-                    let executions = []
-                    for (let i = 0; i < posts.length; i++)
-                        executions.push(function (callback) {
-                            db.collection('contents').find({
-                                pa: posts[i].author,
-                                pp: posts[i].link
-                            }, {limit: 1000}).toArray(function (err, comments) {
-                                if (err) { callback(err); return }
-                                for (let y = 0; y < comments.length; y++)
-                                    post.comments[comments[y].author + '/' + comments[y].link] = comments[y]
-                                fillComments(comments, function () {
-                                    callback(null, true)
-                                }, depth + 1)
-                            })
-                        })
+                // Iterative breadth-first walk with a fixed worker pool and a hard
+                // budget on total nodes/queries, so a crafted deep+wide comment
+                // tree cannot fan out into thousands of concurrent Mongo queries.
+                const CONCURRENCY = 4
+                const queue = [{ node: post, depth: 0 }]
+                let budget = MAX_COMMENT_NODES
+                let stored = 0
+                let inFlight = 0
+                let done = false
 
-                    parallel(executions, function (err, results) {
-                        if (err) { logr.error('content comments query failed', err); return cb() }
-                        cb(null, results)
-                    })
-                }
-                fillComments([post], function () {
+                const finish = () => {
+                    if (done) return
+                    done = true
                     res.send(post)
-                })
+                }
+
+                const pump = () => {
+                    while (!done && inFlight < CONCURRENCY && queue.length > 0 && budget > 0) {
+                        const job = queue.shift()
+                        budget--
+                        inFlight++
+                        db.collection('contents').find({
+                            pa: job.node.author,
+                            pp: job.node.link
+                        }, { limit: CONTENT_QUERY_LIMIT }).toArray(function (err, comments) {
+                            inFlight--
+                            if (!err) {
+                                for (let y = 0; y < comments.length; y++) {
+                                    if (stored >= MAX_COMMENT_RESULTS) break
+                                    stored++
+                                    post.comments[comments[y].author + '/' + comments[y].link] = comments[y]
+                                }
+                                if (job.depth + 1 <= MAX_COMMENT_DEPTH)
+                                    for (let y = 0; y < comments.length; y++) {
+                                        if (stored >= MAX_COMMENT_RESULTS) break
+                                        queue.push({ node: comments[y], depth: job.depth + 1 })
+                                    }
+                            }
+                            if (inFlight === 0 && (queue.length === 0 || budget <= 0 || stored >= MAX_COMMENT_RESULTS))
+                                return finish()
+                            pump()
+                        })
+                    }
+                    if (inFlight === 0 && (queue.length === 0 || budget <= 0 || stored >= MAX_COMMENT_RESULTS))
+                        finish()
+                }
+                pump()
             })
         })
 
@@ -96,7 +129,7 @@ module.exports = {
             return /^[a-zA-Z0-9_\-.\u00C0-\u024F]+$/.test(val)
         }
 
-        app.get('/content/:filter', (req, res) => {
+        app.get('/content/:filter', contentLimiter, (req, res) => {
             let filterParam = req.params.filter
             let filter = filterParam.split(':')
             let filterBy = filter[1]

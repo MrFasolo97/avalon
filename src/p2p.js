@@ -6,6 +6,10 @@ const keep_alive_interval = 2500
 const max_blocks_buffer = 100
 const max_peers = process.env.MAX_PEERS || 15
 const max_recover_attempts = 25
+// per-socket throttle for the message types that trigger expensive local work
+// (block revalidation, disk reads, consensus rounds)
+const msg_rate_window = 1000
+const msg_rate_max = 40
 const history_interval = 10000
 const keep_history_for = 20000
 const p2p_port = process.env.P2P_PORT || default_port
@@ -197,6 +201,26 @@ let p2p = {
         })
     },
     messageHandler: (ws) => {
+        // Throttle cost-driving message types per socket. NODE_STATUS messages
+        // (t 0/1) are excluded: they only carry the handshake and are cheap.
+        ws.msgWindow = Date.now()
+        ws.msgCount = 0
+        ws.isRateLimited = (t) => {
+            if (t !== MessageType.QUERY_BLOCK && t !== MessageType.NEW_BLOCK
+                && t !== MessageType.BLOCK_CONF_ROUND && t !== MessageType.FORCE_FINALIZE)
+                return false
+            const now = Date.now()
+            if (now - ws.msgWindow >= msg_rate_window) {
+                ws.msgWindow = now
+                ws.msgCount = 0
+            }
+            ws.msgCount++
+            if (ws.msgCount > msg_rate_max) {
+                logr.warn('P2P message rate limit exceeded, disconnecting peer')
+                return true
+            }
+            return false
+        }
         ws.on('message', (data) => {
             let message
             try {
@@ -206,6 +230,7 @@ let p2p = {
             }
             if (!message || typeof message.t === 'undefined') return
             if (!message.d) return
+            if (ws.isRateLimited(message.t)) return ws.close()
             // logr.debug('P2P-IN '+message.t)
             
             switch (message.t) {

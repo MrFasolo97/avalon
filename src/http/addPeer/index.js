@@ -1,9 +1,16 @@
+const rateLimit = require('express-rate-limit')
 const { isPrivateURL, resolveAndPin, checkRebinding } = require('../ssrf')
+
+const peerLimiter = rateLimit({
+    windowMs: 60000,
+    max: 5,
+    message: { error: 'too many peer requests' }
+})
 
 module.exports = {
     init: (app) => {
         // connect to a new peer
-        app.post('/addPeer', async (req, res) => {
+        app.post('/addPeer', peerLimiter, async (req, res) => {
             try {
                 const peer = req.body.peer
                 if (!peer || typeof peer !== 'string')

@@ -15,6 +15,12 @@ const globalLimiter = rateLimit({
 let http = {
     init: () => {
         let app = express()
+        // Only honour X-Forwarded-* when explicitly told the node sits behind a
+        // trusted proxy, otherwise req.ip (used for rate limiting and session
+        // address binding) would be client-spoofable.
+        const trustProxy = process.env.TRUST_PROXY
+        if (trustProxy && trustProxy !== '0' && trustProxy !== 'false')
+            app.set('trust proxy', /^\d+$/.test(trustProxy) ? parseInt(trustProxy) : trustProxy)
         app.use(cors({
             origin: process.env.CORS_ORIGIN || false
         }))

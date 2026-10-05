@@ -23,7 +23,12 @@ function safeEqual(a, b) {
 }
 
 function clientIp(req) {
-    return (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || (req.socket && req.socket.remoteAddress) || ''
+    // Prefer the socket address. X-Forwarded-For is only trustworthy when the
+    // node is explicitly configured to sit behind a trusted proxy (which makes
+    // express populate req.ip correctly); reading the header directly would let
+    // a direct client forge the session's bound address.
+    if (req.ip) return req.ip
+    return (req.socket && req.socket.remoteAddress) || ''
 }
 
 function getSessionId(req) {
@@ -48,16 +53,25 @@ function adminTokens() {
     return vars.map(v => process.env[v]).filter(Boolean)
 }
 
+// Validates a session cookie and refreshes its timestamp. Enforces the
+// client-address binding so a stolen cookie is only usable from the address it
+// was issued to. Shared by requireAuth() and by endpoints that need a plain
+// boolean check (e.g. the logs SSE stream).
+function isValidSession(req) {
+    const sid = getSessionId(req)
+    if (!sid) return false
+    const sess = sessions.get(sid)
+    if (!sess) return false
+    if (sess.ip && sess.ip !== clientIp(req))
+        return false
+    sess.ts = Date.now()
+    return true
+}
+
 function requireAuth(...tokenEnvVars) {
     return (req, res, next) => {
-        const sid = getSessionId(req)
-        if (sid && sessions.has(sid)) {
-            const sess = sessions.get(sid)
-            if (sess.ip && sess.ip !== clientIp(req))
-                return res.status(401).json({ error: 'authentication required' })
-            sess.ts = Date.now()
+        if (isValidSession(req))
             return next()
-        }
 
         const token = getToken(req)
         if (token) {
@@ -107,5 +121,6 @@ module.exports = {
         })
     },
     requireAuth,
+    isValidSession,
     sessions
 }

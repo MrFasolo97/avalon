@@ -1,15 +1,15 @@
 const logBuffer = require('../../logBuffer')
 const crypto = require('crypto')
-const { requireAuth, sessions } = require('../auth')
+const { requireAuth, isValidSession } = require('../auth')
 
 const LOG_PAGE_ENABLED = process.env.LOG_PAGE !== '0'
 
 const VALID_LEVELS = ['TRACE', 'DEBUG', 'PERF', 'ECON', 'CONS', 'INFO', 'WARN', 'ERROR', 'FATAL']
 
 function isAdmin(req) {
-    const cookie = req.headers['cookie'] || ''
-    const m = cookie.split(';').map(c => c.trim()).find(c => c.startsWith('auth_session='))
-    if (m && sessions.has(m.split('=').slice(1).join('=')))
+    // delegate the session check to the shared helper so the IP binding is
+    // enforced identically here and in requireAuth()
+    if (isValidSession(req))
         return true
 
     const headerToken = req.headers['authorization'] ? req.headers['authorization'].replace('Bearer ', '') : ''
@@ -34,6 +34,18 @@ module.exports = {
 
         app.get('/logs', requireAuth(), (req, res) => {
             res.set('Content-Type', 'text/html; charset=utf-8')
+            res.set('Content-Security-Policy', [
+                'default-src \'none\'',
+                'style-src \'self\' \'unsafe-inline\' https://cdn.jsdelivr.net',
+                'img-src \'self\' data:',
+                'script-src \'self\' \'unsafe-inline\'',
+                'connect-src \'self\'',
+                'form-action \'none\'',
+                'frame-ancestors \'none\'',
+                'base-uri \'none\''
+            ].join('; '))
+            res.set('X-Content-Type-Options', 'nosniff')
+            res.set('Referrer-Policy', 'no-referrer')
             res.send(renderPage())
         })
 
@@ -81,7 +93,7 @@ function renderPage() {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Avalon Node Logs</title>
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous" referrerpolicy="no-referrer">
 <style>
   body { background: #0d1117; color: #c9d1d9; font-family: 'SFMono-Regular','Consolas','Liberation Mono',monospace; font-size: 13px; }
   .navbar { background: #161b22; border-bottom: 1px solid #30363d; }

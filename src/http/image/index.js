@@ -1,11 +1,12 @@
 const sharp = require('sharp')
 const fetch = require('node-fetch-commonjs')
 const { URL } = require('url')
-const dns = require('dns').promises
 const net = require('net')
 const http = require('http')
 const https = require('https')
 const tls = require('tls')
+const rateLimit = require('express-rate-limit')
+const { isPrivateURL, resolveAndPin, checkRebinding } = require('../ssrf')
 const logr = require('../../logger.js')
 
 const QUALITY = 95
@@ -17,86 +18,17 @@ const AVATAR_WIDTH = {
 const DEFAULT_AVATAR = 'https://steemitimages.com/DQmb2HNSGKN3pakguJ4ChCRjgkVuDN9WniFRPmrxoJ4sjR4'
 const CACHE_SIZE = Math.max(parseInt(process.env.IMG_CACHE_SIZE) || 52428800, -1)
 const CACHE_TIME = parseInt(process.env.IMG_CACHE_TIME) || 900000 // 15 minutes default
+// Cap remote image downloads to bound memory: sharp decodes into RAM, so an
+// oversized/decompression-bomb input could OOM the node.
+const MAX_DOWNLOAD_BYTES = parseInt(process.env.IMG_MAX_BYTES) || 10 * 1024 * 1024
+const MAX_INPUT_PIXELS = parseInt(process.env.IMG_MAX_PIXELS) || 20 * 1000 * 1000
 
-async function isPrivateURL(urlStr) {
-    try {
-        const parsed = new URL(urlStr)
-        const host = parsed.hostname
-        if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '[::1]')
-            return true
+const imageLimiter = rateLimit({
+    windowMs: 60000,
+    max: 60,
+    message: { error: 'too many requests' }
+})
 
-        let ip
-        if (net.isIP(host)) 
-            ip = host
-        else 
-            try {
-                const controller = new AbortController()
-                const timeout = setTimeout(() => controller.abort(), 5000)
-                try {
-                    const lookup = await dns.lookup(host, {family: 4, signal: controller.signal})
-                    ip = lookup.address
-                } finally {
-                    clearTimeout(timeout)
-                }
-            } catch {
-                return true
-            }
-        
-        if (!ip) return false
-
-        if (net.isIPv4(ip)) {
-            const parts = ip.split('.').map(Number)
-            if (parts[0] === 10) return true
-            if (parts[0] === 127) return true
-            if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true
-            if (parts[0] === 192 && parts[1] === 168) return true
-            if (parts[0] === 169 && parts[1] === 254) return true
-            if (parts[0] === 0) return true
-        }
-
-        if (net.isIPv6(ip)) {
-            const lower = ip.toLowerCase()
-            if (lower === '::1' || lower === '0:0:0:0:0:0:0:1') return true
-            if (lower.startsWith('fd') || lower.startsWith('fc')) return true
-            if (lower.startsWith('fe80')) return true
-        }
-        return false
-    } catch {
-        return true
-    }
-}
-
-async function resolveAndPin(host) {
-    if (net.isIP(host)) return host
-    try {
-        const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 5000)
-        try {
-            const lookup = await dns.lookup(host, {family: 4, signal: controller.signal})
-            return lookup.address
-        } finally {
-            clearTimeout(timeout)
-        }
-    } catch {
-        return null
-    }
-}
-
-async function checkRebinding(host, pinnedIp) {
-    if (net.isIP(host)) return pinnedIp === host
-    try {
-        const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 5000)
-        try {
-            const lookup = await dns.lookup(host, {family: 4, signal: controller.signal})
-            return lookup.address === pinnedIp
-        } finally {
-            clearTimeout(timeout)
-        }
-    } catch {
-        return false
-    }
-}
 
 let imageCache = {
     avatar: {
@@ -121,7 +53,7 @@ module.exports = {
          * @apiSuccess {Binary} image The image file of the avatar
          * @apiSampleRequest off
          */
-        app.get('/image/avatar/:name/:size?', (req, res) => {
+        app.get('/image/avatar/:name/:size?', imageLimiter, (req, res) => {
             if (!req.params.name)
                 return res.status(400).send({error: 'username is required'})
             let size = req.params.size || 'medium'
@@ -180,7 +112,7 @@ module.exports = {
          * @apiSuccess {Binary} image The image file of the cover
          * @apiSampleRequest off
          */
-        app.get('/image/cover/:name',(req,res) => {
+        app.get('/image/cover/:name', imageLimiter, (req,res) => {
             if (!req.params.name)
                 return res.status(400).send({error: 'username is required'})
             if (imageCache.cover[req.params.name] && imageCache.cover[req.params.name].d) {
@@ -283,7 +215,13 @@ async function fetchAndRespondImage(imageUrl,res,width,height,cacher,redirectsRe
             }
             return res.status(400).send({error: 'redirect not allowed'})
         }
-        let buffer = await imgFetch.buffer()
+        const contentLength = parseInt(imgFetch.headers.get('content-length') || '0', 10)
+        if (contentLength > MAX_DOWNLOAD_BYTES)
+            return res.status(400).send({error: 'image too large'})
+
+        let buffer = await readCappedBody(imgFetch, MAX_DOWNLOAD_BYTES)
+        if (!buffer)
+            return res.status(400).send({error: 'image too large'})
         let img = await resizeImage(buffer,width,height)
         imageResponse(res,img)
         await cacher(await img.toJSON())
@@ -293,9 +231,34 @@ async function fetchAndRespondImage(imageUrl,res,width,height,cacher,redirectsRe
     }
 }
 
+// Reads at most maxBytes from the response body, aborting as soon as the cap is
+// exceeded so a lying/omitted Content-Length cannot force an unbounded buffer.
+function readCappedBody(resp, maxBytes) {
+    return new Promise((resolve, reject) => {
+        const chunks = []
+        let total = 0
+        let done = false
+        const finish = (err, val) => {
+            if (done) return
+            done = true
+            if (err) reject(err); else resolve(val)
+        }
+        resp.body.on('data', (chunk) => {
+            total += chunk.length
+            if (total > maxBytes) {
+                resp.body.destroy()
+                return finish(null, null)
+            }
+            chunks.push(chunk)
+        })
+        resp.body.on('end', () => finish(null, Buffer.concat(chunks)))
+        resp.body.on('error', (err) => finish(err))
+    })
+}
+
 function resizeImage(buf,width,height) {
     return new Promise((rs,rj) => {
-        sharp(buf)
+        sharp(buf, { limitInputPixels: MAX_INPUT_PIXELS, failOn: 'error' })
             .resize(width,height)
             .toFormat('png',{quality: QUALITY})
             .toBuffer((err, data) => {

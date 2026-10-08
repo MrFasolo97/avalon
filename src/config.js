@@ -190,6 +190,24 @@ let config = {
                 28: 0
             }
         },
+        // Hard fork #13330000: supply-anchored reward pool + vote reward rate cap
+        // - initialSupplyBlock / initialSupply: anchor of the total-supply accumulator.
+        //   MEASURED at initialSupplyBlock (frozen). NEVER move these two keys between
+        //   history entries: that would retroactively rewrite config.read(n) for
+        //   already-produced blocks. They are also filtered out of allowedKeys below,
+        //   so only a new fork can correct them (never governance).
+        // - rewardPoolYearlyRate: reward pool = % of total supply per year
+        // - vtReferenceTotal: normal 8h activity (VT) at which the full pool is available,
+        //   below it vote rewards scale down linearly (15,500,000 ~= historical p90)
+        // NOTE: config is refreshed in chain.addBlock AFTER the block's txs execute, so
+        // txs of block 13330000 still run pre-fork; the first block whose txs see the new
+        // economics is 13330001, and the supply accumulator bootstraps at end of 13330000.
+        13330000: {
+            initialSupplyBlock: 13320066,
+            initialSupply: 572311976.600145,
+            rewardPoolYearlyRate: 0.10,
+            vtReferenceTotal: 15500000
+        },
         // Hard fork at ~13,925,000 (~3 weeks from block 13,320,067):
         // - forceFinalize: enables anti-fork safety net if consensus stalls
         // - consensusSigVersion: 2 (sorted keys) prevents key-ordering mismatches
@@ -221,6 +239,10 @@ let config = {
             let govConfig = cache.state[1]
             let allowedKeys = Object.values(config.history).flatMap(h => Object.keys(h))
             allowedKeys.push('_id')
+            // the supply anchor is a consensus invariant: overriding it would make a
+            // re-bootstrapped node compute a different totalSupply than a node that kept
+            // accumulating -> silent consensus divergence. Only a fork may correct it.
+            allowedKeys = allowedKeys.filter(k => k !== 'initialSupply' && k !== 'initialSupplyBlock')
             Object.keys(govConfig).forEach(k => {
                 const override = govConfig[k]
                 if (override && typeof override === 'object' && typeof override.effectiveBlock === 'number' && Object.prototype.hasOwnProperty.call(override, 'value')

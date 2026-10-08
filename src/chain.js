@@ -299,6 +299,23 @@ let chain = {
         cb(true)
     },
     output: (block,rebuilding) => {
+        // total-supply accumulator (13330000 fork). config is refreshed by addBlock /
+        // rebuildState BEFORE this runs, so here it always matches block._id.
+        if (typeof config.initialSupplyBlock === 'number') {
+            const anchorUnits = Math.round(config.initialSupply * 1000)
+            if (typeof eco.totalSupplyUnits !== 'number') {
+                // only valid on a cold rebuild crossing the anchor inside this session:
+                // at the anchor itself nothing has been accumulated after it yet.
+                if (block._id !== config.initialSupplyBlock) {
+                    logr.fatal('eco.totalSupplyUnits not bootstrapped for block #'+block._id)
+                    process.exit(1)
+                }
+                eco.totalSupplyUnits = anchorUnits
+                logr.info('Supply anchor #'+block._id+': '+anchorUnits/1000+' DTC')
+            } else if (block._id > config.initialSupplyBlock)
+                eco.totalSupplyUnits += Math.round((block.dist || 0) * 1000)
+                                     - Math.round((block.burn || 0) * 1000)
+        }
         chain.nextOutput.txs += block.txs.length
         if (block.dist)
             chain.nextOutput.dist += block.dist
@@ -889,6 +906,32 @@ let chain = {
         // Do something after executing hardfork block
         if (blockNum === 4860000)
             eco.loadHistory() // reset previous votes
+    },
+    // Sum of (dist - burn) in integer 1e-3 units over blocks [from, to] (inclusive).
+    // Async because the MongoDB blocks fallback cannot be read synchronously.
+    // Used only to anchor the total-supply accumulator of the 13330000 economics fork.
+    scanSupply: (from, to, cb) => {
+        if (typeof from !== 'number' || typeof to !== 'number' || to < from)
+            return cb(null, 0)
+        const sumBlocks = (bs) => {
+            let sum = 0
+            for (let i = 0; i < bs.length; i++)
+                sum += Math.round((bs[i].dist || 0) * 1000) - Math.round((bs[i].burn || 0) * 1000)
+            return sum
+        }
+        if (blocks.isOpen) {
+            let range
+            try {
+                range = blocks.readRange(from, to)
+            } catch (e) {
+                return cb(e)
+            }
+            return cb(null, sumBlocks(range))
+        }
+        db.collection('blocks').find({_id: { $gte: from, $lte: to }}).toArray((e, bs) => {
+            if (e) return cb(e)
+            cb(null, sumBlocks(bs || []))
+        })
     },
     batchLoadBlocks: (blockNum,cb) => {
         if (chain.blocksToRebuild.length === 0)

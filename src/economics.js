@@ -17,6 +17,9 @@ const TransactionType = require('./transactions').Types
 let eco = {
     startRewardPool: null,
     lastRewardPool: null,
+    // total supply accumulator (integer, 1e-3 units) used to size the reward pool.
+    // null = not bootstrapped yet; chain.output() fills it (lazy scan + incremental).
+    totalSupplyUnits: null,
     currentBlock: {
         dist: 0,
         burn: 0,
@@ -80,6 +83,18 @@ let eco = {
     },
     rewardPool: () => {
         let theoricalPool = config.rewardPoolAmount
+        // fork: size the pool as a % of total supply per year instead of a fixed constant
+        if (typeof config.rewardPoolYearlyRate === 'number') {
+            if (typeof eco.totalSupplyUnits !== 'number') {
+                logr.fatal('eco.totalSupplyUnits not bootstrapped, cannot size reward pool')
+                process.exit(1)
+            }
+            // 1095 windows/year (9600 blocks * 3s = 8h each)
+            // eslint-disable-next-line no-magic-numbers
+            let windowsPerYear = 365*24*3600*1000 / (config.ecoBlocks * config.blockTime)
+            theoricalPool = eco.round(eco.totalSupplyUnits / 1000
+                * config.rewardPoolYearlyRate / windowsPerYear)
+        }
         let burned = 0
         let distributed = 0
         let votes = 0
@@ -135,7 +150,11 @@ let eco = {
     accountPrice: (username) => {
         let price = config.accountPriceMin
         let extra = config.accountPriceBase - config.accountPriceMin
-        let mult = Math.pow(config.accountPriceChars / username.length, config.accountPriceCharMult)
+        // fork: ipow(base, int) instead of Math.pow. Not bit-identical for a
+        // fractional base, so it MUST stay gated to keep pre-fork prices unchanged.
+        let mult = typeof config.rewardPoolYearlyRate === 'number'
+            ? eco.ipow(config.accountPriceChars / username.length, config.accountPriceCharMult)
+            : Math.pow(config.accountPriceChars / username.length, config.accountPriceCharMult)
         price += Math.round(extra*mult)
         return price
     },
@@ -219,7 +238,7 @@ let eco = {
             let authorVote = -1
             let authorVoteClaimed = false
             let totalAuthorTip = 0
-            let precisionMulti = Math.pow(10,config.ecoClaimPrecision+config.tippedVotePrecision)
+            let precisionMulti = eco.pow10(config.ecoClaimPrecision+config.tippedVotePrecision)
             // determine existence and position of author vote
             for (let v = 0; v < newVotes.length; v++)
                 if (newVotes[v].u === content.author) {
@@ -231,7 +250,7 @@ let eco = {
             for (let v = 0; v < newVotes.length; v++) {
                 if (authorVote >= 0 && newVotes[v].u !== content.author && newVotes[v].tip)
                     if (!authorVoteClaimed) {
-                        let tipAmt = (newVotes[v].gross * Math.pow(10,config.ecoClaimPrecision)) * (newVotes[v].tip * Math.pow(10,config.tippedVotePrecision))
+                        let tipAmt = (newVotes[v].gross * eco.pow10(config.ecoClaimPrecision)) * (newVotes[v].tip * eco.pow10(config.tippedVotePrecision))
                         totalAuthorTip += tipAmt
                         newVotes[v].totalTip = tipAmt / precisionMulti
                         newVotes[v].claimable = ((newVotes[v].gross * precisionMulti) - tipAmt) / precisionMulti
@@ -311,7 +330,14 @@ let eco = {
 
         // rounding down
         thNewCoins = eco.floor(thNewCoins)
-        
+
+        // fork: single-vote rate cap, proportional to network activity.
+        // A whale voting on an otherwise dead network can no longer drain the whole
+        // 8h pool: the payout is at most pool * vt / vtReferenceTotal.
+        if (typeof config.vtReferenceTotal === 'number')
+            thNewCoins = Math.min(thNewCoins,
+                eco.floor(stats.theo * Math.abs(vt) / config.vtReferenceTotal))
+
         // and making sure one person cant empty the whole pool when network has been inactive
         // e.g. when stats.votes close to 0
         // then vote value will be capped to rewardPoolMaxShare %
@@ -357,16 +383,30 @@ let eco = {
             rentability = baseRentability + (1-baseRentability) * (claimRewardTime-ts) / (claimRewardTime-rentabilityEndTime)
 
 
-        rentability = Math.floor(directionRent*rentability*Math.pow(10, config.ecoRentPrecision))/Math.pow(10, config.ecoRentPrecision)
+        rentability = Math.floor(directionRent*rentability*eco.pow10(config.ecoRentPrecision))/eco.pow10(config.ecoRentPrecision)
         return rentability
+    },
+    // exact integer power of 10 (10^p fits exactly in a double up to p=22).
+    // Deterministic replacement for Math.pow(10, p): same bits, engine-independent.
+    pow10: (p) => {
+        let r = 1
+        for (let i = 0; i < p; i++) r *= 10
+        return r
+    },
+    // repeated multiplication. Deterministic replacement for Math.pow(base, exp)
+    // when exp is an integer: avoids engine-specific pow() ULP differences.
+    ipow: (base, exp) => {
+        let r = 1
+        for (let i = 0; i < exp; i++) r *= base
+        return r
     },
     round: (val = 0) => {
         if (typeof val !== 'number' || isNaN(val)) val = 0
-        return Math.round(val*Math.pow(10,config.ecoClaimPrecision))/Math.pow(10,config.ecoClaimPrecision)
+        return Math.round(val*eco.pow10(config.ecoClaimPrecision))/eco.pow10(config.ecoClaimPrecision)
     },
     floor: (val = 0) => {
         if (typeof val !== 'number' || isNaN(val)) val = 0
-        return Math.floor(val*Math.pow(10,config.ecoClaimPrecision))/Math.pow(10,config.ecoClaimPrecision)
+        return Math.floor(val*eco.pow10(config.ecoClaimPrecision))/eco.pow10(config.ecoClaimPrecision)
     }
 } 
 

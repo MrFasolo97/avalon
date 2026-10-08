@@ -84,6 +84,10 @@ mongo.init(async function(state) {
     if (isResumingRebuild) {
         logr.info('Resuming interrupted rebuild from block ' + rebuildResumeBlock)
         config = require('./config').read(rebuildResumeBlock - 1)
+        // restore the supply accumulator of the 13330000 fork if it matches this head
+        if (state && state.headBlock === rebuildResumeBlock - 1
+            && typeof state.totalSupplyUnits === 'number')
+            eco.totalSupplyUnits = state.totalSupplyUnits
         chain.restoredBlocks = block._id
         let blkScheduleStart = rebuildResumeBlock-1 - (rebuildResumeBlock-1)%config.leaders
         if (!blocks.isOpen)
@@ -101,16 +105,42 @@ mongo.init(async function(state) {
     }
     logr.info('#' + block._id + ' is the latest block in our db')
     config = require('./config.js').read(block._id)
+    // restore the supply accumulator of the 13330000 fork if it matches this head
+    if (state && state.headBlock === block._id && typeof state.totalSupplyUnits === 'number')
+        eco.totalSupplyUnits = state.totalSupplyUnits
     if (blocks.isOpen) {
         blocks.fillInMemoryBlocks()
-        startDaemon()
+        bootstrapSupply(block._id, startDaemon)
     } else
-        mongo.fillInMemoryBlocks(startDaemon)
+        mongo.fillInMemoryBlocks(() => bootstrapSupply(block._id, startDaemon))
 })
+
+// Anchor the total-supply accumulator of the 13330000 economics fork.
+// targetBlock = last block already accounted for, so the accumulator must end up
+// equal to the total supply S(targetBlock) before block targetBlock+1 executes.
+// Self-healing: if state already carries a valid accumulator (restored below), it wins.
+function bootstrapSupply(targetBlock, cb) {
+    if (typeof config.initialSupplyBlock !== 'number') return cb()
+    if (typeof eco.totalSupplyUnits === 'number') return cb()
+    chain.scanSupply(config.initialSupplyBlock + 1, targetBlock, (e, sum) => {
+        if (e) {
+            logr.fatal('Cannot bootstrap total supply: ' + e)
+            return process.exit(1)
+        }
+        eco.totalSupplyUnits = Math.round(config.initialSupply * 1000) + sum
+        logr.info('Supply anchor restored at block #' + targetBlock + ': '
+            + eco.totalSupplyUnits / 1000 + ' DTC')
+        cb()
+    })
+}
 
 function startRebuild(startBlock) {
     let rebuildStartTime = new Date().getTime()
     chain.lastRebuildOutput = rebuildStartTime
+    bootstrapSupply(startBlock - 1, () => rebuildFrom(startBlock, rebuildStartTime))
+}
+
+function rebuildFrom(startBlock, rebuildStartTime) {
     chain.rebuildState(startBlock,(e,headBlockNum) => {
         if (e) {
             erroredRebuild = true

@@ -120,6 +120,57 @@ test('mineBlock: no token required when MINE_TOKEN unset', () => {
     assert.strictEqual(r.status, 200)
 })
 
+test('requireAuth: passes through when no admin token is set', () => {
+    const auth = require('../src/http/auth')
+    const saved = {}
+    const vars = ['ADMIN_TOKEN', 'LOG_ADMIN_TOKEN', 'MINE_TOKEN', 'DEBUG_TOKEN', 'RECOVER_TOKEN']
+    for (const v of vars) { saved[v] = process.env[v]; delete process.env[v] }
+
+    // Mock req/res as seen from `curl http://localhost:3001/mineBlock`
+    const req = {
+        headers: { accept: '*/*' },
+        query: {},
+        socket: { remoteAddress: '127.0.0.1' }
+    }
+    let res
+    const newRes = () => ({
+        statusCode: 200,
+        status(c) { this.statusCode = c; return this },
+        set() { return this },
+        json() { this.body = { json: true }; return this },
+        send(b) { this.body = b; return this }
+    })
+
+    // No tokens configured -> request is accepted (no login HTML)
+    let nextCalled = false
+    res = newRes()
+    auth.requireAuth()(req, res, () => { nextCalled = true })
+    assert.strictEqual(nextCalled, true, 'no tokens set: next() should be called')
+
+    // With ADMIN_TOKEN set -> curl without token still gets 401 + login HTML
+    process.env.ADMIN_TOKEN = 'secret'
+    nextCalled = false
+    res = newRes()
+    auth.requireAuth()(req, res, () => { nextCalled = true })
+    assert.strictEqual(nextCalled, false, 'token set: next() must not be called')
+    assert.strictEqual(res.statusCode, 401)
+    assert.ok(String(res.body).includes('<!DOCTYPE html'), 'expected login HTML')
+
+    // With ADMIN_TOKEN set -> correct token (query param) is accepted
+    const reqToken = { headers: { accept: '*/*' }, query: { token: 'secret' }, socket: { remoteAddress: '127.0.0.1' } }
+    nextCalled = false
+    res = newRes()
+    res.req = reqToken
+    auth.requireAuth()(reqToken, res, () => { nextCalled = true })
+    assert.strictEqual(nextCalled, true, 'valid token should be accepted')
+
+    for (const v of vars) {
+        if (saved[v] === undefined) delete process.env[v]
+        else process.env[v] = saved[v]
+    }
+    auth.sessions.clear()
+})
+
 // 7. DEBUG_TOKEN validation
 console.log('\n--- debug/index.js: DEBUG_TOKEN ---')
 test('debug: no token required when DEBUG_TOKEN unset', () => {

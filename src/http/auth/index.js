@@ -73,9 +73,17 @@ function requireAuth(...tokenEnvVars) {
         if (isValidSession(req))
             return next()
 
+        const candidates = tokenEnvVars.length ? tokenEnvVars.map(v => process.env[v]).filter(Boolean) : adminTokens()
+
+        // No token configured anywhere: there is nothing to verify a login
+        // against (/auth/login 401s too), so the login popup is a dead end.
+        // Accept the request instead, keeping unconfigured nodes usable with
+        // plain curl (e.g. /mineBlock, /recover) as documented in the README.
+        if (!candidates.length)
+            return next()
+
         const token = getToken(req)
         if (token) {
-            const candidates = tokenEnvVars.length ? tokenEnvVars.map(v => process.env[v]).filter(Boolean) : adminTokens()
             for (const expected of candidates)
                 if (safeEqual(token, expected)) {
                     const newSid = crypto.randomBytes(16).toString('hex')

@@ -288,6 +288,7 @@ Plus, on the control node: rebuild from genesis → same head **and same hash** 
 - By **13,925,000** (604,933 blocks ≈ 21 days at 3 s from the current head) **all nodes must run the new code**: that fork enables `forceFinalize` and moves `consensusSigVersion` to 2 (ordered-keys serialization). A node left behind does not produce/validate the same signatures → fork or halt.
 - Until that block the network has force-finalization **disabled**: a new halt can only be resolved with `auto_resolve_halt.sh`.
 - To monitor: `Hard Fork #13925000` in the logs at the right time, peer health, any multiple `possBlocks`.
+- **Post-migration backlog** (dependency audit 2026-10-20): bump `sharp` `^0.32.6` → `^0.35.5` (high: libvips/libheif CVEs on the user-image processing endpoint; validate with an upload+resize test) and `apidoc` `^1.2.0` → `^0.29.0` (dev-only). One commit, AFTER the cutover — deliberately outside the flag-day delta.
 
 ### S9 — Rollback
 

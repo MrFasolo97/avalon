@@ -435,4 +435,3 @@ curl -s localhost:3001/version
 # Has the node activated the economy? (must stay empty)
 grep "Hard Fork #13330000" /var/log/avalon.log
 ```
-

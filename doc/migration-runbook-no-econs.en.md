@@ -2,9 +2,9 @@
 
 **Type**: operational runbook
 **Date**: 18 October 2026
-**Last verified**: 20 October 2026 — every check below was re-run on HEAD `04ad87b`, and the network state was re-measured (head unchanged)
+**Last verified**: 20 October 2026 — every check below was re-run on HEAD `04ad87b` (the two commits above it, `/version` endpoint + release 2.0.0, touch no consensus code), and the network state was re-measured (head unchanged)
 **From**: branch `new_net` (the code line the current network runs on, today halted)
-**To**: the new code = `new_econs` HEAD `04ad87b` (=`cefabdd` plus two docs/deps-only commits `62fa68a`, `04ad87b`), **minus** commit `46c77ff` (the economic hard fork)
+**To**: the new code = `new_econs` HEAD `dcfe8b4` (=`cefabdd` plus the non-consensus commits above it: docs, javalon2 bump, `/version` endpoint, release 2.0.0), **minus** commit `46c77ff` (the economic hard fork)
 **Companion**: `doc/economics_fork_13330000.md` (what the new economy does, in detail)
 
 Checks performed for this runbook (in a throwaway worktree; re-run on 20 October 2026 on HEAD `04ad87b`, whose `src`/`test` are identical to `cefabdd`):
@@ -21,7 +21,7 @@ Checks performed for this runbook (in a throwaway worktree; re-run on 20 October
 
 | In the migration | Out |
 |---|---|
-| 168 commits (170 at HEAD `04ad87b`: the last two are docs/deps-only): security hardening (SSRF, NoSQLi, prototype pollution, log redaction), **anti-fork force-finalization**, halt-recovery, rate limiting, Node ≥ 24, Docker testnet, log viewer, dependency bumps (`javalon2` now `^1.1.10`) | **only** commit `46c77ff` `feat(econs): add hard fork #13330000 (supply-anchored pool, vote rate cap)` — 6 files, +432 / −10 |
+| 168 commits (173 at HEAD `dcfe8b4`: everything above `cefabdd` is non-consensus — docs, javalon2 bump, `/version` endpoint, release 2.0.0): security hardening (SSRF, NoSQLi, prototype pollution, log redaction), **anti-fork force-finalization**, halt-recovery, rate limiting, Node ≥ 24, Docker testnet, log viewer, dependency bumps (`javalon2` now `^1.1.10`) | **only** commit `46c77ff` `feat(econs): add hard fork #13330000 (supply-anchored pool, vote rate cap)` — 6 files, +432 / −10 |
 
 Three things to keep in mind:
 
@@ -35,7 +35,7 @@ Three things to keep in mind:
 
 ### 1.1 The object to exclude
 
-A **single commit**, `46c77ff`, the code-wise second-to-last on the branch (directly above it sits only `cefabdd`, which does not touch the economy; the two later commits `62fa68a` and `04ad87b` are docs/deps-only):
+A **single commit**, `46c77ff`, among the last code commits on the branch (the only commit above it that touches code is `cefabdd`, which does not touch the economy; everything above that is non-consensus: docs, javalon2 bump, `/version` endpoint, release 2.0.0):
 
 ```
 46c77ff  feat(econs): add hard fork #13330000 (supply-anchored pool, vote rate cap)
@@ -143,7 +143,7 @@ Variant **V1** (verified clean):
 ```bash
 cd /path/avalon
 git fetch --all
-git log --oneline -3 new_econs        # expected: 04ad87b / 62fa68a / cefabdd
+git log --oneline -5 new_econs        # expected: everything above cefabdd is non-consensus (docs, deps, /version, 2.0.0)
 git checkout -b new_net_noecons new_econs
 git revert --no-commit 46c77ff        # no conflicts, no manual intervention
 git status --short                    # expected: 5 M + D test/supply-anchor.js
@@ -193,6 +193,10 @@ npm run lint                      # expected: 1 pre-existing error (auth/index.j
 node test/audit-fixes.js          # expected: 19 passed, 0 failed
 node test/force-finalize.js       # expected: All tests passed
 # test/supply-anchor.js: it must NOT exist (the revert deletes it; in V3 delete it by hand)
+
+# 4. Once the gates are green, certify the commit as the release
+git tag -a v2.0.0 -m "release 2.0.0 (new code without econs)"
+git push origin v2.0.0           # from now on every operator runs: git checkout v2.0.0
 ```
 
 ### S3 — Config, environment, proxy 🔴
@@ -263,11 +267,12 @@ nohup ./scripts/start.sh > /var/log/avalon.log 2>&1 &   # or systemd / pm2 / scr
 curl -s localhost:3001/count                      # head ADVANCING (13,320,068+)
 curl -s localhost:3001/block/13320068 | head -c 200   # phash = hash of 13320067
 curl -s localhost:3001/supply | head -c 200           # sanity (endpoint unchanged, not econs)
+curl -s localhost:3001/version         # expected: {"version":"2.0.0"} — IDENTICAL on every node
 grep -c "Hard Fork #13330000" /var/log/avalon.log     # expected: 0 (forever)
 grep "Hard Fork #" /var/log/avalon.log | tail -3      # only 241600 expected (and 13925000 from the future fork)
 ```
 
-Plus, on the control node: rebuild from genesis → same head **and same hash** as the other nodes. Payout/vote format: unchanged (pool = 150001). First full day of observation: `/count` monotonic, no growing `possBlocks`, stable peers.
+Plus, on the control node: rebuild from genesis → same head **and same hash** as the other nodes. Payout/vote format: unchanged (pool = 150001). First full day of observation: `/count` monotonic, no growing `possBlocks`, stable peers. Every operator runs `curl -s localhost:3001/version` and posts the result in the cutover chat: all nodes must answer `2.0.0`.
 
 ### S7 — Clients, indexers, embed
 
@@ -296,7 +301,7 @@ Plus, on the control node: rebuild from genesis → same head **and same hash** 
 
 | # | Risk | Impact | Prob. | Mitigation |
 |---|---|---|---|---|
-| **R1** | Exclusion applied to only some nodes → at block 13,330,000 some apply the fork and others do not: different `dist`/pool, **split chain** | 🔴 critical | medium | flag day with all leaders; S2 verification (one-liner on every node) + `grep "Hard Fork #13330000"` = 0 on every node; no `new_net` node online |
+| **R1** | Exclusion applied to only some nodes → at block 13,330,000 some apply the fork and others do not: different `dist`/pool, **split chain** | 🔴 critical | medium | flag day with all leaders; S2 verification (one-liner on every node) + `grep "Hard Fork #13330000"` = 0 + `curl /version` = 2.0.0 on every node; no `new_net` node online |
 | **R2** | The new code changes **validators** (`validate/json.js`, `float.js`, `integer.js`, `string.js`, bandwidth check on create-account, block size bounds, JSON with `.`/`$` keys rejected): a block/tx accepted by the old code may be rejected by the new one | 🔴 fork or impossible rebuild | high if the cutover is not coordinated | S4 testnet with a control rebuild and hash comparison; simultaneous cutover; no mixed nodes |
 | **R3** | Rollback after post-cutover blocks: the old version cannot validate the new chain | 🔴 data loss | medium | define the point of no return in D4; S0 backup; targeted truncation S9 |
 | **R4** | `CORS_ORIGIN` not set (default `false`) → the web client cannot read the APIs | 🔴 broken client | high | set it on all public nodes (S3, S7) |
@@ -320,6 +325,7 @@ Plus, on the control node: rebuild from genesis → same head **and same hash** 
 - [ ] Residue `grep` and the S2 config one-liner → expected outcome (no econs keys, `pool: 150001`, `FF@13925000: true`, `sigVer: 2`)
 - [ ] `npm run lint` + `test/audit-fixes.js` + `test/force-finalize.js` green as per baseline
 - [ ] Node ≥ 24 on all nodes and in the Docker images
+- [ ] Tag `v2.0.0` pushed on the certified commit; `curl /version` returns `2.0.0` on every node
 - [ ] `CORS_ORIGIN`, `HTTP_HOST`, `TRUST_PROXY`, `ADMIN_TOKEN`/`LOG_ADMIN_TOKEN` set and verified **from outside the local network**
 - [ ] New env vars declared in `scripts/start.sh` (commented block) so operators can discover them
 - [ ] Testnet dry run: rebuild from genesis with matching hashes + force-finalization tested
@@ -357,7 +363,7 @@ Totals:
 
 ## Appendix A — What is in the new code (measured 2026-10-20)
 
-168 commits / 102 files / +5131 −801 measured at `cefabdd` (the code tip); at HEAD `04ad87b`: 170 commits / 103 files / +5141 −809 — the two extra commits are docs/deps-only and the extra file is the refreshed `doc/v1.5.2-upgrade.md`.
+168 commits / 102 files / +5131 −801 measured at `cefabdd` (the code tip); at HEAD `dcfe8b4`: 173 commits / 105 files / +5566 −810 — everything above `cefabdd` is non-consensus (docs, javalon2 bump, `/version` endpoint, release 2.0.0; the extra files vs `cefabdd` are the refreshed `doc/v1.5.2-upgrade.md`, this runbook and `src/http/version/`).
 
 | Area | Examples |
 |---|---|
@@ -367,7 +373,7 @@ Totals:
 | P2P network | websocket payload cap, dedicated rate limiter, TTL on `blockSenders`, O(1) cleanup |
 | Cache/block robustness | atomic state writes, Mongo queue error handling, truncated BSON handled, `sanitizeQuery` |
 | Validators | `float`/`integer`/`string`/`json` (NaN/Infinity, `.`/`$` keys, zero bounds), JSON size in bytes |
-| Platform | Node ≥ 24, multi-node `docker/testnet`, in-node log viewer, `javalon2` 1.1.10 |
+| Platform | Node ≥ 24, multi-node `docker/testnet`, in-node log viewer, `/version` endpoint, `javalon2` 1.1.10 |
 | Economy (the only excluded part) | commit `46c77ff` |
 
 ## Appendix B — Hard fork timeline
@@ -402,6 +408,9 @@ const p=c.read(13330000),f=c.read(13925000);console.log(p.rewardPoolYearlyRate,p
 
 # Network state
 curl -s https://dtube.fso.ovh/count
+
+# Same release on this node? (expected: 2.0.0)
+curl -s localhost:3001/version
 
 # Has the node activated the economy? (must stay empty)
 grep "Hard Fork #13330000" /var/log/avalon.log

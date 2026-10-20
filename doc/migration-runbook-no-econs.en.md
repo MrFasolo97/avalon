@@ -2,12 +2,12 @@
 
 **Type**: operational runbook
 **Date**: 18 October 2026
-**Last verified**: 20 October 2026 — every check below was re-run on the tree of tag **`v2.0.1`** (= `v2.0.0` plus the three gitar-bot review fixes, S1), and the network state was re-measured (head unchanged)
+**Last verified**: 20 October 2026 — every check below was re-run on the tree of tag **`v2.0.2`** (= `v2.0.0` plus the gitar-bot review fixes and the Node 24 alignment, S1), and the network state was re-measured (head unchanged)
 **From**: branch `new_net` (the code line the current network runs on, today halted)
-**To**: the new code = tag **`v2.0.1`** on `feat/auto-force-finalize` (= the `new_econs` code tip `d0ca532` minus commit `46c77ff`; verified 2026-10-20: code diff = exactly the 6 econs files, zero econs residue)
+**To**: the new code = tag **`v2.0.2`** on `feat/auto-force-finalize` (= the `new_econs` code tip `6cc3b46` minus commit `46c77ff`; verified 2026-10-20: code diff = exactly the 6 econs files, zero econs residue)
 **Companion**: `doc/economics_fork_13330000.md` (what the new economy does, in detail)
 
-Checks performed for this runbook (in a throwaway worktree; re-run on 20 October 2026 on the `v2.0.1` tree, whose `src`/`test`/`scripts` match `new_econs` `d0ca532` apart from the econs revert):
+Checks performed for this runbook (in a throwaway worktree; re-run on 20 October 2026 on the `v2.0.2` tree, whose `src`/`test`/`scripts` match `new_econs` `6cc3b46` apart from the econs revert):
 
 - reverting the econs commit **applies with no conflicts** (5 modified files + `D test/supply-anchor.js`; 6 files, +10 / −432);
 - **zero residue** of econs symbols in `src/`, `test/`, `scripts/` on the reverted tree (the `doc/` folder is not scanned on purpose: the companion and migration documents legitimately discuss these tokens — see the corrected grep in S2);
@@ -21,7 +21,7 @@ Checks performed for this runbook (in a throwaway worktree; re-run on 20 October
 
 | In the migration | Out |
 |---|---|
-| 168 commits (177 at the code tip `d0ca532`: everything above `cefabdd` is non-consensus — docs, javalon2 bump, `/version` endpoint, releases 2.0.0/2.0.1): security hardening (SSRF, NoSQLi, prototype pollution, log redaction), **anti-fork force-finalization**, halt-recovery, rate limiting, Node ≥ 24, Docker testnet, log viewer, dependency bumps (`javalon2` now `^1.1.10`) | **only** commit `46c77ff` `feat(econs): add hard fork #13330000 (supply-anchored pool, vote rate cap)` — 6 files, +432 / −10 |
+| 168 commits (181 at the code tip `6cc3b46`: everything above `cefabdd` is non-consensus — docs, javalon2 bump, `/version` endpoint, releases 2.0.0–2.0.2): security hardening (SSRF, NoSQLi, prototype pollution, log redaction), **anti-fork force-finalization**, halt-recovery, rate limiting, Node ≥ 24, Docker testnet, log viewer, dependency bumps (`javalon2` now `^1.1.10`) | **only** commit `46c77ff` `feat(econs): add hard fork #13330000 (supply-anchored pool, vote rate cap)` — 6 files, +432 / −10 |
 
 Three things to keep in mind:
 
@@ -35,7 +35,7 @@ Three things to keep in mind:
 
 ### 1.1 The object to exclude
 
-A **single commit**, `46c77ff`, among the last code commits on the branch (the commits above it touch code only in `cefabdd` — which does not touch the economy — and in the v2.0.1 review fixes `d0ca532`, which restore historical semantics; everything else above is non-consensus: docs, javalon2 bump, `/version` endpoint, releases 2.0.0/2.0.1):
+A **single commit**, `46c77ff`, among the last code commits on the branch (the commits above it touch code only in `cefabdd` — which does not touch the economy — and in the v2.0.1 review fixes `d0ca532`, which restore historical semantics; everything else above is non-consensus: docs, javalon2 bump, `/version` endpoint, releases 2.0.0–2.0.2):
 
 ```
 46c77ff  feat(econs): add hard fork #13330000 (supply-anchored pool, vote rate cap)
@@ -75,7 +75,7 @@ Note: `new_net` has **no force-finalization code at all** (`consensus.js` 290 �
 
 ### 1.3 How the exclusion was built (audit trail)
 
-**Operators do not build anything**: the exclusion is already certified as tag `v2.0.1` — `git checkout v2.0.1` (S1) *is* the whole step. The three variants below are the decision record of how that tree was produced (and why V3 was rejected):
+**Operators do not build anything**: the exclusion is already certified as tag `v2.0.2` — `git checkout v2.0.2` (S1) *is* the whole step. The three variants below are the decision record of how that tree was produced (and why V3 was rejected):
 
 | Variant | How | Diff | Pros | Cons |
 |---|---|---|---|---|
@@ -140,21 +140,25 @@ To record on the cutover sheet: head height, head block hash, **commit** current
 
 ### S1 — Get the no-economy branch 🔴
 
-**Recommended: use the release tag.** The verified no-econs tree is published as tag **`v2.0.1`** on branch `feat/auto-force-finalize` (verified 2026-10-20: identical to `new_econs` in every file except the 6 econs files, zero econs residue):
+**Recommended: use the release tag.** The verified no-econs tree is published as tag **`v2.0.2`** on branch `feat/auto-force-finalize` (verified 2026-10-20: identical to `new_econs` in every file except the 6 econs files, zero econs residue):
 
 ```bash
 cd /path/avalon
 git fetch --all --tags
-git checkout v2.0.1                 # new code without econs, with /version + review fixes
+git checkout v2.0.2                 # new code without econs, with /version + review fixes
 ```
 
-**What `v2.0.1` adds over `v2.0.0`** — three fixes from the automated code review (gitar-bot, PR #2, 20 October 2026), each re-verified on the real tree:
+**What the releases add over `v2.0.0`** — each re-verified on the real tree:
+
+**`v2.0.1`** — three fixes from the automated code review (gitar-bot, PR #2, 20 October 2026):
 
 1. `scripts/auto_resolve_halt.sh`: the `blocks.index` offset is decoded as `(high << 8) + low`, matching the encoding written by `src/blocks.js` (`high = pos >> 8`, `low = pos & 0xFF`). The previous `<< 32` made every real truncation position explode past the file size, so the last-resort BSON truncation could never succeed on a live chain;
 2. `src/http/account/index.js`: `validate.string` now receives `allowedUsernameCharsOnlyMiddle`, so accounts whose names contain `-` or `.` in the middle (legitimate per tx validation) are no longer 404-ed;
 3. `src/consensus.js`: the finalization quorum is `floor(n·2/3) + 1` — the smallest integer strictly above 2/3 — restoring the historical `new_net` semantics that `ceil` + `>=` had weakened for `activeLeaders` counts that are multiples of 3.
 
-`v2.0.0` stays valid for provenance; every operator path in this document uses `v2.0.1`.
+**`v2.0.2`** (same day, over `v2.0.1`): Docker images and the startup guard aligned to **Node 24** — `docker/Dockerfile` (NodeSource `setup_24.x`), `docker/testnet/Dockerfile` (`FROM node:24`), `docker/test.dockerfile` (`node:24-alpine`) and the `main.js` version check (`>= v24`, was `>= v18` while `engines` required ≥24): closes R8.
+
+`v2.0.0` stays valid for provenance; every operator path in this document uses `v2.0.2`.
 
 Building the branch yourself — **not required for the migration** (audit trail, kept for the record: the tag already *is* this tree):
 
@@ -163,7 +167,7 @@ Variant **V1** (verified clean):
 ```bash
 cd /path/avalon
 git fetch --all
-git log --oneline -5 new_econs        # orientation: docs, deps, /version, releases and the v2.0.1 review fixes above cefabdd
+git log --oneline -5 new_econs        # orientation: docs, deps, /version and the release commits above cefabdd
 git checkout -b new_net_noecons new_econs
 git revert --no-commit 46c77ff        # no conflicts, no manual intervention
 git status --short                    # expected: 5 M + D test/supply-anchor.js
@@ -177,7 +181,7 @@ Variant **V2** (same tree, linear history):
 git checkout -b new_net_noecons 46c77ff^   # = 9774aca
 git cherry-pick 46c77ff..new_econs         # every commit above the econs one:
                                            # docs, deps, /version, releases and the
-                                           # v2.0.1 review fixes (no conflict expected)
+                                           # release commits (no conflict expected)
 ```
 
 Equivalence check (any variant — also confirms the tag):
@@ -185,7 +189,7 @@ Equivalence check (any variant — also confirms the tag):
 ```bash
 # expected: exactly the 6 economy files — the tag/branch = new code − econs
 # (scoped to code on purpose: doc/ revisions may legitimately differ)
-git diff new_econs v2.0.1 --stat -- src test scripts   # or your new_net_noecons branch
+git diff new_econs v2.0.2 --stat -- src test scripts   # or your new_net_noecons branch
 ```
 
 ### S2 — Static, offline verification ⚠️
@@ -216,7 +220,7 @@ node test/force-finalize.js       # expected: All tests passed
 # test/supply-anchor.js: it must NOT exist (the revert deletes it; in V3 delete it by hand)
 
 # 4. Confirm you are on the certified release tag
-git describe --tags              # expected: v2.0.1
+git describe --tags              # expected: v2.0.2
 ```
 
 ### S3 — Config, environment, proxy 🔴
@@ -250,13 +254,13 @@ CORS_ORIGIN='*'      # or the exact origin of the web client
 HTTP_HOST=0.0.0.0
 ```
 
-Docker: `docker/docker-compose.yml` lost `version:` and now passes `HTTP_HOST=0.0.0.0`. **Careful**: `docker/Dockerfile` still installs **Node 18** (`deb.nodesource.com/setup_18.x`) and `docker/testnet/Dockerfile` uses `FROM node:18`, while `package.json` requires **`node >= 24`** (the runtime check in `main.js` accepts `>= 18`). An internal inconsistency in the new code: align the images to Node 24 **before** the cutover (R8).
+Docker: `docker/docker-compose.yml` lost `version:` and now passes `HTTP_HOST=0.0.0.0`. Node is aligned to **24** everywhere since `v2.0.2`: mainnet image (`docker/Dockerfile`, NodeSource `setup_24.x`), testnet image (`docker/testnet/Dockerfile`, `FROM node:24`), `docker/test.dockerfile` (`node:24-alpine`) and the `main.js` startup guard (`>= v24`) — all consistent with `engines: node >= 24` (R8 closed).
 
 ### S4 — Dry run on a local testnet ⚠️
 
 Before touching mainnet, reproduce the migration on `docker/testnet` (3 miners + bootstrap, ports 3101-3104 / 6101-6104):
 
-1. checkout the release tag and build (`git checkout v2.0.1 && docker compose build`);
+1. checkout the release tag and build (`git checkout v2.0.2 && docker compose build`);
 2. chain from scratch: verify that blocks are produced and that `Hard Fork #13330000` **never appears** in the logs;
 3. **determinism test**: full rebuild from genesis on the new-code-without-economy and compare around a hundred block hashes with a `new_net` node → they must match (validators changed, R2);
 4. force-finalization test (two near-simultaneous `/mineBlock` on different miners);
@@ -287,12 +291,12 @@ nohup ./scripts/start.sh > /var/log/avalon.log 2>&1 &   # or systemd / pm2 / scr
 curl -s localhost:3001/count                      # head ADVANCING (13,320,068+)
 curl -s localhost:3001/block/13320068 | head -c 200   # phash = hash of 13320067
 curl -s localhost:3001/supply | head -c 200           # sanity (endpoint unchanged, not econs)
-curl -s localhost:3001/version         # expected: {"version":"2.0.1"} — IDENTICAL on every node
+curl -s localhost:3001/version         # expected: {"version":"2.0.2"} — IDENTICAL on every node
 grep -c "Hard Fork #13330000" /var/log/avalon.log     # expected: 0 (forever)
 grep "Hard Fork #" /var/log/avalon.log | tail -3      # only 241600 expected (and 13925000 from the future fork)
 ```
 
-Plus, on the control node: rebuild from genesis → same head **and same hash** as the other nodes. Payout/vote format: unchanged (pool = 150001). First full day of observation: `/count` monotonic, no growing `possBlocks`, stable peers. Every operator runs `curl -s localhost:3001/version` and posts the result in the cutover chat: all nodes must answer `2.0.1`.
+Plus, on the control node: rebuild from genesis → same head **and same hash** as the other nodes. Payout/vote format: unchanged (pool = 150001). First full day of observation: `/count` monotonic, no growing `possBlocks`, stable peers. Every operator runs `curl -s localhost:3001/version` and posts the result in the cutover chat: all nodes must answer `2.0.2`.
 
 ### S7 — Clients, indexers, embed
 
@@ -322,14 +326,14 @@ Plus, on the control node: rebuild from genesis → same head **and same hash** 
 
 | # | Risk | Impact | Prob. | Mitigation |
 |---|---|---|---|---|
-| **R1** | Exclusion applied to only some nodes → at block 13,330,000 some apply the fork and others do not: different `dist`/pool, **split chain** | 🔴 critical | medium | flag day with all leaders; S2 verification (one-liner on every node) + `grep "Hard Fork #13330000"` = 0 + `curl /version` = 2.0.1 on every node; no `new_net` node online |
+| **R1** | Exclusion applied to only some nodes → at block 13,330,000 some apply the fork and others do not: different `dist`/pool, **split chain** | 🔴 critical | medium | flag day with all leaders; S2 verification (one-liner on every node) + `grep "Hard Fork #13330000"` = 0 + `curl /version` = 2.0.2 on every node; no `new_net` node online |
 | **R2** | The new code changes **validators** (`validate/json.js`, `float.js`, `integer.js`, `string.js`, bandwidth check on create-account, block size bounds, JSON with `.`/`$` keys rejected): a block/tx accepted by the old code may be rejected by the new one | 🔴 fork or impossible rebuild | high if the cutover is not coordinated | S4 testnet with a control rebuild and hash comparison; simultaneous cutover; no mixed nodes |
 | **R3** | Rollback after post-cutover blocks: the old version cannot validate the new chain | 🔴 data loss | medium | define the point of no return in D4; S0 backup; targeted truncation S9 |
 | **R4** | `CORS_ORIGIN` not set (default `false`) → the web client cannot read the APIs | 🔴 broken client | high | set it on all public nodes (S3, S7) |
 | **R5** | `HTTP_HOST` default `127.0.0.1` → API unreachable from outside | 🔴 service down | medium | set `HTTP_HOST=0.0.0.0` (S3) and verify from outside, not just from localhost |
 | **R6** | Global rate limit 50 r/s + `TRUST_PROXY` unset behind a proxy: one bucket for everybody → mass `429`s; admin sessions bound to the proxy IP | 🟠 degradation/abuse | high | correct `TRUST_PROXY` + nginx headers; consider limits in nginx; monitor `429`s |
 | **R7** | Rate limit on `/transact` (5 r/s) breaks dtube2 batch flows | 🟠 lost tx | medium | client backoff/retry; check vote/upload flows |
-| **R8** | Node: `engines >= 24` but Docker images on **Node 18** (`docker/Dockerfile`, `docker/testnet/Dockerfile`) and runtime check `>= 18` | 🟠 unsupported install/runtime | medium | align images to Node 24 before the cutover; `npm ci` with Node ≥ 24 during validation |
+| **R8** | Node: `engines >= 24` but Docker images on **Node 18** (`docker/Dockerfile`, `docker/testnet/Dockerfile`) and runtime check `>= 18` — found during validation | 🟠 unsupported install/runtime | low *(closed)* | **closed in `v2.0.2`**: images aligned (`setup_24.x`, `FROM node:24`, `node:24-alpine`) and `main.js` guard raised to `>= v24`; validate with `npm ci` on Node ≥ 24 |
 | **R9** | Re-enabling the economy later by touching `initialSupplyBlock`/`initialSupply` (frozen anchor, filtered by `allowedKeys`) | 🔴 silent fork | low | new fork entry with a future height and a measured anchor; never move existing keys (appendix C) |
 | **R10** | `eco.totalSupplyUnits` not bootstrapped → `logr.fatal` + `process.exit(1)` at the first block of the fork (for a node crossing the anchor without restarting) | 🟠 node dies | low (excluded in this migration) | this is why the anchor sits at the current tip: restart all nodes as part of the resume |
 | **R11** | Unresolved halt: force-finalization is **not active** until 13,925,000; the script guardrails (max 10 blocks per pass, 30 total, `.avalon_halt` state) may refuse the truncation | 🔴 chain halted | medium | `DRY_RUN=1` first, plan the manual intervention, S0 backup, agreed maintenance window |
@@ -342,11 +346,11 @@ Plus, on the control node: rebuild from genesis → same head **and same hash** 
 
 ## 6. Definition of done
 
-- [ ] Tag checked out on every node (`git checkout v2.0.1`) and `git diff new_econs v2.0.1 --stat -- src test scripts` shows **only** the 6 economy files
+- [ ] Tag checked out on every node (`git checkout v2.0.2`) and `git diff new_econs v2.0.2 --stat -- src test scripts` shows **only** the 6 economy files
 - [ ] Residue `grep` and the S2 config one-liner → expected outcome (no econs keys, `pool: 150001`, `FF@13925000: true`, `sigVer: 2`)
 - [ ] `npm run lint` + `test/audit-fixes.js` + `test/force-finalize.js` green as per baseline
 - [ ] Node ≥ 24 on all nodes and in the Docker images
-- [ ] Every node on the certified tag (`git describe --tags` = `v2.0.1`); `curl /version` returns `2.0.1` on every node
+- [ ] Every node on the certified tag (`git describe --tags` = `v2.0.2`); `curl /version` returns `2.0.2` on every node
 - [ ] `CORS_ORIGIN`, `HTTP_HOST`, `TRUST_PROXY`, `ADMIN_TOKEN`/`LOG_ADMIN_TOKEN` set and verified **from outside the local network**
 - [ ] New env vars declared in `scripts/start.sh` (commented block) so operators can discover them
 - [ ] Testnet dry run: rebuild from genesis with matching hashes + force-finalization tested
@@ -365,7 +369,7 @@ Hands-on time per step, estimated against the real node layout (mainnet: `blocks
 | Step | Hands-on | Basis |
 |---|---|---|
 | **S0 pre-flight** | **~15 min** | blocks.bson/index copy ≈ 1–2 min (4.3 GB local disk / 1 Gbit), `mongodump` 2.7 GB ≈ 2–3 min, git/env/key snapshots ~5 min |
-| **S1 release checkout** | **~1 min** | `git checkout v2.0.1` (tag already certified; the self-build variants are audit-only) |
+| **S1 release checkout** | **~1 min** | `git checkout v2.0.2` (tag already certified; the self-build variants are audit-only) |
 | **S2 static verification** | **~10–15 min** | `npm ci` 1–5 min (warm cache), greps + config one-liner + lint + 2 test suites |
 | **S3 config/proxy** | **~30 min per node** | `.env` + new commented block in `start.sh` + nginx (`X-Forwarded-For`) + verification from outside |
 | **S4 testnet dry run** | **~1–2 h first run**, ~45 min on repeat | `docker compose build` 15–30 min first time; chain from scratch, determinism rebuild, force-finalization test |
@@ -384,7 +388,7 @@ Totals:
 
 ## Appendix A — What is in the new code (measured 2026-10-20)
 
-168 commits / 102 files / +5131 −801 measured at `cefabdd` (the old code tip); at code tip `d0ca532`: 177 commits / 105 files / +5591 −810 — everything above `cefabdd` is non-consensus (docs, javalon2 bump, `/version` endpoint, releases 2.0.0/2.0.1; the extra files vs `cefabdd` are the refreshed `doc/v1.5.2-upgrade.md`, this runbook and `src/http/version/`).
+168 commits / 102 files / +5131 −801 measured at `cefabdd` (the old code tip); at code tip `6cc3b46`: 181 commits / 106 files / +5604 −812 — everything above `cefabdd` is non-consensus (docs, javalon2 bump, `/version` endpoint, releases 2.0.0–2.0.2; the extra files vs `cefabdd` are the refreshed `doc/v1.5.2-upgrade.md`, this runbook and `src/http/version/`).
 
 | Area | Examples |
 |---|---|
@@ -430,7 +434,7 @@ const p=c.read(13330000),f=c.read(13925000);console.log(p.rewardPoolYearlyRate,p
 # Network state
 curl -s https://dtube.fso.ovh/count
 
-# Same release on this node? (expected: 2.0.1)
+# Same release on this node? (expected: 2.0.2)
 curl -s localhost:3001/version
 
 # Has the node activated the economy? (must stay empty)

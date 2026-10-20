@@ -227,19 +227,20 @@ test('resolveAndPin + checkRebinding prevents DNS rebinding', async () => {
 
 // 9. BSON position calculation
 console.log('\n--- auto_resolve_halt.sh: BSON truncPos ---')
-test('truncPos = (BigInt(high) << 32n) + BigInt(low)', () => {
-    function calc(high, low) { return (BigInt(high) << 32n) + BigInt(low) }
-    function oldCalc(high, low) { return (BigInt(high) << 8n) + BigInt(low) }
+test('truncPos = (BigInt(high) << 8n) + BigInt(low)', () => {
+    // Node encoding (src/blocks.js appendIndex/read): high = pos >> 8, low = pos & 0xFF,
+    // so the decode must mirror it: pos = (high << 8) + low
+    function calc(high, low) { return (BigInt(high) << 8n) + BigInt(low) }
+    function wrongCalc(high, low) { return (BigInt(high) << 32n) + BigInt(low) }
     
-    assert.strictEqual(calc(0, 1000), 1000n)
-    assert.strictEqual(calc(0, 0xFFFFFFFF), 0xFFFFFFFFn)
-    assert.strictEqual(calc(1, 0), 4294967296n)
-    assert.strictEqual(calc(1, 1), 4294967297n)
-    assert.strictEqual(calc(2, 100), 8589934692n)
+    assert.strictEqual(calc(0, 255), 255n)
+    assert.strictEqual(calc(3, 232), 1000n)
+    assert.strictEqual(calc(17578125, 0), 4500000000n)
+    assert.strictEqual(calc(33554432, 0), 8589934592n)
     
-    // Old code catastrophically wrong for large files
-    assert.strictEqual(oldCalc(2, 100), 612n, 'old: 612 bytes instead of 8.5GB')
-    assert.notStrictEqual(calc(2, 100), oldCalc(2, 100))
+    // The << 32 decode explodes any real offset (>= 256) past every file size
+    assert.strictEqual(wrongCalc(3, 232), 12884902120n)
+    assert.notStrictEqual(calc(3, 232), wrongCalc(3, 232))
 })
 
 // 10. Miner log sanitization
@@ -302,9 +303,10 @@ test('image/index.js has resolveAndPin + checkRebinding', () => {
     assert.ok(c.includes('checkRebinding'))
 })
 
-test('auto_resolve_halt.sh has BSON << 32n', () => {
+test('auto_resolve_halt.sh has BSON << 8n', () => {
     const c = readScript('auto_resolve_halt.sh')
-    assert.ok(c.includes('<< 32n'))
+    assert.ok(c.includes('<< 8n'))
+    assert.ok(!c.includes('<< 32n'))
 })
 
 // Summary

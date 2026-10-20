@@ -230,7 +230,9 @@ truncate_blocks_bson() {
 
     const high = buf.readUInt32LE(0);
     const low = buf.readUInt32LE(4);
-    const truncPos = (BigInt(high) << 32n) + BigInt(low);
+    // blocks.js encodes pos as high = pos >> 8, low = pos & 0xFF
+    // (appendIndex/read: `(high << 8) + low`) — decode must mirror it
+    const truncPos = (BigInt(high) << 8n) + BigInt(low);
     const idxTruncSize = (newHeight + 1) * 8;
 
     if (Number(truncPos) > bsonSize || truncPos < 0n) {

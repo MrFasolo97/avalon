@@ -74,7 +74,9 @@ let consensus = {
         consensus.tryNextStepBusy = true
         try {
             let consensus_size = consensus.activeLeaders().length
-            let threshold = Math.ceil(consensus_size * consensus_threshold)
+            // smallest integer STRICTLY above 2/3 (floor+1): `ceil` + `>=` would drop
+            // the quorum to exactly 2/3 when consensus_size is a multiple of 3
+            let threshold = Math.floor(consensus_size * consensus_threshold) + 1
 
             // Require at least 3 respondents so no 50% partition can reach consensus alone
             if (threshold < 3) threshold = 3

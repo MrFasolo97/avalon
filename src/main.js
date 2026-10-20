@@ -19,8 +19,8 @@ const http = require('./http')
 
 // verify node version
 const currentNodeV = parseInt(process.versions.node.split('.')[0])
-if (currentNodeV < 18) {
-    logr.fatal('Wrong NodeJS version. Allowed versions: >= v18')
+if (currentNodeV < 24) {
+    logr.fatal('Wrong NodeJS version. Allowed versions: >= v24')
     process.exit(1)
 } else logr.info('Correctly using NodeJS v'+process.versions.node)
 

@@ -4,7 +4,7 @@
 **Date**: 18 October 2026
 **Last verified**: 20 October 2026 — every check below was re-run on the tree of tag **`v2.0.1`** (= `v2.0.0` plus the three gitar-bot review fixes, S1), and the network state was re-measured (head unchanged)
 **From**: branch `new_net` (the code line the current network runs on, today halted)
-**To**: the new code = tag **`v2.0.1`** on `feat/auto-force-finalize` (= `new_econs` HEAD `d0ca532` minus commit `46c77ff`; verified 2026-10-20: code diff = exactly the 6 econs files, zero econs residue)
+**To**: the new code = tag **`v2.0.1`** on `feat/auto-force-finalize` (= the `new_econs` code tip `d0ca532` minus commit `46c77ff`; verified 2026-10-20: code diff = exactly the 6 econs files, zero econs residue)
 **Companion**: `doc/economics_fork_13330000.md` (what the new economy does, in detail)
 
 Checks performed for this runbook (in a throwaway worktree; re-run on 20 October 2026 on the `v2.0.1` tree, whose `src`/`test`/`scripts` match `new_econs` `d0ca532` apart from the econs revert):
@@ -21,7 +21,7 @@ Checks performed for this runbook (in a throwaway worktree; re-run on 20 October
 
 | In the migration | Out |
 |---|---|
-| 168 commits (177 at HEAD `d0ca532`: everything above `cefabdd` is non-consensus — docs, javalon2 bump, `/version` endpoint, releases 2.0.0/2.0.1): security hardening (SSRF, NoSQLi, prototype pollution, log redaction), **anti-fork force-finalization**, halt-recovery, rate limiting, Node ≥ 24, Docker testnet, log viewer, dependency bumps (`javalon2` now `^1.1.10`) | **only** commit `46c77ff` `feat(econs): add hard fork #13330000 (supply-anchored pool, vote rate cap)` — 6 files, +432 / −10 |
+| 168 commits (177 at the code tip `d0ca532`: everything above `cefabdd` is non-consensus — docs, javalon2 bump, `/version` endpoint, releases 2.0.0/2.0.1): security hardening (SSRF, NoSQLi, prototype pollution, log redaction), **anti-fork force-finalization**, halt-recovery, rate limiting, Node ≥ 24, Docker testnet, log viewer, dependency bumps (`javalon2` now `^1.1.10`) | **only** commit `46c77ff` `feat(econs): add hard fork #13330000 (supply-anchored pool, vote rate cap)` — 6 files, +432 / −10 |
 
 Three things to keep in mind:
 
@@ -35,7 +35,7 @@ Three things to keep in mind:
 
 ### 1.1 The object to exclude
 
-A **single commit**, `46c77ff`, among the last code commits on the branch (the only commit above it that touches code is `cefabdd`, which does not touch the economy; everything above that is non-consensus: docs, javalon2 bump, `/version` endpoint, releases 2.0.0/2.0.1):
+A **single commit**, `46c77ff`, among the last code commits on the branch (the commits above it touch code only in `cefabdd` — which does not touch the economy — and in the v2.0.1 review fixes `d0ca532`, which restore historical semantics; everything else above is non-consensus: docs, javalon2 bump, `/version` endpoint, releases 2.0.0/2.0.1):
 
 ```
 46c77ff  feat(econs): add hard fork #13330000 (supply-anchored pool, vote rate cap)
@@ -73,15 +73,17 @@ Everything else on the branch, including another hard fork **that stays**:
 
 Note: `new_net` has **no force-finalization code at all** (`consensus.js` 290 → 684 lines, 47 commits on halt/consensus/quorum, `scripts/auto_resolve_halt.sh` new, 794 lines). That, not the economy, is the substance of the migration.
 
-### 1.3 The three exclusion variants
+### 1.3 How the exclusion was built (audit trail)
+
+**Operators do not build anything**: the exclusion is already certified as tag `v2.0.1` — `git checkout v2.0.1` (S1) *is* the whole step. The three variants below are the decision record of how that tree was produced (and why V3 was rejected):
 
 | Variant | How | Diff | Pros | Cons |
 |---|---|---|---|---|
-| **V1 — revert** (recommended) | `git revert 46c77ff` on the new code | 6 files (+10 / −432) + 1 revert commit | verified, trivial, removes dead code *and* the test | a `revert` commit in history (noise if the branch is public) |
-| **V2 — linear history** | branch from `46c77ff^` + `cherry-pick` every commit above it | tree **identical** to V1 | no `revert` in the log: preferable if the branch is published for node operators | requires a cherry-pick sequence (no conflict: only `cefabdd` touches code) |
+| **V1 — revert** (tree-equivalent) | `git revert 46c77ff` on the new code | 6 files (+10 / −432) + 1 revert commit | verified, trivial, removes dead code *and* the test | a `revert` commit in history (noise if the branch is public) |
+| **V2 — linear history** | branch from `46c77ff^` + `cherry-pick` every commit above it | tree **identical** to V1 | no `revert` in the log: preferable if the branch is published for node operators | requires a cherry-pick sequence (no conflict expected) |
 | **V3 — config entry only** | drop the `13330000` block from `config.history` | ~10 lines | minimal change; re-enabling the economy = putting one entry back | leaves dead code + an unused accumulator and **makes `test/supply-anchor.js` fail** (it must be deleted); a future merge from `new_econs` can reintroduce the entry with a silent conflict |
 
-In all three variants the golden rule holds: **the new economy is excluded in code only, never at runtime** (no env var disables it; no `allowedKeys` turns it off).
+In every variant the golden rule holds: **the new economy is excluded in code only, never at runtime** (no env var disables it; no `allowedKeys` turns it off).
 
 ---
 
@@ -154,14 +156,14 @@ git checkout v2.0.1                 # new code without econs, with /version + re
 
 `v2.0.0` stays valid for provenance; every operator path in this document uses `v2.0.1`.
 
-Building the branch yourself (how the tag was produced — kept for the record):
+Building the branch yourself — **not required for the migration** (audit trail, kept for the record: the tag already *is* this tree):
 
 Variant **V1** (verified clean):
 
 ```bash
 cd /path/avalon
 git fetch --all
-git log --oneline -5 new_econs        # expected: everything above cefabdd is non-consensus (docs, deps, /version, 2.0.x)
+git log --oneline -5 new_econs        # orientation: docs, deps, /version, releases and the v2.0.1 review fixes above cefabdd
 git checkout -b new_net_noecons new_econs
 git revert --no-commit 46c77ff        # no conflicts, no manual intervention
 git status --short                    # expected: 5 M + D test/supply-anchor.js
@@ -174,17 +176,16 @@ Variant **V2** (same tree, linear history):
 ```bash
 git checkout -b new_net_noecons 46c77ff^   # = 9774aca
 git cherry-pick 46c77ff..new_econs         # every commit above the econs one:
-                                           # only cefabdd touches code; everything
-                                           # above is non-consensus (docs, deps, /version, release)
+                                           # docs, deps, /version, releases and the
+                                           # v2.0.1 review fixes (no conflict expected)
 ```
 
 Equivalence check (any variant — also confirms the tag):
 
 ```bash
-# it must show ONLY the 6 economy files: that means your branch = new code − econs
-# (doc/ revisions may also appear if new_econs is newer than the tag — doc-only;
-#  the src/test/scripts diff must be exactly those 6 files)
-git diff new_econs v2.0.1 --stat    # or new_net_noecons if you built it yourself
+# expected: exactly the 6 economy files — the tag/branch = new code − econs
+# (scoped to code on purpose: doc/ revisions may legitimately differ)
+git diff new_econs v2.0.1 --stat -- src test scripts   # or your new_net_noecons branch
 ```
 
 ### S2 — Static, offline verification ⚠️
@@ -255,7 +256,7 @@ Docker: `docker/docker-compose.yml` lost `version:` and now passes `HTTP_HOST=0.
 
 Before touching mainnet, reproduce the migration on `docker/testnet` (3 miners + bootstrap, ports 3101-3104 / 6101-6104):
 
-1. build the `new_net_noecons` branch (`docker compose build`);
+1. checkout the release tag and build (`git checkout v2.0.1 && docker compose build`);
 2. chain from scratch: verify that blocks are produced and that `Hard Fork #13330000` **never appears** in the logs;
 3. **determinism test**: full rebuild from genesis on the new-code-without-economy and compare around a hundred block hashes with a `new_net` node → they must match (validators changed, R2);
 4. force-finalization test (two near-simultaneous `/mineBlock` on different miners);
@@ -341,7 +342,7 @@ Plus, on the control node: rebuild from genesis → same head **and same hash** 
 
 ## 6. Definition of done
 
-- [ ] Branch `new_net_noecons` built (V1 or V2) and `git diff new_econs <branch> --stat` shows **only** the 6 economy files
+- [ ] Tag checked out on every node (`git checkout v2.0.1`) and `git diff new_econs v2.0.1 --stat -- src test scripts` shows **only** the 6 economy files
 - [ ] Residue `grep` and the S2 config one-liner → expected outcome (no econs keys, `pool: 150001`, `FF@13925000: true`, `sigVer: 2`)
 - [ ] `npm run lint` + `test/audit-fixes.js` + `test/force-finalize.js` green as per baseline
 - [ ] Node ≥ 24 on all nodes and in the Docker images
@@ -364,7 +365,7 @@ Hands-on time per step, estimated against the real node layout (mainnet: `blocks
 | Step | Hands-on | Basis |
 |---|---|---|
 | **S0 pre-flight** | **~15 min** | blocks.bson/index copy ≈ 1–2 min (4.3 GB local disk / 1 Gbit), `mongodump` 2.7 GB ≈ 2–3 min, git/env/key snapshots ~5 min |
-| **S1 no-economics branch** | **~5 min** | `revert --no-commit`, status/diff, commit |
+| **S1 release checkout** | **~1 min** | `git checkout v2.0.1` (tag already certified; the self-build variants are audit-only) |
 | **S2 static verification** | **~10–15 min** | `npm ci` 1–5 min (warm cache), greps + config one-liner + lint + 2 test suites |
 | **S3 config/proxy** | **~30 min per node** | `.env` + new commented block in `start.sh` + nginx (`X-Forwarded-For`) + verification from outside |
 | **S4 testnet dry run** | **~1–2 h first run**, ~45 min on repeat | `docker compose build` 15–30 min first time; chain from scratch, determinism rebuild, force-finalization test |
@@ -383,7 +384,7 @@ Totals:
 
 ## Appendix A — What is in the new code (measured 2026-10-20)
 
-168 commits / 102 files / +5131 −801 measured at `cefabdd` (the code tip); at HEAD `d0ca532`: 177 commits / 105 files / +5591 −810 — everything above `cefabdd` is non-consensus (docs, javalon2 bump, `/version` endpoint, releases 2.0.0/2.0.1; the extra files vs `cefabdd` are the refreshed `doc/v1.5.2-upgrade.md`, this runbook and `src/http/version/`).
+168 commits / 102 files / +5131 −801 measured at `cefabdd` (the old code tip); at code tip `d0ca532`: 177 commits / 105 files / +5591 −810 — everything above `cefabdd` is non-consensus (docs, javalon2 bump, `/version` endpoint, releases 2.0.0/2.0.1; the extra files vs `cefabdd` are the refreshed `doc/v1.5.2-upgrade.md`, this runbook and `src/http/version/`).
 
 | Area | Examples |
 |---|---|
@@ -416,8 +417,8 @@ Totals:
 ## Appendix D — Quick commands
 
 ```bash
-# Does my branch really exclude the economy?  (expected: 6 files)
-git diff new_econs HEAD --stat
+# Does my checkout really exclude the economy?  (expected: exactly the 6 files)
+git diff new_econs HEAD --stat -- src test scripts
 
 # Any residue?  (src/test/scripts only — see S2 for why doc/ is excluded)
 grep -rn "rewardPoolYearlyRate\|vtReferenceTotal\|initialSupplyBlock\|totalSupplyUnits" src test scripts

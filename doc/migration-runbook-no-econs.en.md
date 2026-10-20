@@ -4,7 +4,7 @@
 **Date**: 18 October 2026
 **Last verified**: 20 October 2026 — every check below was re-run on HEAD `04ad87b` (the two commits above it, `/version` endpoint + release 2.0.0, touch no consensus code), and the network state was re-measured (head unchanged)
 **From**: branch `new_net` (the code line the current network runs on, today halted)
-**To**: the new code = `new_econs` HEAD `dcfe8b4` (=`cefabdd` plus the non-consensus commits above it: docs, javalon2 bump, `/version` endpoint, release 2.0.0), **minus** commit `46c77ff` (the economic hard fork)
+**To**: the new code = tag **`v2.0.0`** on `feat/auto-force-finalize` (= `new_econs` HEAD `dcfe8b4` minus commit `46c77ff`; the tag tree was verified identical to the V1 revert below, 2026-10-20)
 **Companion**: `doc/economics_fork_13330000.md` (what the new economy does, in detail)
 
 Checks performed for this runbook (in a throwaway worktree; re-run on 20 October 2026 on HEAD `04ad87b`, whose `src`/`test` are identical to `cefabdd`):
@@ -136,7 +136,17 @@ nginx -v 2>/dev/null; grep -rn "proxy_set_header\|proxy_pass" /etc/nginx/  # rev
 
 To record on the cutover sheet: head height, head block hash, **commit** currently in production, ports (`HTTP_PORT`, `P2P_PORT`), peer list, expected tolerance in minutes.
 
-### S1 — Build the branch without the economy 🔴
+### S1 — Get the no-economy branch 🔴
+
+**Recommended: use the release tag.** The verified no-econs tree is published as tag **`v2.0.0`** on branch `feat/auto-force-finalize` (tree verified identical to the V1 revert of `new_econs` `dcfe8b4` on 2026-10-20: 6 files, +10/−432, zero econs residue):
+
+```bash
+cd /path/avalon
+git fetch --all --tags
+git checkout v2.0.0                 # new code without econs, with /version and release 2.0.0
+```
+
+Building the branch yourself (how the tag was produced — kept for the record):
 
 Variant **V1** (verified clean):
 
@@ -156,15 +166,15 @@ Variant **V2** (same tree, linear history):
 ```bash
 git checkout -b new_net_noecons 46c77ff^   # = 9774aca
 git cherry-pick 46c77ff..new_econs         # every commit above the econs one:
-                                           # only cefabdd touches code, the two
-                                           # later commits are docs/deps-only
+                                           # only cefabdd touches code; everything
+                                           # above is non-consensus (docs, deps, /version, release)
 ```
 
-Equivalence check (useful in any variant):
+Equivalence check (any variant — also confirms the tag):
 
 ```bash
 # it must show ONLY the 6 economy files: that means your branch = new code − econs
-git diff new_econs new_net_noecons --stat
+git diff new_econs v2.0.0 --stat    # or new_net_noecons if you built it yourself
 ```
 
 ### S2 — Static, offline verification ⚠️
@@ -194,9 +204,8 @@ node test/audit-fixes.js          # expected: 19 passed, 0 failed
 node test/force-finalize.js       # expected: All tests passed
 # test/supply-anchor.js: it must NOT exist (the revert deletes it; in V3 delete it by hand)
 
-# 4. Once the gates are green, certify the commit as the release
-git tag -a v2.0.0 -m "release 2.0.0 (new code without econs)"
-git push origin v2.0.0           # from now on every operator runs: git checkout v2.0.0
+# 4. Confirm you are on the certified release tag
+git describe --tags              # expected: v2.0.0
 ```
 
 ### S3 — Config, environment, proxy 🔴
@@ -326,7 +335,7 @@ Plus, on the control node: rebuild from genesis → same head **and same hash** 
 - [ ] Residue `grep` and the S2 config one-liner → expected outcome (no econs keys, `pool: 150001`, `FF@13925000: true`, `sigVer: 2`)
 - [ ] `npm run lint` + `test/audit-fixes.js` + `test/force-finalize.js` green as per baseline
 - [ ] Node ≥ 24 on all nodes and in the Docker images
-- [ ] Tag `v2.0.0` pushed on the certified commit; `curl /version` returns `2.0.0` on every node
+- [ ] Every node on the certified tag (`git describe --tags` = `v2.0.0`); `curl /version` returns `2.0.0` on every node
 - [ ] `CORS_ORIGIN`, `HTTP_HOST`, `TRUST_PROXY`, `ADMIN_TOKEN`/`LOG_ADMIN_TOKEN` set and verified **from outside the local network**
 - [ ] New env vars declared in `scripts/start.sh` (commented block) so operators can discover them
 - [ ] Testnet dry run: rebuild from genesis with matching hashes + force-finalization tested

@@ -25,7 +25,7 @@ module.exports = {
          * @apiSuccess {String} [pub_leader] Leader signing public key of account
          */
         app.get('/account/:name', (req, res) => {
-            if (!validate.string(req.params.name, config.accountMaxLength, config.accountMinLength, config.allowedUsernameChars)) {
+            if (!validate.string(req.params.name, config.accountMaxLength, config.accountMinLength, config.allowedUsernameChars, config.allowedUsernameCharsOnlyMiddle)) {
                 res.sendStatus(404)
                 return
             }

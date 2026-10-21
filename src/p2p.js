@@ -215,7 +215,17 @@ let p2p = {
                 ws.msgCount = 0
             }
             ws.msgCount++
-            if (ws.msgCount > msg_rate_max) {
+            // During active catch-up, be more permissive: bootstrap/miners may
+            // stream blocks in quick succession (QUERY_BLOCK/BLOCK)
+            let limit = msg_rate_max
+            if (p2p.recovering && (t === MessageType.NEW_BLOCK)) {
+                limit = 150
+            } else if (p2p.recovering && t === MessageType.QUERY_BLOCK) {
+                limit = 120
+            } else if (p2p.recovering && t === MessageType.BLOCK) {
+                limit = 150
+            }
+            if (ws.msgCount > limit) {
                 logr.warn('P2P message rate limit exceeded, disconnecting peer')
                 return true
             }
@@ -468,7 +478,8 @@ let p2p = {
     },
     recover: () => {
         if (!p2p.sockets || p2p.sockets.length === 0) return
-        if (Object.keys(p2p.recoveredBlocks).length + p2p.recoveringBlocks.length > max_blocks_buffer) return
+        if (p2p._recoverTicking) return
+        if (Object.keys(p2p.recoveredBlocks || {}).length + (p2p.recoveringBlocks || []).length > max_blocks_buffer) return
         if (!p2p.recovering) p2p.recovering = chain.getLatestBlock()._id
         
         let peersAhead = []
@@ -487,12 +498,23 @@ let p2p = {
         let champions = peersAhead.slice(0, Math.min(3, peersAhead.length))
         let champion = champions[0]
         if (p2p.recovering+1 <= champion.node_status.head_block) {
-            p2p.recovering++
-            for (let i = 0; i < champions.length; i++)
-                p2p.sendJSON(champions[i], {t: MessageType.QUERY_BLOCK, d:p2p.recovering})
-            p2p.recoveringBlocks.push(p2p.recovering)
-            logr.debug('query block #'+p2p.recovering+' -- head block: '+champion.node_status.head_block)
-            if (p2p.recovering%2) p2p.recover()
+            p2p._recoverTicking = true
+            const next = p2p.recovering + 1
+            p2p.recovering = next
+            // Space requests to avoid tripping the per-socket rate limit
+            champions.forEach((ch, idx) => {
+                setTimeout(() => {
+                    try { p2p.sendJSON(ch, {t: MessageType.QUERY_BLOCK, d: next}) } catch(e){}
+                }, idx * 25)
+            })
+            if (!p2p.recoveringBlocks) p2p.recoveringBlocks = []
+            if (!p2p.recoveredBlocks) p2p.recoveredBlocks = {}
+            p2p.recoveringBlocks.push(next)
+            logr.debug('query block #'+next+' -- head block: '+champion.node_status.head_block)
+            setTimeout(() => {
+                p2p._recoverTicking = false
+                p2p.recover()
+            }, 80)
         }
     },
     refresh: (force = false) => {
@@ -516,6 +538,16 @@ let p2p = {
         if (idx !== -1)
             p2p.sockets.splice(idx, 1)
         logr.debug('a peer disconnected, '+p2p.sockets.length+' peers left')
+        // If we were catching up and lost peers, reset recovery state so
+        // p2p.refresh() can retry automatically instead of getting stuck.
+        if (p2p.recovering) {
+            if (p2p.sockets.length === 0) {
+                logr.debug('Lost all peers while recovering, resetting recovery state')
+                p2p.recovering = false
+                p2p.recoveringBlocks = []
+                p2p.recoveredBlocks = {}
+            }
+        }
     },
     recordBlockFailure: (blockHash) => {
         const entry = p2p.blockSenders[blockHash]

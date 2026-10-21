@@ -215,17 +215,7 @@ let p2p = {
                 ws.msgCount = 0
             }
             ws.msgCount++
-            // During active catch-up, be more permissive: bootstrap/miners may
-            // stream blocks in quick succession (QUERY_BLOCK/BLOCK)
-            let limit = msg_rate_max
-            if (p2p.recovering && (t === MessageType.NEW_BLOCK)) {
-                limit = 150
-            } else if (p2p.recovering && t === MessageType.QUERY_BLOCK) {
-                limit = 120
-            } else if (p2p.recovering && t === MessageType.BLOCK) {
-                limit = 150
-            }
-            if (ws.msgCount > limit) {
+            if (ws.msgCount > msg_rate_max) {
                 logr.warn('P2P message rate limit exceeded, disconnecting peer')
                 return true
             }

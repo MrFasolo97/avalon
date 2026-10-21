@@ -1,6 +1,6 @@
 # Avalon Mainnet Deployment & Rollback Plan (No-Econs Migration)
 
-**Target Release:** `v2.0.2` (branch `feat/auto-force-finalize`, tag `v2.0.2`)  
+**Target Release:** `v2.0.3` (branch `feat/auto-force-finalize`, tag `v2.0.3`)  
 **Migration Type:** Code migration from `new_net` to no-economy codebase (fork #13330000 not activated)  
 **Safety Level:** CRITICAL - Production Mainnet  
 **Last Updated:** 2026-10-21
@@ -15,7 +15,7 @@
 
 1. [Pre-Flight Checklist](#pre-flight-checklist)
 2. [Backup Strategy (CRITICAL)](#backup-strategy-critical)
-3. [P2P Catchup Fix (v2.0.2-hotfix)](#p2p-catchup-fix-v202-hotfix)
+3. [P2P Catchup Fix (v2.0.3-hotfix)](#p2p-catchup-fix-v203-hotfix)
 4. [Deployment Procedure](#deployment-procedure)
 5. [Post-Deployment Verification](#post-deployment-verification)
 6. [Rollback Procedure (Full Rollback)](#rollback-procedure-full-rollback)
@@ -36,7 +36,7 @@
 
 ### 1.2 Code Preparation
 - [ ] Merge PR #2 (`feat/auto-force-finalize`) to target branch
-- [ ] Tag released as `v2.0.2` (or new tag if hotfix applied)
+- [ ] Tag released as `v2.0.3`
 - [ ] Apply P2P catchup fixes if not already included (see section 3)
 - [ ] Build Docker images for all node types
 - [ ] Verify no `Hard Fork #13330000` references in logs/config
@@ -71,7 +71,7 @@ docker exec <MONGO_CONTAINER> mongodump --archive --gzip > $BACKUP_DIR/mongo-ful
 
 # Verify backup
 ls -lh $BACKUP_DIR/
-mongorestore --dryRun --archive < $BACKUP_DIR/mongo-full.archive.gz 2>&1 | tail -5
+mongorestore --dryRun --archive --gzip < $BACKUP_DIR/mongo-full.archive.gz 2>&1 | tail -5
 ```
 
 ### 2.2 Git Repository Backup
@@ -124,7 +124,7 @@ echo "BACKUP_HASH=$(sha256sum $BACKUP_DIR/mongo-full.archive.gz | awk '{print $1
 
 ---
 
-## 3. P2P Catchup Fix (v2.0.2-hotfix)
+## 3. P2P Catchup Fix (v2.0.3-hotfix)
 
 As discovered in S4 dry-run, the new anti-DoS rate limiter can prevent stuck nodes from auto-recovering. Apply these fixes before deployment.
 
@@ -291,17 +291,7 @@ systemctl status mongod || docker ps | grep mongo
 ```bash
 # On each node
 for node in leader1 leader2 leader3 leader4; do
-  ssh $node << 'EOF'
-    cd /path/to/avalon
-    git fetch --all --tags
-    git checkout v2.0.2  # or new tag with hotfix
-    git log -1 --oneline
-    
-    # Build/rebuild
-    npm install  # if needed
-    docker build -t avalon:$(git rev-parse --short HEAD) . || true
-    docker-compose build || true
-  EOF
+  ssh $node "cd /path/to/avalon && git fetch --all --tags && git checkout v2.0.3 && git log -1 --oneline && npm install && docker build -t avalon:\$(git rev-parse --short HEAD) . || true && docker-compose build || true"
 done
 ```
 
@@ -315,16 +305,7 @@ COMMIT=$(git rev-parse --short HEAD)
 echo "[$(date)] Starting all nodes with commit $COMMIT" | tee -a /var/log/avalon-cutover.log
 
 for node in leader1 leader2 leader3 leader4; do
-  ssh $node << EOF &
-    cd /path/to/avalon
-    export HTTP_HOST=0.0.0.0
-    export CORS_ORIGIN='*'
-    export TRUST_PROXY=1
-    export LOG_LEVEL=cons
-    # Add your env vars
-    nohup ./scripts/start.sh > /var/log/avalon.log 2>&1 &
-    echo "Started on $HOSTNAME"
-EOF
+  ssh $node "cd /path/to/avalon && export HTTP_HOST=0.0.0.0 && export CORS_ORIGIN='*' && export TRUST_PROXY=1 && export LOG_LEVEL=cons && nohup ./scripts/start.sh > /var/log/avalon.log 2>&1 & echo Started" &
 done
 wait
 
@@ -359,7 +340,7 @@ for port in 3001 3002 3003 3004; do
   curl -s localhost:$port/version
   echo
 done
-# Expected: {"version":"2.0.2"} on ALL nodes
+# Expected: {"version":"2.0.3"} on ALL nodes
 
 # 2. Chain is advancing
 echo "=== ADVANCEMENT CHECK ==="
@@ -485,14 +466,7 @@ sleep 10
 
 ```bash
 for node in leader1 leader2 leader3 leader4; do
-  ssh $node << 'EOF'
-    cd /path/to/avalon
-    # Restore from git backup or checkout previous tag
-    git fetch --all --tags
-    git checkout <PREVIOUS_COMMIT_OR_TAG>  # e.g., previous release tag
-    # Or restore from tarball
-    # tar xzf /backup/.../avalon-repo.tar.gz -C /path/to/
-  EOF
+  ssh $node "cd /path/to/avalon && git fetch --all --tags && git checkout <PREVIOUS_COMMIT_OR_TAG>"
 done
 echo "[$(date)] Code restored to previous version" | tee -a /var/log/avalon-rollback.log
 ```
@@ -501,11 +475,7 @@ echo "[$(date)] Code restored to previous version" | tee -a /var/log/avalon-roll
 
 ```bash
 for node in leader1 leader2 leader3 leader4; do
-  ssh $node << 'EOF'
-    cd /path/to/avalon
-    cp $BACKUP_LOC/config.js.backup ./config.js 2>/dev/null
-    cp $BACKUP_LOC/.env.backup ./.env 2>/dev/null
-  EOF
+  ssh $node "BACKUP_LOC=$BACKUP_LOC && cd /path/to/avalon && cp \$BACKUP_LOC/config.js.backup ./config.js 2>/dev/null && cp \$BACKUP_LOC/.env.backup ./.env 2>/dev/null"
 done
 ```
 
@@ -513,11 +483,7 @@ done
 
 ```bash
 for node in leader1 leader2 leader3 leader4; do
-  ssh $node << EOF &
-    cd /path/to/avalon
-    export HTTP_HOST=0.0.0.0
-    nohup ./scripts/start.sh > /var/log/avalon.log 2>&1 &
-EOF
+  ssh $node "cd /path/to/avalon && export HTTP_HOST=0.0.0.0 && nohup ./scripts/start.sh > /var/log/avalon.log 2>&1 &" &
 done
 wait
 echo "[$(date)] Nodes restarted with restored version" | tee -a /var/log/avalon-rollback.log
@@ -675,7 +641,7 @@ Copy this for each cutover:
 - [Migration Runbook (EN)](./migration-runbook-no-econs.en.md)
 - [S4 Dry-Run Report](../../../../tmp/opencode/s4/S4-REPORT.md)
 - [PR #2](https://github.com/dtube/avalon/pull/2)
-- [Release v2.0.2](https://github.com/dtube/avalon/releases/tag/v2.0.2)
+- [Release v2.0.3](https://github.com/dtube/avalon/releases/tag/v2.0.3)
 
 ---
 

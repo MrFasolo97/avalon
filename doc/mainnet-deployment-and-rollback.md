@@ -1,7 +1,8 @@
-# Avalon Mainnet Deployment & Rollback Plan (No-Econs Migration)
+# Avalon Mainnet Deployment & Rollback Plan (Code Upgrade without enabling Economy Fork #13330000)
 
 **Target Release:** `v2.0.3` (branch `feat/auto-force-finalize`, tag `v2.0.3`)  
-**Migration Type:** Code migration from `new_net` to no-economy codebase (fork #13330000 not activated)  
+**Migration Type:** Code upgrade from `new_net` to the refactored codebase without activating Hard Fork #13330000  
+**Economy:** Existing economy remains fully intact (no changes to DTC balances, fees, rewards, or economic parameters)  
 **Safety Level:** CRITICAL - Production Mainnet  
 **Last Updated:** 2026-10-21
 
@@ -638,7 +639,7 @@ Copy this for each cutover:
 
 ### 8.4 References
 
-- [Migration Runbook (EN)](./migration-runbook-no-econs.en.md)
+- [Migration Runbook (EN)](./migration-runbook-no-econs.en.md)  _(upgrade without enabling Economy Fork #13330000)_
 - [S4 Dry-Run Report](../../../../tmp/opencode/s4/S4-REPORT.md)
 - [PR #2](https://github.com/dtube/avalon/pull/2)
 - [Release v2.0.3](https://github.com/dtube/avalon/releases/tag/v2.0.3)

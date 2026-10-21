@@ -1,4 +1,6 @@
-# Migrating from `new_net` to the new code — without the new economy (fork #13330000)
+# Migrating from `new_net` to the new code — without enabling the Economy Fork #13330000
+
+> **Note:** This is a *code upgrade*, not an economy change. We are deploying the refactored Avalon codebase but **not enabling** the economy rules of Hard Fork #13330000. All existing DTC balances, fees, rewards, and economic parameters remain unchanged.
 
 **Type**: operational runbook
 **Date**: 18 October 2026

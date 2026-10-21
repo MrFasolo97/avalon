@@ -1,5 +1,3 @@
-const dao = require("../../dao")
-
 module.exports = {
     init: (app) => {
         app.get('/proposal/:id', async (req,res) => {
@@ -10,7 +8,8 @@ module.exports = {
             try {
                 proposal = await db.collection('proposals').findOne({_id: parseInt(id)})
             } catch (e) {
-                return res.status(500).send({error: e.toString()})
+                logr.error('proposal query failed', e)
+                return res.status(500).send({error: 'query failed'})
             }
             if (!proposal)
                 return res.status(404).send({error: 'proposal not found'})
@@ -29,7 +28,8 @@ module.exports = {
             try {
                 res.send(await db.collection('proposalVotes').find(query).toArray())
             } catch (e) {
-                return res.status(500).send({error: e.toString()})
+                logr.error('proposal votes query failed', e)
+                return res.status(500).send({error: 'query failed'})
             }
         })
 
@@ -42,7 +42,8 @@ module.exports = {
             try {
                 res.send(await db.collection('proposalVotes').find(query).toArray())
             } catch (e) {
-                return res.status(500).send({error: e.toString()})
+                logr.error('proposal votes by voter query failed', e)
+                return res.status(500).send({error: 'query failed'})
             }
         })
     }

@@ -27,8 +27,10 @@ module.exports = {
                 })
             else
                 db.collection('blocks').findOne({ 'txs.hash': req.params.txhash }, { projection: { txs: { $elemMatch: { hash: req.params.txhash}}}},(error,tx) => {
-                    if (error)
-                        res.status(500).send(error)
+                    if (error) {
+                        logr.error('transaction query failed', error)
+                        res.status(500).send({error: 'query failed'})
+                    }
                     else if (tx && tx.txs) {
                         let result = tx.txs[0]
                         result.includedInBlock = tx._id

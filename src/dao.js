@@ -48,8 +48,8 @@ let dao = {
                 return dao.fundRequestStatus.revisionRequired
             else if (proposal.reviewDeadline > ts)
                 return dao.fundRequestStatus.reviewInProgress
-        else
-            return dao.fundRequestStatus.proposalComplete
+            else
+                return dao.fundRequestStatus.proposalComplete
     },
     getFundRequestReviewThreshold: (proposal) => {
         let snapshotLength = proposal.leaderSnapshot.length
@@ -181,19 +181,19 @@ let dao = {
         for (let i in activeRequests) {
             cache.proposals[activeRequests[i]._id] = activeRequests[i]
             switch (activeRequests[i].status) {
-                case dao.fundRequestStatus.votingActive:
-                    dao.activeProposalIDs[activeRequests[i]._id] = activeRequests[i].votingEnds
-                    break
-                case dao.fundRequestStatus.fundingActive:
-                    dao.activeProposalIDs[activeRequests[i]._id] = activeRequests[i].fundingEnds
-                    break
-                case dao.fundRequestStatus.fundingSuccess:
-                case dao.fundRequestStatus.revisionRequired:
-                    dao.activeProposalIDs[activeRequests[i]._id] = activeRequests[i].deadline
-                    break
-                case dao.fundRequestStatus.reviewInProgress:
-                    dao.activeProposalIDs[activeRequests[i]._id] = activeRequests[i].reviewDeadline
-                    break
+            case dao.fundRequestStatus.votingActive:
+                dao.activeProposalIDs[activeRequests[i]._id] = activeRequests[i].votingEnds
+                break
+            case dao.fundRequestStatus.fundingActive:
+                dao.activeProposalIDs[activeRequests[i]._id] = activeRequests[i].fundingEnds
+                break
+            case dao.fundRequestStatus.fundingSuccess:
+            case dao.fundRequestStatus.revisionRequired:
+                dao.activeProposalIDs[activeRequests[i]._id] = activeRequests[i].deadline
+                break
+            case dao.fundRequestStatus.reviewInProgress:
+                dao.activeProposalIDs[activeRequests[i]._id] = activeRequests[i].reviewDeadline
+                break
             }
         }
     },
@@ -208,12 +208,12 @@ let dao = {
         for (let i in activeProposals) {
             cache.proposals[activeProposals[i]._id] = activeProposals[i]
             switch (activeProposals[i].status) {
-                case dao.chainUpdateStatus.votingActive:
-                    dao.activeProposalIDs[activeProposals[i]._id] = activeProposals[i].votingEnds
-                    break
-                case dao.chainUpdateStatus.votingSuccess:
-                    dao.activeProposalIDs[activeProposals[i]._id] = activeProposals[i].executionTs
-                    break
+            case dao.chainUpdateStatus.votingActive:
+                dao.activeProposalIDs[activeProposals[i]._id] = activeProposals[i].votingEnds
+                break
+            case dao.chainUpdateStatus.votingSuccess:
+                dao.activeProposalIDs[activeProposals[i]._id] = activeProposals[i].executionTs
+                break
             }
         }
     },

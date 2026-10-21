@@ -11,7 +11,7 @@ module.exports = {
         if (vpCheck.needs)
             return cb(false, 'not enough VP, attempting to spend '+tx.data.amount+' VP but only has '+vpCheck.has+' VP')
         cache.findOne('accounts', {name: tx.data.receiver}, function(err, account) {
-            if (err) throw err
+            if (err) { logr.error('transferVt error', err); return cb(false, 'internal error') }
             if (!account) cb(false, 'invalid tx receiver does not exist')
             else cb(true)
         })
@@ -21,7 +21,7 @@ module.exports = {
         if (config.burnAccountIsBlackhole && tx.data.receiver === config.burnAccount)
             return cb(true)
         cache.findOne('accounts', {name: tx.data.receiver}, function(err, account) {
-            if (err) throw err
+            if (err) { logr.error('transferVt error', err); return cb(false, 'internal error') }
             account.vt.v += tx.data.amount
             cache.updateOne('accounts', {name: tx.data.receiver}, {$set: {vt: account.vt}}, function() {
                 cb(true)

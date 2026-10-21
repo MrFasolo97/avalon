@@ -17,10 +17,10 @@ module.exports = {
             db.collection('accounts').findOne({ name: req.params.name }, function (err, account) {
                 if (!account) res.sendStatus(404)
                 else
-                if (account.follows)
-                    res.send(account.follows)
-                else
-                    res.send([])
+                    if (account.follows)
+                        res.send(account.follows)
+                    else
+                        res.send([])
 
             })
         })

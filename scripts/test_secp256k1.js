@@ -1,7 +1,7 @@
 const randomBytes = require('randombytes')
 const secp256k1 = require('secp256k1')
 const bs58 = require('bs58')
-var CryptoJS = require('crypto-js')
+const crypto = require('crypto')
 const { performance } = require('perf_hooks')
 
 const iterations = parseInt(process.argv[2])
@@ -44,7 +44,7 @@ function sign(privKey, sender, tx) {
     // add timestamp to seed the hash (avoid transactions reuse)
     tx.ts = new Date().getTime()
     // hash the transaction
-    tx.hash = CryptoJS.SHA256(JSON.stringify(tx)).toString()
+    tx.hash = crypto.createHash('sha256').update(JSON.stringify(tx)).digest('hex')
     // sign the transaction
     var signature = secp256k1.ecdsaSign(Buffer.from(tx.hash, 'hex'), bs58.decode(privKey))
     tx.signature = bs58.encode(signature.signature)

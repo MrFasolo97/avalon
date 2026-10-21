@@ -17,8 +17,11 @@ let config = {
             b58Alphabet: '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz',
             // the block #0 genesis timestamp
             block0ts: 1601477849000,
-            // the block hash serialization revision
-            blockHashSerialization: 1,
+            // the block hash serialization revision (overridden below)
+            // the consensus message serialization version
+            // 1: insertion order (no sort) — legacy
+            // 2: sorted keys — prevents key-ordering mismatches
+            consensusSigVersion: 1,
             // the block time in ms
             blockTime: 3000,
             // the number of ms needed for 0.01 DTC to generate 1 byte of bw
@@ -51,7 +54,7 @@ let config = {
             // the maximum number of follows a single account can do
             followsMax: 2000,
             // F
-            hotfix1: false,
+            // overridden below
             // the max size of a stringified json input (content / user profile)
             // best if kept slightly lower than bwMax
             jsonMaxBytes: 60000,
@@ -85,8 +88,7 @@ let config = {
             masterNoPreloadAcc: true,
             // the maximum time drift in ms before a block is invalid
             maxDrift: 200,
-            // the maximum number of transactions in a single block
-            maxTxPerBlock: 20,
+            // the maximum number of transactions in a single block (overridden below)
             // the max length of a transfer memo
             memoMaxLength: 250,
             // defines how long it takes for a notification to get deleted, and how often the purge happens
@@ -174,35 +176,58 @@ let config = {
             preloadVt: 50, // 50% of vtPerBurn
             preloadBwGrowth: 2, // x2 more time of bwGrowth
             multisig: true,
+            // force finalize disabled in base config — enabled at hard fork height below
+            forceFinalize: false,
+            // force finalize fallback: if backoff is exhausted without quorum among
+            // active leaders, fallback to force finalizing anyway.
+            // WARNING: enabling fallback can create a permanent fork during network
+            // partitions. When false, the chain halts until quorum is reached — safer.
+            forceFinalizeFallback: false,
         },
+        // 241600: only txLimits change — matches existing new_net deploy
         241600: {
             txLimits: {
                 28: 0
             }
+        },
+        // Hard fork at ~13,925,000 (~3 weeks from block 13,320,067):
+        // - forceFinalize: enables anti-fork safety net if consensus stalls
+        // - consensusSigVersion: 2 (sorted keys) prevents key-ordering mismatches
+        13925000: {
+            forceFinalize: true,
+            consensusSigVersion: 2
         }
     },
     read: (blockNum) => {
         let finalConfig = {}
         let latestHf = 0
-        for (const key in config.history) 
+        const historyKeys = Object.keys(config.history).map(Number)
+        for (let hi = 0; hi < historyKeys.length; hi++) {
+            const key = historyKeys[hi]
             if (blockNum >= key) {
-                if (blockNum === parseInt(key) && blockNum !== 0)
+                if (blockNum === key && blockNum !== 0)
                     logr.info('Hard Fork #'+key)
                 Object.assign(finalConfig, config.history[key])
-                latestHf = parseInt(key)
-            }
-            else {
+                latestHf = key
+            } else {
                 if (config.history[key].ecoBlocks > finalConfig.ecoBlocks
                 && config.history[key].ecoBlocks - finalConfig.ecoBlocks >= key-blockNum)
                     finalConfig.ecoBlocksIncreasesSoon = config.history[key].ecoBlocks
                 
                 break
             }
+        }
         if (typeof cache !== 'undefined' && cache.state && cache.state[1]) {
             let govConfig = cache.state[1]
-            for (let k in govConfig)
-                if (k !== '_id' && govConfig[k].effectiveBlock >= latestHf)
-                    finalConfig[k] = govConfig[k].value
+            let allowedKeys = Object.values(config.history).flatMap(h => Object.keys(h))
+            allowedKeys.push('_id')
+            Object.keys(govConfig).forEach(k => {
+                const override = govConfig[k]
+                if (override && typeof override === 'object' && typeof override.effectiveBlock === 'number' && Object.prototype.hasOwnProperty.call(override, 'value')
+                    && override.effectiveBlock >= latestHf
+                    && allowedKeys.indexOf(k) !== -1)
+                    finalConfig[k] = override.value
+            })
         }
         
         return finalConfig

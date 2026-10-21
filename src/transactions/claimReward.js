@@ -20,7 +20,7 @@ module.exports = {
                     if (content.votes[i].claimed) {
                         cb(false, 'invalid tx reward already claimed'); return
                     }
-                    if (content.votes[i].claimable < 1) {
+                    if (typeof content.votes[i].claimable !== 'number' || content.votes[i].claimable < 1) {
                         cb(false, 'reward too low to be claimed'); return
                     }
                     if (ts - content.votes[i].ts < config.ecoClaimTime) {
@@ -36,6 +36,7 @@ module.exports = {
     },
     execute: (tx, ts, cb) => {
         cache.findOne('contents', {_id: tx.data.author+'/'+tx.data.link}, function(err, content) {
+            if (!content) return cb(false, 'content not found')
             for (let i = 0; i < content.votes.length; i++)
                 if (content.votes[i].u === tx.sender) {
                     let reward = Math.floor(content.votes[i].claimable)
@@ -53,7 +54,7 @@ module.exports = {
                                 _id: content.author+'/'+content.link+'/claim/'+tx.sender
                             }, function() {
                                 cache.findOne('accounts', {name: tx.sender}, function(err, curator) {
-                                    if (err) throw err
+                                    if (err) { logr.error('claimReward error', err); cb(false); return }
                                     // update his bandwidth
                                     curator.balance -= reward
                                     transaction.updateGrowInts(curator, ts, function() {

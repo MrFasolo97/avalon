@@ -1,5 +1,5 @@
-const CryptoJS = require('crypto-js')
-const { randomBytes } = require('crypto')
+const crypto = require('crypto')
+const { randomBytes } = crypto
 const secp256k1 = require('secp256k1')
 const bs58 = require('base-x')(config.b58Alphabet)
 const series = require('run-series')
@@ -13,7 +13,9 @@ const blocks = require('./blocks')
 const GrowInt = require('growint')
 const default_replay_output = 100
 const replay_output = process.env.REPLAY_OUTPUT || default_replay_output
-const skip_check_early_blocks = [3889058] // to be removed in case of a fork or new net.
+// Temporal check bypass for specific block heights during migrations/forks.
+// Set via env: SKIP_EARLY_CHECK_BLOCKS=3889058,4000000
+const skip_check_early_blocks = (process.env.SKIP_EARLY_CHECK_BLOCKS || '3889058').split(',').map(Number)
 const max_batch_blocks = 10000
 
 class Block {
@@ -70,6 +72,8 @@ let chain = {
         // grab all transactions and sort by ts
         let txs = []
         let mempool = transaction.pool.sort(function(a,b){return a.ts-b.ts})
+        const maxPerSender = Math.max(1, Math.floor(config.maxTxPerBlock / 10))
+        // pass 1: at most 1 tx per unique sender (fairness)
         loopOne:
         for (let i = 0; i < mempool.length; i++) {
             if (txs.length === config.maxTxPerBlock)
@@ -80,6 +84,8 @@ let chain = {
             txs.push(mempool[i])
         }
 
+        // pass 2: fill remaining slots with a per-sender cap
+        const senderCounts = {}
         loopTwo:
         for (let i = 0; i < mempool.length; i++) {
             if (txs.length === config.maxTxPerBlock)
@@ -87,6 +93,10 @@ let chain = {
             for (let y = 0; y < txs.length; y++)
                 if (txs[y].hash === mempool[i].hash)
                     continue loopTwo
+            const sender = mempool[i].sender || 'unknown'
+            senderCounts[sender] = (senderCounts[sender] || 0) + 1
+            if (senderCounts[sender] > maxPerSender)
+                continue loopTwo
             txs.push(mempool[i])
         }
         txs = txs.sort(function(a,b){return a.ts-b.ts})
@@ -153,6 +163,8 @@ let chain = {
 
                 possBlock[0].push(process.env.NODE_OWNER)
                 consensus.possBlocks.push(possBlock)
+                if (config.forceFinalize)
+                    consensus.scheduleForceFinalize()
                 consensus.endRound(0, newBlock)
                 cb(null, newBlock)
             })
@@ -162,9 +174,9 @@ let chain = {
         // when we receive an outside block and check whether we should add it to our chain or not
         if (chain.shuttingDown) return
         chain.isValidNewBlock(newBlock, revalidate, false, function(isValid) {
-            if (!isValid) {
+            if (!isValid) 
                 return cb(true, newBlock)
-            }
+            
             // straight execution
             chain.executeBlockTransactions(newBlock, revalidate, function(validTxs, distributed, burned) {
                 // if any transaction is wrong, thats a fatal error
@@ -210,7 +222,7 @@ let chain = {
         })
     },
     addRecentTxsInBlock: (txs = []) => {
-        for (let t in txs)
+        for (let t = 0; t < txs.length; t++)
             chain.recentTxs[txs[t].hash] = txs[t]
     },
     minerWorker: (block) => {
@@ -263,8 +275,12 @@ let chain = {
         // push cached accounts and contents to mongodb
         chain.cleanMemory()
 
-        // update the config if an update was scheduled
-        config = require('./config.js').read(block._id)
+        // update the config if an update was scheduled (remove stale keys)
+        const freshConfig = require('./config.js').read(block._id)
+        for (const k of Object.keys(config))
+            if (!(k in freshConfig))
+                delete config[k]
+        Object.assign(config, freshConfig)
         chain.applyHardforkPostBlock(block._id)
         eco.appendHistory(block)
         eco.nextBlock()
@@ -300,7 +316,8 @@ let chain = {
             if (rebuilding)
                 output += '/' + chain.restoredBlocks
             else
-                output += '  by '+block.miner
+                // eslint-disable-next-line no-control-regex
+                output += '  by '+(block.miner||'').replace(/[\x00-\x1f]/g, '')
 
             output += '  '+chain.nextOutput.txs+' tx'
             if (chain.nextOutput.txs>1)
@@ -342,81 +359,92 @@ let chain = {
     isValidSignature: (user, txType, hash, sign, cb) => {
         // verify signature and bandwidth
         cache.findOne('accounts', {name: user}, async function(err, account) {
-            if (err) throw err
-            if (!account) {
-                cb(false); return
-            } else if (chain.restoredBlocks && chain.getLatestBlock()._id < chain.restoredBlocks && process.env.REBUILD_NO_VERIFY === '1')
-                // no verify rebuild mode, only use if you trust the contents of blocks.zip
-                return cb(account)
-
-            // main key can authorize all transactions
-            let allowedPubKeys = [[account.pub, account.pub_weight || 1]]
-            let threshold = 1
-            // add all secondary keys having this transaction type as allowed keys
-            if (account.keys && typeof txType === 'number' && Number.isInteger(txType))
-                for (let i = 0; i < account.keys.length; i++) 
-                    if (account.keys[i].types.indexOf(txType) > -1)
-                        allowedPubKeys.push([account.keys[i].pub, account.keys[i].weight || 1])
-            // account authorities
-            if (account.auths && typeof txType === 'number' && Number.isInteger(txType))
-                for (let i in account.auths)
-                    if (account.auths[i].types.indexOf(txType) > -1) {
-                        let authorizedAcc = await cache.findOnePromise('accounts',{name: account.auths[i].user})
-                        if (authorizedAcc && authorizedAcc.keys)
-                            for (let a in authorizedAcc.keys)
-                                if (authorizedAcc.keys[a].id === account.auths[i].id) {
-                                    allowedPubKeys.push([authorizedAcc.keys[a].pub, account.auths[i].weight || 1])
-                                    break
-                                }
-                    }
-
-            // if there is no transaction type
-            // it means we are verifying a block signature
-            // so only the leader key is allowed
-            if (txType === null)
-                if (account.pub_leader)
-                    allowedPubKeys = [[account.pub_leader, 1]]
-                else
-                    allowedPubKeys = []
-            // compute required signature threshold otherwise
-            else if (account.thresholds && account.thresholds[txType])
-                threshold = account.thresholds[txType]
-            else if (account.thresholds && account.thresholds.default)
-                threshold = account.thresholds.default
-
-            // multisig transactions
-            if (config.multisig && Array.isArray(sign))
-                return chain.isValidMultisig(account,threshold,allowedPubKeys,hash,sign,cb)
-            
-            // single signature
             try {
-                for (let i = 0; i < allowedPubKeys.length; i++) {
-                    let bufferHash = Buffer.from(hash, 'hex')
-                    let b58sign = bs58.decode(sign)
-                    let b58pub = bs58.decode(allowedPubKeys[i][0])
-                    if (secp256k1.ecdsaVerify(b58sign, bufferHash, b58pub) && allowedPubKeys[i][1] >= threshold) {
-                        cb(account)
-                        return
+                if (err) throw err
+                if (!account) {
+                    cb(false); return
+                } else if (chain.restoredBlocks && chain.getLatestBlock()._id < chain.restoredBlocks && process.env.REBUILD_NO_VERIFY === '1')
+                // no verify rebuild mode, only use if you trust the contents of blocks.zip
+                    return cb(account)
+
+                // main key can authorize all transactions
+                let allowedPubKeys = [[account.pub, account.pub_weight || 1]]
+                let threshold = 1
+                // add all secondary keys having this transaction type as allowed keys
+                if (account.keys && typeof txType === 'number' && Number.isInteger(txType))
+                    for (let i = 0; i < account.keys.length; i++) 
+                        if (account.keys[i].types.indexOf(txType) > -1)
+                            allowedPubKeys.push([account.keys[i].pub, account.keys[i].weight || 1])
+                // account authorities
+                if (account.auths && Array.isArray(account.auths) && typeof txType === 'number' && Number.isInteger(txType))
+                    for (let i = 0; i < account.auths.length; i++)
+                        if (account.auths[i].types.indexOf(txType) > -1) {
+                            let authorizedAcc = await cache.findOnePromise('accounts',{name: account.auths[i].user})
+                            if (authorizedAcc && authorizedAcc.keys && Array.isArray(authorizedAcc.keys))
+                                for (let a = 0; a < authorizedAcc.keys.length; a++)
+                                    if (authorizedAcc.keys[a].id === account.auths[i].id) {
+                                        allowedPubKeys.push([authorizedAcc.keys[a].pub, account.auths[i].weight || 1])
+                                        break
+                                    }
+                        }
+
+                // if there is no transaction type
+                // it means we are verifying a block signature
+                // so only the leader key is allowed
+                if (txType === null)
+                    if (account.pub_leader)
+                        allowedPubKeys = [[account.pub_leader, 1]]
+                    else
+                        allowedPubKeys = []
+                // compute required signature threshold otherwise
+                else if (account.thresholds && account.thresholds[txType])
+                    threshold = account.thresholds[txType]
+                else if (account.thresholds && account.thresholds.default)
+                    threshold = account.thresholds.default
+
+                // multisig transactions
+                if (config.multisig && Array.isArray(sign))
+                    return chain.isValidMultisig(account,threshold,allowedPubKeys,hash,sign,cb)
+            
+                // single signature
+                try {
+                    for (let i = 0; i < allowedPubKeys.length; i++) {
+                        let bufferHash = Buffer.from(hash, 'hex')
+                        let b58sign = bs58.decode(sign)
+                        let b58pub = bs58.decode(allowedPubKeys[i][0])
+                        if (secp256k1.ecdsaVerify(b58sign, bufferHash, b58pub) && allowedPubKeys[i][1] >= threshold) {
+                            cb(account)
+                            return
+                        }
                     }
-                }
-            } catch (e) {}
-            cb(false)
+                } catch (e) {}
+                cb(false)
+            } catch (e) {
+                logr.error('Unhandled error in isValidSignature', e)
+                cb(false)
+            }
         })
     },
     isValidMultisig: (account,threshold,allowedPubKeys,hash,signatures,cb) => {
+        if (!Array.isArray(signatures) || signatures.length > 50) 
+            return cb(false, 'invalid signature count')
+        
         let validWeights = 0
-        let validSigs = []
+        let validSigSet = new Set()
         try {
+            let allowedPubSet = {}
+            for (let p = 0; p < allowedPubKeys.length; p++)
+                allowedPubSet[allowedPubKeys[p][0]] = true
             let hashBuf = Buffer.from(hash, 'hex')
             for (let s = 0; s < signatures.length; s++) {
                 let signBuf = bs58.decode(signatures[s][0])
                 let recoveredPub = bs58.encode(secp256k1.ecdsaRecover(signBuf,signatures[s][1],hashBuf))
-                if (validSigs.includes(recoveredPub))
-                    return cb(false, 'duplicate signatures found')
+                if (!allowedPubSet[recoveredPub] || validSigSet.has(recoveredPub))
+                    continue
                 for (let p = 0; p < allowedPubKeys.length; p++)
                     if (allowedPubKeys[p][0] === recoveredPub) {
                         validWeights += allowedPubKeys[p][1]
-                        validSigs.push(recoveredPub)
+                        validSigSet.add(recoveredPub)
                     }
             }
         } catch (e) {
@@ -536,7 +564,7 @@ let chain = {
         // to mine after (n+1)*blockTime as 'backups'
         // so that the network can keep going even if 1,2,3...n node(s) have issues
         else
-            for (let i = 1; i <= config.leaders; i++) {
+            for (let i = 1; i <= config.leaders; i++) 
                 if (chain.recentBlocks.length - i >= 0) {
                     if (!chain.recentBlocks[chain.recentBlocks.length - i])
                         break
@@ -545,7 +573,7 @@ let chain = {
                         break
                     }
                 }
-            }
+            
                 
 
         if (minerPriority === 0) {
@@ -554,7 +582,7 @@ let chain = {
         }
 
         // check if new block isnt too early
-        if (newBlock.timestamp - previousBlock.timestamp < minerPriority*config.blockTime && skip_check_early_blocks.indexOf(newBlock._id) == -1) {
+        if (newBlock.timestamp - previousBlock.timestamp < minerPriority*config.blockTime && skip_check_early_blocks.indexOf(newBlock._id) === -1) {
             logr.error('block too early for miner with priority #'+minerPriority)
             cb(false); return
         }
@@ -622,7 +650,6 @@ let chain = {
                             burned: burned
                         })
                     })
-                i++
             })
         executions.push((callback) => chain.applyHardfork(block,callback))
         
@@ -685,6 +712,9 @@ let chain = {
             y++
         }
 
+        // reset observer flag so nodes can re-evaluate their active status
+        consensus.observer = false
+
         return {
             block: block,
             shuffle: shuffledMiners
@@ -693,11 +723,12 @@ let chain = {
     generateLeaders: (withLeaderPub, withWs, limit, start) => {
         let leaders = []
         let leaderAccs = withLeaderPub ? cache.leaders : cache.accounts
-        for (const key in leaderAccs) {
-            if (!cache.accounts[key].node_appr || cache.accounts[key].node_appr <= 0)
-                continue
+        Object.keys(leaderAccs).forEach(key => {
+            if (!Object.prototype.hasOwnProperty.call(leaderAccs, key)) return
+            if (!cache.accounts[key] || !cache.accounts[key].node_appr || cache.accounts[key].node_appr <= 0)
+                return
             if (withLeaderPub && !cache.accounts[key].pub_leader)
-                continue
+                return
             let leader = cache.accounts[key]
             let leaderDetails = {
                 name: leader.name,
@@ -710,7 +741,7 @@ let chain = {
             if (withWs && leader.json && leader.json.node && typeof leader.json.node.ws === 'string')
                 leaderDetails.ws = leader.json.node.ws
             leaders.push(leaderDetails)
-        }
+        })
         leaders = leaders.sort(function(a,b) {
             return b.node_appr - a.node_appr
         })
@@ -788,7 +819,7 @@ let chain = {
                 delete clonedBlock.hash
                 delete clonedBlock.signature
             }
-            return CryptoJS.SHA256(JSON.stringify(deleteExisting ? clonedBlock : block)).toString()
+            return crypto.createHash('sha256').update(JSON.stringify(deleteExisting ? clonedBlock : block)).digest('hex')
         }
     },
     calculateHashV1: (index, phash, timestamp, txs, miner, missedBy, distributed, burned) => {
@@ -797,7 +828,7 @@ let chain = {
         if (distributed) string += distributed
         if (burned) string += burned
 
-        return CryptoJS.SHA256(string).toString()
+        return crypto.createHash('sha256').update(string).digest('hex')
     },    
     getLatestBlock: () => {
         return chain.recentBlocks[chain.recentBlocks.length-1]
@@ -813,6 +844,13 @@ let chain = {
     cleanMemoryBlocks: () => {
         if (config.ecoBlocksIncreasesSoon) {
             logr.trace('Keeping old blocks in memory because ecoBlocks is changing soon')
+            if (chain.recentBlocks.length > config.ecoBlocks * 2) {
+                let overflow = chain.recentBlocks.length - config.ecoBlocks * 2
+                while (overflow > 0) {
+                    chain.recentBlocks.shift()
+                    overflow--
+                }
+            }
             return
         }
             
@@ -823,9 +861,10 @@ let chain = {
         }
     },
     cleanMemoryTx: () => {
-        for (const hash in chain.recentTxs)
+        Object.keys(chain.recentTxs).forEach(hash => {
             if (chain.recentTxs[hash].ts + config.txExpirationTime < chain.getLatestBlock().timestamp)
                 delete chain.recentTxs[hash]
+        })
     },
     applyHardfork: (block,cb) => {
         // Do something on hardfork block after tx executions and before leader rewards distribution
@@ -889,9 +928,9 @@ let chain = {
                 if (!isValidBlock)
                     return cb(true, blockNum)
             }
-            chain.executeBlockTransactions(blockToRebuild,process.env.REBUILD_NO_VALIDATE !== '1',(validTxs,dist,burn) => {
+            chain.executeBlockTransactions(blockToRebuild,false,(validTxs,dist,burn) => {
                 // if any transaction is wrong, thats a fatal error
-                // transactions should have been verified in isValidNewBlock
+                // matching consensus validation: skip revalidation, trust miner
                 if (blockToRebuild.txs.length !== validTxs.length) {
                     logr.fatal('Invalid tx(s) in block found after starting execution')
                     return cb('Invalid tx(s) in block found after starting execution', blockNum)
@@ -908,7 +947,7 @@ let chain = {
                 
                 // update the config if an update was scheduled
                 chain.addRecentTxsInBlock(blockToRebuild.txs)
-                config = require('./config.js').read(blockToRebuild._id)
+                Object.assign(config, require('./config.js').read(blockToRebuild._id))
                 chain.applyHardforkPostBlock(blockToRebuild._id)
                 dao.nextBlock()
                 daoMaster.nextBlock()

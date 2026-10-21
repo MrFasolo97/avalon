@@ -17,7 +17,7 @@ module.exports = {
             if (!p)
                 return cb(false, 'playlist does not exist')
             let newContents = 0
-            for (let s in tx.data.seq) {
+            for (let s = 0; s < tx.data.seq.length; s++) {
                 if (!validate.array(tx.data.seq[s],2))
                     return cb(false, 'invalid playlist seq index #'+s+' array')
 
@@ -41,7 +41,7 @@ module.exports = {
     },
     execute: (tx, ts, cb) => {
         cache.findOne('playlists',{_id: tx.sender+'/'+tx.data.link},(e,p) => {
-            for (let s in tx.data.seq)
+            for (let s = 0; s < tx.data.seq.length; s++)
                 p.playlist[tx.data.seq[s][0]] = tx.data.seq[s][1]
             cache.updateOne('playlists',{_id: tx.sender+'/'+tx.data.link}, {
                 $set: { playlist: p.playlist }

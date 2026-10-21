@@ -1,4 +1,4 @@
-const dao = require("../../dao")
+const dao = require('../../dao')
 
 module.exports = {
     bsonValidate: true,
@@ -28,7 +28,7 @@ module.exports = {
             let status = dao.getFundRequestStatus(proposal,ts)
             if (status !== dao.fundRequestStatus.votingActive &&
                 status !== dao.fundRequestStatus.fundingActive)
-                    return cb(false, 'cannot edit inactive proposals or fund requests past its funding stage')
+                return cb(false, 'cannot edit inactive proposals or fund requests past its funding stage')
         } else if (proposal.type === dao.governanceTypes.chainUpdate) {
             let status = dao.getChainUpdateStatus(proposal,ts)
             if (status !== dao.chainUpdateStatus.votingActive)

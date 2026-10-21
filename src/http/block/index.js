@@ -22,17 +22,20 @@ module.exports = {
          */
         app.get('/block/:number', (req, res) => {
             let blockNumber = parseInt(req.params.number)
+            if (isNaN(blockNumber))
+                return res.status(400).send({error: 'invalid block number'})
             if (blocks.isOpen) {
                 let block = {}
                 try {
                     block = blocks.read(blockNumber)
                 } catch (e) {
-                    return res.status(404).send({error: e.toString()})
+                    logr.error('block read failed', e)
+                    return res.status(500).send({error: 'block read failed'})
                 }
                 return res.send(block)
             }
             db.collection('blocks').findOne({ _id: blockNumber }, function (err, block) {
-                if (err) throw err
+                if (err) { logr.error('block query failed', err); return res.status(500).send({error: 'query failed'}) }
                 if (!block) {
                     res.sendStatus(404)
                     return

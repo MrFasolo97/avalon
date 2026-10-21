@@ -16,6 +16,7 @@ module.exports = {
                 return
             }
             db.collection('notifications').find({ u: req.params.name }, { sort: { ts: -1 }, limit: 200 }).toArray(function (err, notifs) {
+                if (err) { logr.error('notifications query failed', err); return res.status(500).send({error: 'query failed'}) }
                 if (!notifs) res.sendStatus(404)
                 else res.send(notifs)
             })

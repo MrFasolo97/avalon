@@ -2,9 +2,9 @@
 // vt (can be negative but still non zero) 
 
 module.exports = (value, canBeZero, canBeNegative, max, min) => {
-    if (!max)
+    if (typeof max === 'undefined')
         max = Number.MAX_SAFE_INTEGER
-    if (!min)
+    if (typeof min === 'undefined')
         if (canBeNegative)
             min = Number.MIN_SAFE_INTEGER
         else

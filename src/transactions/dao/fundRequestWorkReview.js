@@ -29,7 +29,7 @@ module.exports = {
     execute: async (tx, ts, cb) => {
         let proposal = await cache.findOnePromise('proposals',{ _id: tx.data.id })
         let existingReviewIdx, existingApprove
-        for (let r in proposal.reviews)
+        for (let r = 0; r < proposal.reviews.length; r++)
             if (proposal.reviews[r].reviewer === tx.sender) {
                 existingReviewIdx = r
                 existingApprove = proposal.reviews[r].approve

@@ -24,8 +24,8 @@ RUN apt-get update && apt-get install -y -q --no-install-recommends \
 
 RUN apt-get -y update && apt-get install -y openssl vim tmux locales-all curl
 
-# Install nvm with node and npm
-RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && apt-get install -y nodejs
+# Install Node.js from NodeSource
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && apt-get install -y nodejs
 
 LABEL "project.home"="https://github.com/dtube/avalon"
 RUN cd / && git clone https://github.com/dtube/avalon

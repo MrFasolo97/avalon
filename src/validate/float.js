@@ -1,9 +1,9 @@
 // floating point
 
 module.exports = (value, canBeZero, canBeNegative, max, min) => {
-    if (!max)
+    if (typeof max === 'undefined')
         max = Math.pow(2,33)-1
-    if (!min)
+    if (typeof min === 'undefined')
         if (canBeNegative)
             min = -Math.pow(2,33)+1
         else
@@ -11,7 +11,7 @@ module.exports = (value, canBeZero, canBeNegative, max, min) => {
     
     if (typeof value !== 'number')
         return false
-    if (isNaN(value))
+    if (isNaN(value) || !isFinite(value))
         return false
     let parts = value.toString().split('.')
     if (parts.length > 2)

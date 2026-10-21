@@ -5,14 +5,13 @@ module.exports = {
          * @apiName blog
          * @apiGroup Contents
          * 
-         * @apiParam {String} username Username to retrieve blog of
-         * 
          * @apiSuccess {Array} contents List of root contents authored by username
          */
         app.get('/blog/:username', (req, res) => {
             let username = req.params.username
 
             db.collection('contents').find({ pa: null, author: username }, { sort: { ts: -1 }, limit: 50 }).toArray(function (err, contents) {
+                if (err) { logr.error('blog query failed', err); return res.status(500).send({error: 'query failed'}) }
                 res.send(contents)
             })
         })
@@ -32,6 +31,8 @@ module.exports = {
             let filterParam = req.params.filter
             let filter = filterParam.split(':')
             let filterBy = filter[1]
+            if (!filterBy)
+                return res.status(400).send({error: 'invalid filter'})
             let filterAttrs = filterBy.split('&')
 
             let filterMap = {}
@@ -49,8 +50,9 @@ module.exports = {
                     if (key === 'sortBy') 
                         filterMap['sortBy'] = val
                     else if (key === 'limit') {
-                        filterMap['limit'] = parseInt(val)
-                        limit = filterMap['limit']
+                        limit = parseInt(val)
+                        if (isNaN(limit) || limit < 1 || limit > 100)
+                            limit = 50
                     }
                 }
             }
@@ -60,12 +62,13 @@ module.exports = {
             else if (filterMap['sortBy'] === 'asc') 
                 ts = 1
             db.collection('contents').find({ pa: null, author: username }, { sort: { ts: ts }, limit: limit }).toArray(function (err, contents) {
+                if (err) { logr.error('blog filter query failed', err); return res.status(500).send({error: 'query failed'}) }
                 res.send(contents)
             })
         })
 
         /**
-         * @api {get} /blog/:username/:link User Blog (Continued)
+         * @api {get} /blog/:username/:author/:link User Blog (Continued)
          * @apiName blogContinued
          * @apiGroup Contents
          * 
@@ -94,6 +97,7 @@ module.exports = {
                         { ts: { $lte: content.ts } }
                     ]
                 }, { sort: { ts: -1 }, limit: 50 }).toArray(function (err, contents) {
+                    if (err) { logr.error('blog continued query failed', err); return res.status(500).send({error: 'query failed'}) }
                     res.send(contents)
                 })
             })

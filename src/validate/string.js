@@ -3,9 +3,9 @@
 // key identifier
 
 module.exports = (value, maxLength, minLength, allowedChars, allowedCharsMiddle) => {
-    if (!maxLength)
+    if (typeof maxLength === 'undefined')
         maxLength = Number.MAX_SAFE_INTEGER
-    if (!minLength)
+    if (typeof minLength === 'undefined')
         minLength = 0
     if (typeof value !== 'string')
         return false
@@ -18,7 +18,7 @@ module.exports = (value, maxLength, minLength, allowedChars, allowedCharsMiddle)
             if (allowedChars.indexOf(value[i]) === -1)
                 if (i === 0 || i === value.length-1)
                     return false
-                else if (allowedCharsMiddle && allowedCharsMiddle.indexOf(value[i]) === -1)
+                else if (!allowedCharsMiddle || allowedCharsMiddle.indexOf(value[i]) === -1)
                     return false
                     
     return true

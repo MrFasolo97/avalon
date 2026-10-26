@@ -3,6 +3,7 @@ const crypto = require('crypto')
 const bs58 = require('base-x')(config.b58Alphabet)
 const cloneDeep = require('clone-deep')
 const leaderHealth = require('./leaderHealth')
+const commitLockStore = require('./commitLockStore')
 // The 2/3 rule is now expressed by the adaptive quorum (plan §6.3):
 // q = min(quorumCap, max(quorumMin, E)) — see src/leaderHealth.js
 
@@ -26,7 +27,11 @@ let consensus = {
     // per-height commit lock: at most one hash per height is committed by this node
     // (see leaderHealth.commitDecision). `breakerOverride` is set for one height by a
     // haltBreaker recovery round and is the only way to commit a second hash.
+    // The lock is persisted so a crash + restart cannot cause double-signing.
     commitLocks: {},
+    loadCommitLocks: () => {
+        consensus.commitLocks = commitLockStore.load()
+    },
     breakerOverride: null,
     lockRefusals: 0,
     lockOverrides: 0,
@@ -205,6 +210,27 @@ let consensus = {
             && !consensus.finalizing 
             && possBlock.block._id === chain.getLatestBlock()._id+1
             && possBlock[0] && possBlock[0].indexOf(process.env.NODE_OWNER) !== -1) {
+                // per-height commit lock: do not finalise a second block at this height
+                if (config.commitLock) {
+                    const decision = leaderHealth.commitDecision(
+                        consensus.commitLocks, possBlock.block._id, possBlock.block, consensus.breakerOverride)
+                    if (!decision.allow) {
+                        consensus.lockRefusals++
+                        logr.warn('commit lock: refusing to finalise block ' + possBlock.block._id +
+                            '#' + String(possBlock.block.hash).substr(0, 8) + ' by ' + possBlock.block.miner +
+                            ', already committed ' + String(decision.lockedHash || '').substr(0, 8))
+                        continue
+                    }
+                    if (decision.overridden) {
+                        consensus.lockOverrides++
+                        logr.warn('commit lock: override by haltBreaker at height ' + possBlock.block._id +
+                            '#' + String(possBlock.block.hash).substr(0, 8) + ' by ' + possBlock.block.miner)
+                    }
+                    if (decision.lock) {
+                        consensus.commitLocks[possBlock.block._id] = { hash: possBlock.block.hash, miner: possBlock.block.miner }
+                        commitLockStore.append(possBlock.block._id, possBlock.block.hash, possBlock.block.miner)
+                    }
+                }
                 // block becomes valid, we can move forward !
                     consensus.finalizing = true
 
@@ -245,6 +271,7 @@ let consensus = {
                             for (const h of Object.keys(consensus.commitLocks))
                                 if (Number(h) <= possBlock.block._id)
                                     delete consensus.commitLocks[h]
+                            commitLockStore.cleanup(possBlock.block._id)
                             if (config.forceFinalize)
                                 consensus.cancelForceFinalize()
                         } catch (e) {
@@ -358,33 +385,13 @@ let consensus = {
                 }
             })
         } else {
-            // commit stage: at most one block per height (plan §6.4). Without the
-            // lock a node commits every candidate that reached a polka, so two blocks
-            // at the same height both carry the same signatures and only the
-            // deterministic tie-break (which requires seeing both) keeps the chain
-            // together. With the lock only a haltBreaker recovery round may override.
+            // commit stage: a node signs round 1 on every candidate whose round 0
+            // reached threshold. The actual per-height lock is acquired later, in
+            // tryNextStep, when a block is finalised; locking here would risk locking
+            // a losing candidate and then refusing the winner.
             for (let b = 0; b < consensus.possBlocks.length; b++)
                 if (consensus.possBlocks[b].block.hash === block.hash
                 && consensus.possBlocks[b][round].indexOf(process.env.NODE_OWNER) === -1) {
-                    if (config.commitLock) {
-                        const decision = leaderHealth.commitDecision(
-                            consensus.commitLocks, block._id, block, consensus.breakerOverride)
-                        if (!decision.allow) {
-                            consensus.lockRefusals++
-                            logr.warn('commit lock: refusing to commit block ' + block._id +
-                                '#' + String(block.hash).substr(0, 8) + ' by ' + block.miner +
-                                ', already committed ' + String(decision.lockedHash || '').substr(0, 8) +
-                                ' by ' + decision.lockedMiner)
-                            continue
-                        }
-                        if (decision.overridden) {
-                            consensus.lockOverrides++
-                            logr.warn('commit lock: override by haltBreaker at height ' + block._id +
-                                '#' + String(block.hash).substr(0, 8) + ' by ' + block.miner)
-                        }
-                        if (decision.lock)
-                            consensus.commitLocks[block._id] = { hash: block.hash, miner: block.miner }
-                    }
                     consensus.possBlocks[b][round].push(process.env.NODE_OWNER)
                     consensus.endRound(round, block)
                 }

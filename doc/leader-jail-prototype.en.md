@@ -19,23 +19,31 @@ jail slice described in `doc/consensus-offline-leaders-plan.en.md`.
   re-sent as a no-fee, idempotent heartbeat that clears the jail immediately.
 * **Halt breaker:** the only wall-clock element. If a block is produced but
   cannot gather the chain-derived quorum, the breaker finalises it after a
-  timeout provided the live eligible signers are 2 or more and at most 2 are
-  missing.
+  timeout provided the live eligible signers are a *majority* of the eligible
+  set (`floor(E/2)+1`), so two conflicting blocks at the same height cannot
+  both be finalised under a partition.
 * **Per-height commit lock:** a node commits at most one block per height; the
-  only override is an explicit halt-breaker recovery round. This prevents two
-  competing blocks at the same height from both gathering full quorums when
-  visibility is asymmetric.
+  only override is an explicit halt-breaker recovery round. The lock is
+  persisted to disk so a crash + restart cannot cause double-signing. This
+  prevents two competing blocks at the same height from both gathering full
+  quorums when visibility is asymmetric.
+* **Mainnet-like simulation harness** — `test/simulation.js` is a discrete-event
+  simulator that drives the real `src/leaderHealth.js` kernel with compressed
+  time (`blockTime=10 ms`, `N=30`, `J=200`, `leaderStandbys=5`).
 
 ## 2. Code map
 
 | file | role |
 |------|------|
-| `src/leaderHealth.js` | pure kernel: ladder, attestation, jail state, quorum, commit-lock decision |
+| `src/leaderHealth.js` | pure kernel: ladder, attestation, jail state, quorum, commit-lock decision, breaker threshold |
 | `src/chain.js` | `skips[]`, `jailState()`, `leaderLadder()`, `minerSchedule()`, `minerWorker()` re-anchor fix |
-| `src/consensus.js` | adaptive quorum, halt breaker, per-height commit lock |
+| `src/consensus.js` | adaptive quorum, halt breaker with majority threshold, per-height commit lock |
+| `src/commitLockStore.js` | persistent JSONL store for the per-height commit lock |
 | `src/config.js` | env-driven jail/quorum/commit-lock params in `history[0]` |
+| `src/main.js` | loads commit locks from disk before joining consensus |
 | `src/http/leaderhealth/index.js` | diagnostic endpoint `/leaderhealth` |
-| `test/leader-jail.js` | 25 pure-function unit tests |
+| `test/leader-jail.js` | 26 pure-function unit tests |
+| `test/simulation.js` | mainnet-like discrete-event simulator |
 | `docker/testnet/docker-compose.jail.yml` | isolated 5-node testnet |
 | `docker/testnet/scripts/jail-demo.sh` | driver for baseline/kill/observe/wake |
 

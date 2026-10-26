@@ -148,6 +148,8 @@ function startDaemon() {
     rankings.init()
     // start the http server
     http.init()
+    // load any commit locks from disk before joining consensus
+    consensus.loadCommitLocks()
     // start the websocket server
     p2p.init()
     // and connect to peers

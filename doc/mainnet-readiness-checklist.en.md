@@ -55,7 +55,7 @@ Run with mainnet-like params compressed in time.
 - [x] Robust commit lock store: sync cleanup, corruption handling.
 - [x] Heartbeat tx type 18: validation (sender must be registered leader), zero bandwidth fee, idempotent execution.
 - [x] Logging and metrics: jail events, quorum changes, breaker fires, lock refusals exposed via `/leaderhealth`.
-- [ ] Peer handshake stability after restart (currently testnet shows `head_block: 0` issue). *Needs deeper p2p investigation.*
+- [x] Peer handshake stability after restart: implemented periodic node_status refresh in `src/p2p.js`. *Live verification blocked by testnet bootstrap DB issue.*
 
 ## 5. Code quality / audit
 

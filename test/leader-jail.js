@@ -275,4 +275,52 @@ test('breaker threshold: majority of the eligible set', () => {
     assert.strictEqual(lh.breakerThreshold(6), 4)
 })
 
+// 8. edge cases ---------------------------------------------------------------
+test('edge case: E=1 quorum is the floor', () => {
+    const q = lh.quorumFor(['miner1'], lh.jailState([], {}), 1, { quorumMin: 3, quorumCap: 4 })
+    assert.strictEqual(q.E, 1)
+    assert.strictEqual(q.q, 3) // halts unless testnet carve-out
+})
+
+test('edge case: E=2 never reaches quorumMin=3', () => {
+    const q = lh.quorumFor(['miner1', 'miner2'], lh.jailState([], {}), 1, { quorumMin: 3, quorumCap: 4 })
+    assert.strictEqual(q.E, 2)
+    assert.strictEqual(q.q, 3)
+})
+
+test('edge case: all active leaders jailed leaves only standbys', () => {
+    const blocks = chainOf([
+        ['miner3', ['miner1']], ['miner2', ['miner1']], ['miner3', ['miner1']],
+        ['miner3', ['miner2']], ['miner1', ['miner2']], ['miner3', ['miner2']],
+    ])
+    const state = lh.jailState(blocks, { jailMissThreshold: 3, jailBlocks: 20, lookback: 100 })
+    assert.strictEqual(lh.isJailed(state, 'miner1', 6), true)
+    assert.strictEqual(lh.isJailed(state, 'miner2', 6), true)
+})
+
+// 9. commit lock store --------------------------------------------------------
+test('commit lock store: persists and reloads locks', () => {
+    const store = require('../src/commitLockStore')
+    const tmp = process.env.COMMIT_LOCK_DIR
+    const tmpOwner = process.env.NODE_OWNER
+    process.env.COMMIT_LOCK_DIR = '/tmp/opencode/avalon-jail-commit-test'
+    process.env.NODE_OWNER = 'testnode'
+    try {
+        // clean slate
+        try { require('fs').unlinkSync(store.filePath()) } catch (e) {}
+        store.append(10, 'hash10', 'miner1')
+        store.append(11, 'hash11', 'miner2')
+        const loaded = store.load()
+        assert.strictEqual(loaded[10].hash, 'hash10')
+        assert.strictEqual(loaded[11].miner, 'miner2')
+        store.cleanup(11, 0)
+        const cleaned = store.load()
+        assert.strictEqual(cleaned[10], undefined)
+        assert.strictEqual(cleaned[11].hash, 'hash11')
+    } finally {
+        process.env.COMMIT_LOCK_DIR = tmp
+        process.env.NODE_OWNER = tmpOwner
+    }
+})
+
 console.log('\n' + passed + ' tests passed')

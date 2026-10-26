@@ -390,7 +390,17 @@ function scenarioPartition22() {
     assert.strictEqual(sched.safetyViolations.length, 0, 'no safety violations in partition scenario')
 }
 
-// --- main --------------------------------------------------------------------
-scenarioHealthyAndKill()
-scenarioPartition22()
-console.log('\nSimulation completed successfully.')
+function runDefaultScenarios() {
+    scenarioHealthyAndKill()
+    scenarioPartition22()
+    console.log('\nSimulation completed successfully.')
+}
+
+module.exports = {
+    SimParams, allNodes, nodeAppr, Network, Node, Scheduler,
+    hashOf, clone,
+    scenarioHealthyAndKill, scenarioPartition22, runDefaultScenarios
+}
+
+if (require.main === module)
+    runDefaultScenarios()

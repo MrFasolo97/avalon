@@ -6,6 +6,12 @@
 //
 // Storage path: /avalon/config/testnet-keys/commit-locks-<NODE_OWNER>.jsonl
 // (uses the existing jail_config volume, but the file is per node).
+//
+// Design notes:
+//   * append-only JSONL for durability;
+//   * synchronous cleanup to avoid races with the event loop;
+//   * keep the last `keep` entries to bound file size;
+//   * corrupted lines are skipped but logged.
 
 const fs = require('fs')
 const path = require('path')
@@ -23,14 +29,16 @@ function load() {
     const locks = {}
     if (!fs.existsSync(f)) return locks
     const lines = fs.readFileSync(f, 'utf8').split('\n')
-    for (const line of lines) {
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]
         if (!line.trim()) continue
         try {
             const e = JSON.parse(line)
             if (e && typeof e.height === 'number' && e.hash)
                 locks[e.height] = { hash: e.hash, miner: e.miner || null }
         } catch (err) {
-            // skip corrupted line
+            // skip corrupted line but leave a trace
+            process.stderr.write('[commitLockStore] corrupted line ' + (i + 1) + ' in ' + f + '\n')
         }
     }
     return locks
@@ -47,25 +55,34 @@ function append(height, hash, miner) {
 function cleanup(finalizedHeight, keep = 1000) {
     const f = filePath()
     if (!fs.existsSync(f)) return
-    const tmp = f + '.tmp'
-    const out = fs.createWriteStream(tmp)
     const lines = fs.readFileSync(f, 'utf8').split('\n')
-    for (const line of lines) {
+    const kept = []
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]
         if (!line.trim()) continue
         try {
             const e = JSON.parse(line)
-            if (e.height >= finalizedHeight - keep) out.write(line + '\n')
-        } catch (err) {}
+            if (e.height >= finalizedHeight - keep)
+                kept.push(line)
+        } catch (err) {
+            process.stderr.write('[commitLockStore] corrupted line ' + (i + 1) + ' in ' + f + '\n')
+        }
     }
-    out.end()
-    // createWriteStream is async, but for a small file the event loop will drain
-    // quickly; rename on 'close' to be safe
-    out.on('close', () => {
-        try { fs.renameSync(tmp, f) } catch (e) {}
-    })
-    out.on('error', () => {
-        try { fs.unlinkSync(tmp) } catch (e) {}
-    })
+    const tmp = f + '.tmp'
+    fs.writeFileSync(tmp, kept.join('\n') + (kept.length ? '\n' : ''))
+    fs.renameSync(tmp, f)
 }
 
-module.exports = { load, append, cleanup, filePath }
+// Verify that the on-disk store is consistent with the in-memory locks.
+function verify(locks) {
+    const fromDisk = load()
+    for (const h of Object.keys(locks)) {
+        const disk = fromDisk[h]
+        const mem = locks[h]
+        if (!disk || disk.hash !== mem.hash)
+            throw new Error('commit lock mismatch at height ' + h + ': memory=' + mem.hash + ' disk=' + (disk && disk.hash))
+    }
+    return true
+}
+
+module.exports = { load, append, cleanup, verify, filePath }

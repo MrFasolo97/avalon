@@ -11,8 +11,8 @@
 # [dtube, miner1, miner2] and miner3/miner4 are the standby pool.
 
 x-jail-params: &jail-params
-  # rotation: 3 leaders (dtube + the 2 highest node_appr miners)
-  LEADERS_OVERRIDE: "3"
+  # rotation: 4 leaders (dtube + the 3 highest node_appr miners)
+  LEADERS_OVERRIDE: "4"
   # Testnet carve-out: at genesis the network has a *single* leader (dtube, the
   # master), so the floor must be allowed to reach 1 or block #1 can never be
   # finalised. On mainnet quorumMin stays 3 (there is no single-leader genesis).

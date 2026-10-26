@@ -266,4 +266,13 @@ test('commit lock: a candidate without hash is never committed', () => {
     assert.strictEqual(d.reason, 'no-candidate')
 })
 
+test('breaker threshold: majority of the eligible set', () => {
+    assert.strictEqual(lh.breakerThreshold(1), 1)
+    assert.strictEqual(lh.breakerThreshold(2), 2)
+    assert.strictEqual(lh.breakerThreshold(3), 2)
+    assert.strictEqual(lh.breakerThreshold(4), 3)
+    assert.strictEqual(lh.breakerThreshold(5), 3)
+    assert.strictEqual(lh.breakerThreshold(6), 4)
+})
+
 console.log('\n' + passed + ' tests passed')

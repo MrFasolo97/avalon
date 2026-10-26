@@ -246,6 +246,15 @@ function quorumSize(eligibleCount, overrides) {
     return Math.min(p.quorumCap, Math.max(p.quorumMin, eligibleCount))
 }
 
+// Majority threshold for the halt breaker. Any two majorities of the same set
+// intersect, so with a per-height commit lock a network partition cannot
+// finalise two different blocks at the same height: the intersection node would
+// have to commit both, which the lock forbids.
+function breakerThreshold(eligibleCount) {
+    if (eligibleCount <= 1) return eligibleCount
+    return Math.floor(eligibleCount / 2) + 1
+}
+
 function quorumFor(leaderNames, state, height, overrides) {
     const p = params(overrides)
     const eligible = eligibleLeaders(leaderNames, state, height)
@@ -304,4 +313,5 @@ module.exports = {
     quorumSize,
     quorumFor,
     commitDecision,
+    breakerThreshold,
 }

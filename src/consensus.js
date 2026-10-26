@@ -115,8 +115,9 @@ let consensus = {
     },
     // Recovery round (plan §6.3.1): the ONLY wall-clock element of the design. It
     // only changes *when* this node accepts an already produced block, never which
-    // block is valid. Requires the unanimity of the live eligible signers; if the
-    // missing signers are more than the tolerated 2, it halts instead of forking.
+    // block is valid. The breaker requires a *majority* of the eligible signers so
+    // that, together with the per-height commit lock, two conflicting blocks at the
+    // same height cannot both be finalised under a partition.
     _haltBreaker: (height) => {
         if (!config.haltBreaker || consensus.finalizing) return
         if (height !== chain.getLatestBlock()._id + 1) return
@@ -131,9 +132,12 @@ let consensus = {
         const q = consensus.leaderQuorum()
         const signers = (winner[0] || []).filter(n => q.eligible.indexOf(n) !== -1)
         const missing = q.eligible.length - signers.length
-        if (signers.length < 2 || missing < 1 || missing > 2) {
+        const minSigners = leaderHealth.breakerThreshold(q.eligible.length)
+        const maxMissing = q.eligible.length - minSigners
+        if (signers.length < minSigners || missing < 1 || missing > maxMissing) {
             logr.warn('haltBreaker: recovery not possible at height ' + height +
-                ' (signers=' + signers.length + ' eligible=' + q.eligible.length +
+                ' (signers=' + signers.length + '/' + q.eligible.length +
+                ' need>=' + minSigners + ' missing<=' + maxMissing +
                 '), halting instead of forking')
             return
         }

@@ -264,3 +264,72 @@ NO MISMATCHES: all 5 DBs agree on every block from 659 to 720
 Conclusion: under this partition the chain did **not fork**; the majority side
 kept finalising, the minority side halted, and after reconnection every node
 converged to the same history.
+
+## 10. The dangerous case: 2|2 partition with `E=4`
+
+With `quorumCap=4` and `E=4`, the normal quorum is `q=4`. The original breaker
+rule (`signers >= 2 && missing <= 2`) allows each half of a 2|2 partition to
+finalise a *different* block at the same height, producing a real chain split.
+
+### 10.1 Reproducing the split (old breaker rule)
+
+Test setup: `LEADERS_OVERRIDE=4`, `E=4`, `q=4`, `commitLock=true`.
+Partition: side A = `{dtube, miner1}`, side B = `{miner2, miner3}`, `miner4`
+isolated.
+
+After giving side B a `/mineBlock` kick, both sides produced independently:
+
+```
+Side A (avalon DB):   122 dtube, 123 miner1, 124 miner1, ...
+Side B (miner2 DB):   122 miner2 dtube, 123 miner2 miner1, 124 miner3, ...
+```
+
+The two sides had **different hashes at the same heights** (122-133). The commit
+lock prevented individual nodes from signing both candidates, but because the
+sides were disjoint there was no intersection node to stop them: each side had
+exactly 2 eligible signers, and the old breaker accepted 2-of-4.
+
+### 10.2 Fix: majority threshold in the breaker
+
+The breaker now requires a *majority* of the eligible set:
+
+```js
+breakerThreshold(E) = Math.floor(E / 2) + 1
+E=3 -> 2    E=4 -> 3    E=5 -> 3
+```
+
+Two majorities of the same set always intersect; with the per-height commit
+lock, the intersection node cannot commit two different blocks, so a partition
+cannot finalise conflicting blocks at the same height.
+
+### 10.3 Re-running the 2|2 test (fixed breaker)
+
+Same topology, new rule. Both sides logged:
+
+```
+haltBreaker: recovery not possible at height 122
+  (signers=2/4 need>=3 missing<=1), halting instead of forking
+```
+
+No block was produced beyond the common tip (121). After removing the iptables
+rules and reconnecting the nodes, the chain resumed from the same history:
+
+```
+NO MISMATCHES: all 5 DBs agree on every block from 122 to 150
+```
+
+### 10.4 Implications for the production design
+
+The production plan must use the majority breaker threshold, not a fixed
+"2 missing" rule. With `leaders=5`, `quorumCap=4`, `quorumMin=3`:
+
+| situation | E | normal q | breaker needs | behaviour |
+|---|---|---|---|---|
+| all healthy | 5 | 4 | 4 | finalises normally |
+| 1 leader missing | 5 | 4 | 3 | breaker finalises with 3 signers |
+| 2 leaders missing | 5 | 4 | 3 | breaker finalises with 3 signers |
+| 2|2 split after 1 jail | 4 | 4 | 3 | **both sides halt** — no fork |
+
+This preserves liveness for single/double failures while preventing a split in
+the worst partition case.
+

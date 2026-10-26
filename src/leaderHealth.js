@@ -25,6 +25,8 @@ const DEFAULTS = {
     heartbeatTxType: 18, // ENABLE_NODE, re-sent as a heartbeat
     lookback: 5000,
     standbyEnabled: false,
+    jailEnabled: true,
+    bootstrap: false,
 }
 
 function params(overrides = {}) {
@@ -171,6 +173,17 @@ function jailState(blocks, overrides) {
     let tip = 0
     let tipTs = 0
 
+    // Before H_S the legacy rules apply: no jail accounting, no streaks.
+    if (p.jailEnabled === false) {
+        for (let i = from; i < list.length; i++) {
+            const b = list[i]
+            if (!b) continue
+            tip = b._id
+            tipTs = b.timestamp
+        }
+        return { byName, tip, height: tip, timestamp: tipTs }
+    }
+
     for (let i = from; i < list.length; i++) {
         const b = list[i]
         if (!b) continue
@@ -240,9 +253,13 @@ function eligibleLeaders(leaderNames, state, height) {
     return out
 }
 
-// q = min(cap, max(quorumMin, E))
+// q = min(cap, max(quorumMin, E)).
+// Bootstrap carve-out: before H_S, if the active set is smaller than quorumMin,
+// require all eligible signers (e.g. single-leader genesis can still finalise).
 function quorumSize(eligibleCount, overrides) {
     const p = params(overrides)
+    if (p.bootstrap && eligibleCount < p.quorumMin)
+        return Math.max(1, eligibleCount)
     return Math.min(p.quorumCap, Math.max(p.quorumMin, eligibleCount))
 }
 

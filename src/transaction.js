@@ -235,9 +235,15 @@ let transaction = {
                 cb(false, 'error debug'); return
             }
 
+            // Heartbeat (ENABLE_NODE, type 18) is the wake-up envelope for a jailed
+            // leader. It must be free so a leader with zero bandwidth can still
+            // un-jail itself. Idempotency is handled by execution (sets pub_leader).
+            const isHeartbeat = tx.type === config.heartbeatTxType
+            const txSize = isHeartbeat ? 0 : Buffer.byteLength(JSON.stringify(tx), 'utf8')
+
             // checking if the user has enough bandwidth
-            if (Buffer.byteLength(JSON.stringify(tx), 'utf8') > newBw.v) {
-                cb(false, 'need more bandwidth ('+(Buffer.byteLength(JSON.stringify(tx), 'utf8')-newBw.v)+' B)'); return
+            if (txSize > newBw.v) {
+                cb(false, 'need more bandwidth ('+(txSize-newBw.v)+' B)'); return
             }
 
             // check transaction specifics

@@ -38,43 +38,56 @@ Run with mainnet-like params compressed in time.
 
 ## 3. Integration tests on isolated Docker testnet
 
-- [ ] 48h+ stable run with `LEADERS_OVERRIDE=3` (default prototype).
-- [ ] Kill a leader via `docker stop`, verify standby promotion after `N` misses.
-- [ ] Restart a jailed node and send heartbeat tx; verify un-jailing.
-- [ ] 2|2 partition via `iptables`/network namespaces.
+- [~] 48h+ stable run with `LEADERS_OVERRIDE=3` (default prototype). *Needs long-running environment; helper scripts created.*
+- [~] Kill a leader via `docker stop`, verify standby promotion after `N` misses. *Script `jail-kill.sh` created.*
+- [~] Restart a jailed node and send heartbeat tx; verify un-jailing. *Script `jail-restart.sh` created.*
+- [~] 2|2 partition via `iptables`/network namespaces. *Scripts `jail-partition.sh` / `jail-heal.sh` created.*
 - [ ] Upgrade test: start chain without jail, activate jail params, verify continuity.
-- [ ] Restart all nodes one by one; verify no fork and lock files reloaded.
+- [~] Restart all nodes one by one; verify no fork and lock files reloaded. *Persistent commit lock + jail index implemented; needs manual run.*
 
 ## 4. Productionization required before mainnet
 
-- [ ] Height-gated activation: implement `H_S`, `H_strict`, `H_standby` enforcement in code.
-- [ ] Remove testnet carve-outs:
-  - `QUORUM_MIN=1` fallback,
-  - env-only params that should be chain constants.
-- [ ] Persistent/checkpointed jail index (avoid full chain scan each block).
-- [x] Robust commit lock store: sync cleanup, corruption handling (atomic append via `appendFileSync`).
-- [~] Heartbeat tx type 18: validation, zero fee, idempotency (parsed by kernel; gateway wiring pending).
+- [x] Height-gated activation: `H_S`, `H_strict`, `H_standby` implemented in config + `healthParams()`.
+- [x] Remove testnet carve-outs:
+  - [x] `QUORUM_MIN=1` fallback replaced by bootstrap rule (`q = E` when `E < quorumMin` before `H_S`).
+  - [x] `SKIP_STRICT`/`STANDBY_ENABLED` env booleans replaced by height-gated flags.
+- [x] Persistent/checkpointed jail index (`src/jailIndex.js`, loaded in `main.js`).
+- [x] Robust commit lock store: sync cleanup, corruption handling.
+- [x] Heartbeat tx type 18: validation (sender must be registered leader), zero bandwidth fee, idempotent execution.
 - [x] Logging and metrics: jail events, quorum changes, breaker fires, lock refusals exposed via `/leaderhealth`.
-- [ ] Peer handshake stability after restart (currently testnet shows `head_block: 0` issue).
+- [ ] Peer handshake stability after restart (currently testnet shows `head_block: 0` issue). *Needs deeper p2p investigation.*
 
 ## 5. Code quality / audit
 
-- [ ] Document every new consensus invariant.
+- [x] Document every new consensus invariant (plan + prototype report + this checklist).
 - [ ] External audit of `leaderHealth.js`, `consensus.js`, `chain.js` changes.
-- [ ] Fuzz test the pure kernel with random inputs.
-- [ ] Property-based test: no two commits at same height without override.
+- [x] Fuzz test the pure kernel with random inputs (`test/fuzz.js`).
+- [x] Property-based test: no two commits at same height without override (`test/fuzz.js` + `test/leader-jail.js`).
 
 ## 6. Mainnet rollout plan
 
-- [ ] Choose activation height far in the future (`H_S` >> current height).
-- [ ] Release candidate with activation height hardcoded.
+- [x] Choose activation height far in the future (`H_S` >> current height). *Defaults set to planned flag-day heights in `config.js`; env override for testnet.*
+- [~] Release candidate with activation height hardcoded. *Code supports it; final RC pending.*
 - [ ] Validator communication and upgrade window.
 - [ ] Canary nodes monitoring jail events, quorum, block times.
-- [ ] Emergency rollback procedure documented.
+- [~] Emergency rollback procedure documented. *Rollback = new hard fork disabling jail via lower H_* heights; procedure in plan.*
 
 ---
 
 ## Current verdict
 
-**Status: NOT ready for mainnet.**
-Open blockers: items in §2 (long/chaos/partition sims), §4 (productionization), §5 (audit).
+**Status: STILL NOT ready for mainnet, but significantly closer.**
+
+Resolved in this pass:
+- height-gated activation,
+- removal of `QUORUM_MIN=1` and env-only booleans,
+- persistent jail index + commit lock store,
+- heartbeat validation/zero fee,
+- fuzz/property tests,
+- Docker helper scripts.
+
+Remaining hard blockers:
+- peer handshake stability after restart (§4),
+- 48h+ Docker integration run (§3),
+- external audit (excluded by request),
+- validator communication + canary rollout (§6).

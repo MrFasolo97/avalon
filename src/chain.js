@@ -10,6 +10,7 @@ const transaction = require('./transaction.js')
 const notifications = require('./notifications.js')
 const txHistory = require('./txHistory')
 const leaderHealth = require('./leaderHealth')
+const jailIndex = require('./jailIndex')
 const blocks = require('./blocks')
 const GrowInt = require('growint')
 const default_replay_output = 100
@@ -601,11 +602,12 @@ let chain = {
         // skip attestation (plan §5.3): Layer S warns, Layer H rejects.
         // Only checked on signed blocks (local pre-validation happens before the
         // producer fills skips in).
-        if (config.skipRecording && verifyHashAndSignature) {
+        const health = chain.healthParams(newBlock._id)
+        if (health.skipRecording !== false && verifyHashAndSignature) {
             const attestation = leaderHealth.attestation(newBlock, ladder)
             if (!attestation.ok) {
                 const detail = 'expected ' + JSON.stringify(attestation.expected) + ' got ' + JSON.stringify(attestation.got)
-                if (config.skipStrict) {
+                if (health.skipStrict) {
                     logr.error('invalid skip attestation for block ' + newBlock._id + ' by ' + newBlock.miner + ': ' + detail)
                     cb(false); return
                 }
@@ -714,28 +716,49 @@ let chain = {
             })
         })
     },
-    // consensus parameters of the offline-leader plan (prototype: no height gating)
-    healthParams: () => ({
-        leaders: config.leaders,
-        leaderStandbys: config.leaderStandbys,
-        jailMissThreshold: config.jailMissThreshold,
-        jailBlocks: config.jailBlocks,
-        jailBackoffMax: config.jailBackoffMax,
-        quorumMin: config.quorumMin,
-        quorumCap: config.quorumCap,
-        heartbeatTxType: config.heartbeatTxType,
-        lookback: config.leaderHealthLookback,
-        standbyEnabled: !!config.standbyEnabled,
-    }),
+    // consensus parameters of the offline-leader plan, height-gated for mainnet
+    healthParams: (height) => {
+        const h = height || chain.getLatestBlock()._id
+        return {
+            leaders: config.leaders,
+            leaderStandbys: config.leaderStandbys,
+            jailMissThreshold: config.jailMissThreshold,
+            jailBlocks: config.jailBlocks,
+            jailBackoffMax: config.jailBackoffMax,
+            quorumMin: config.quorumMin,
+            quorumCap: config.quorumCap,
+            heartbeatTxType: config.heartbeatTxType,
+            lookback: config.leaderHealthLookback,
+            skipStrict: h >= config.H_strict,
+            standbyEnabled: h >= config.H_standby,
+            jailEnabled: h >= config.H_S,
+            bootstrap: h < config.H_S,
+        }
+    },
     _jailCache: null,
-    jailState: () => {
-        const tip = chain.getLatestBlock()
-        const cacheKey = tip._id + ':' + chain.recentBlocks.length
+    jailState: (height) => {
+        const h = height || chain.getLatestBlock()._id
+        const cacheKey = h + ':' + chain.recentBlocks.length
         if (chain._jailCache && chain._jailCache.key === cacheKey)
             return chain._jailCache.state
-        const state = leaderHealth.jailState(chain.recentBlocks, chain.healthParams())
+        const state = leaderHealth.jailState(chain.recentBlocks, chain.healthParams(h))
         chain._jailCache = { key: cacheKey, state }
+        // persist the computed state so restarts do not re-scan the full window
+        const tip = chain.getLatestBlock()
+        if (tip && tip._id === h)
+            jailIndex.save(h, tip.hash, state)
         return state
+    },
+    loadJailIndex: () => {
+        const idx = jailIndex.load()
+        if (!idx) return
+        const tip = chain.getLatestBlock()
+        if (tip && tip._id === idx.tipHeight && tip.hash === idx.tipHash && idx.state) {
+            chain._jailCache = {
+                key: idx.tipHeight + ':' + chain.recentBlocks.length,
+                state: idx.state
+            }
+        }
     },
     // canonical turn ladder for a height (plan §3.1): scheduled leader, then the
     // most recent producers, then the standby pool when Layer H is enabled
@@ -754,7 +777,7 @@ let chain = {
         if (isNaN(rand)) rand = 0
         if (!p2p.recovering)
             logr.debug('Generating schedule... NRNG: ' + rand)
-        const params = chain.healthParams()
+        const params = chain.healthParams(block._id)
         // include the block that triggers the epoch so its skips are accounted
         const state = leaderHealth.jailState(chain.recentBlocks.concat([block]), params)
         const candidates = chain.generateLeaders(true, false, Number.MAX_SAFE_INTEGER, 0)

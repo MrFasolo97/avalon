@@ -13,11 +13,12 @@
 x-jail-params: &jail-params
   # rotation: 3 leaders (dtube + the 2 highest node_appr miners)
   LEADERS_OVERRIDE: "3"
-  # Testnet carve-out: at genesis the network has a *single* leader (dtube, the
-  # master), so the floor must be allowed to reach 1 or block #1 can never be
-  # finalised. On mainnet quorumMin stays 3 (there is no single-leader genesis).
-  # With E >= 2 the floor is irrelevant: q = min(4, max(1, E)) = E.
-  QUORUM_MIN: "1"
+  # On mainnet H_S/H_strict/H_standby are set to the planned flag-day heights.
+  # On the isolated testnet they are 0 so all layers are active from genesis.
+  H_S: "0"
+  H_STRICT: "0"
+  H_STANDBY: "0"
+  QUORUM_MIN: "3"
   QUORUM_CAP: "4"
   # demo-timed jail: 3 proven misses (~9 s) then 20 blocks (~60 s)
   JAIL_MISS_THRESHOLD: "3"
@@ -25,9 +26,6 @@ x-jail-params: &jail-params
   JAIL_BACKOFF_MAX: "4"
   # Layer H: standbys enter the rotation when a leader is jailed
   LEADER_STANDBYS: "2"
-  STANDBY_ENABLED: "1"
-  # Layer S: attestation is written and verified, mismatches only warn
-  SKIP_STRICT: "0"
   SKIP_GRACE_MS: "500"
   # the only wall-clock element: recovery round after 15 s without finality
   HALT_BREAKER: "1"

@@ -93,8 +93,9 @@ let consensus = {
                 const s = schedule.shuffle[i]
                 if (s && s.name && names.indexOf(s.name) === -1) names.push(s.name)
             }
-        return leaderHealth.quorumFor(names, chain.jailState(),
-            chain.getLatestBlock()._id, chain.healthParams())
+        const height = chain.getLatestBlock()._id + 1
+        return leaderHealth.quorumFor(names, chain.jailState(height),
+            height, chain.healthParams(height))
     },
     quorumThreshold: () => consensus.leaderQuorum().q,
     scheduleHaltBreaker: () => {

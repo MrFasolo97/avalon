@@ -202,17 +202,23 @@ let config = {
             // --- offline / unresponsive leaders (doc/consensus-offline-leaders-plan.en.md) ---
             // Layer S (soft fork): producers attest the turns they skipped, absence is
             // counted from the chain only, the quorum is jail-aware. No validity change.
+            // Height-gated activation: before H_S the legacy rules apply; at/after H_S
+            // skip recording, jail, and adaptive quorum are active; at/after H_strict
+            // bad skips reject the block. On the isolated testnet these are set to 0.
+            H_S: intEnv('H_S', 13325000),
+            H_strict: intEnv('H_strict', 13400000),
+            H_standby: intEnv('H_standby', 13400000),
             skipRecording: process.env.SKIP_RECORDING !== '0',
-            skipStrict: process.env.SKIP_STRICT === '1',
             jailMissThreshold: intEnv('JAIL_MISS_THRESHOLD', 30),
             jailBlocks: intEnv('JAIL_BLOCKS', 200),
             jailBackoffMax: intEnv('JAIL_BACKOFF_MAX', 4),
-            // Layer H (height gated in production): standbys enter the rotation when a
-            // leader is jailed. On mainnet this stays off until the flag day.
+            // Layer H: standbys enter the rotation when a leader is jailed. Activated at
+            // H_standby. On the isolated testnet this is also set to 0.
             leaderStandbys: intEnv('LEADER_STANDBYS', 5),
-            standbyEnabled: process.env.STANDBY_ENABLED === '1',
             skipGraceMs: intEnv('SKIP_GRACE_MS', 500),
-            // adaptive quorum: q = min(quorumCap, max(quorumMin, E))
+            // adaptive quorum: q = min(quorumCap, max(quorumMin, E)).
+            // Before H_S a bootstrap carve-out lets q = E when E < quorumMin so a
+            // single-leader genesis can still finalise blocks.
             quorumMin: intEnv('QUORUM_MIN', 3),
             quorumCap: intEnv('QUORUM_CAP', 4),
             // wake-up envelope: existing ENABLE_NODE tx re-sent as a heartbeat

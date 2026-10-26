@@ -10,9 +10,9 @@ module.exports = {
             const tip = chain.getLatestBlock()
             const schedule = chain.schedule || {}
             const height = tip._id
-            const state = chain.jailState()
+            const state = chain.jailState(height)
             const quorum = consensus.leaderQuorum()
-            const health = chain.healthParams()
+            const health = chain.healthParams(height)
 
             const jailed = []
             const streaks = {}
@@ -40,8 +40,13 @@ module.exports = {
                     jailBlocks: health.jailBlocks,
                     quorumMin: health.quorumMin,
                     quorumCap: health.quorumCap,
-                    skipStrict: !!config.skipStrict,
-                    standbyEnabled: !!health.standbyEnabled,
+                    H_S: config.H_S,
+                    H_strict: config.H_strict,
+                    H_standby: config.H_standby,
+                    skipStrict: health.skipStrict,
+                    standbyEnabled: health.standbyEnabled,
+                    jailEnabled: health.jailEnabled,
+                    bootstrap: health.bootstrap,
                     haltBreakerMs: config.haltBreakerMs,
                 },
                 schedule: {

@@ -9,6 +9,7 @@ const daoMaster = require('./daoMaster')
 const transaction = require('./transaction.js')
 const notifications = require('./notifications.js')
 const txHistory = require('./txHistory')
+const leaderHealth = require('./leaderHealth')
 const blocks = require('./blocks')
 const GrowInt = require('growint')
 const default_replay_output = 100
@@ -19,13 +20,17 @@ const skip_check_early_blocks = (process.env.SKIP_EARLY_CHECK_BLOCKS || '3889058
 const max_batch_blocks = 10000
 
 class Block {
-    constructor(index, phash, timestamp, txs, miner, missedBy, dist, burn, signature, hash) {
+    constructor(index, phash, timestamp, txs, miner, missedBy, skips, dist, burn, signature, hash) {
         this._id = index
         this.phash = phash.toString()
         this.timestamp = timestamp
         this.txs = txs
         this.miner = miner
         if (missedBy) this.missedBy = missedBy
+        // additive field (Layer S): proven skipped turns before this block's producer.
+        // Old nodes keep validating because they hash the object they receive as-is;
+        // they simply ignore skips (see plan §5.3).
+        if (skips && skips.length) this.skips = skips
         if (dist) this.dist = dist
         if (burn) this.burn = burn
         this.hash = hash
@@ -37,6 +42,9 @@ let chain = {
     blocksToRebuild: [],
     restoredBlocks: 0,
     schedule: null,
+    // wall-clock instant of the last haltBreaker recovery: the ladder is anchored on
+    // the latest of this and the last block timestamp (see minerWorker)
+    scheduleAnchor: 0,
     recentBlocks: [],
     recentTxs: {},
     getNewKeyPair: () => {
@@ -58,6 +66,7 @@ let chain = {
             0,
             [],
             config.masterName,
+            null,
             null,
             null,
             null,
@@ -107,7 +116,7 @@ let chain = {
         let nextHash = chain.calculateHashForBlock(block)
         let signature = secp256k1.ecdsaSign(Buffer.from(nextHash, 'hex'), bs58.decode(process.env.NODE_OWNER_PRIV))
         signature = bs58.encode(signature.signature)
-        return new Block(block._id, block.phash, block.timestamp, block.txs, block.miner, block.missedBy, block.dist, block.burn, signature, nextHash)
+        return new Block(block._id, block.phash, block.timestamp, block.txs, block.miner, block.missedBy, block.skips, block.dist, block.burn, signature, nextHash)
     },
     canMineBlock: (cb) => {
         if (chain.shuttingDown) {
@@ -141,9 +150,21 @@ let chain = {
                 // and only add the valid txs to the new block
                 newBlock.txs = validTxs
 
-                // always record the failure of others
-                if (chain.schedule.shuffle[(newBlock._id-1)%config.leaders].name !== process.env.NODE_OWNER)
-                    newBlock.missedBy = chain.schedule.shuffle[(newBlock._id-1)%config.leaders].name
+                // attest the turns that were provably skipped before ours (plan §5.2).
+                // The ladder is a pure function of the chain, so every node can verify it.
+                const ladder = chain.leaderLadder(newBlock._id)
+                const myPosition = leaderHealth.positionOf(ladder, process.env.NODE_OWNER)
+                if (myPosition === -1) {
+                    logr.error('Not in the turn ladder for block ' + newBlock._id + ', refusing to mine')
+                    return cb(true, newBlock)
+                }
+                const skippedTurns = leaderHealth.canonicalSkips(ladder, myPosition)
+                if (skippedTurns.length > 0) {
+                    // insertion order matters for the block hash (JSON serialisation v2):
+                    // it must match the Block constructor order (missedBy, then skips)
+                    newBlock.missedBy = skippedTurns[0]
+                    newBlock.skips = skippedTurns
+                }
 
                 if (distributed) newBlock.dist = distributed
                 if (burned) newBlock.burn = burned
@@ -235,26 +256,32 @@ let chain = {
         }
 
         let mineInMs = null
-        // if we are the next scheduled witness, try to mine in time
-        if (chain.schedule.shuffle[(block._id)%config.leaders].name === process.env.NODE_OWNER)
-            mineInMs = config.blockTime
-        // else if the scheduled leaders miss blocks
-        // backups witnesses are available after each block time intervals
-        else for (let i = 1; i < 2*config.leaders; i++)
-            if (chain.recentBlocks[chain.recentBlocks.length - i]
-            && chain.recentBlocks[chain.recentBlocks.length - i].miner === process.env.NODE_OWNER) {
-                mineInMs = (i+1)*config.blockTime
-                break
-            }
+        // the turn ladder replaces the old "recency index" arithmetic: position 0 is
+        // the scheduled leader, 1.. are the backups, then the standbys (Layer H)
+        const ladder = chain.leaderLadder(block._id + 1)
+        const myPosition = leaderHealth.positionOf(ladder, process.env.NODE_OWNER)
+        // prototype fix: a haltBreaker recovery round can take longer than blockTime
+        // (e.g. 15s wait with 3s blocks). The recovered block is applied late, so the
+        // ladder must be anchored on the recovery instant: anchoring on block.timestamp
+        // alone makes every delay negative and no node would ever mine again.
+        const anchorTs = Math.max(block.timestamp, chain.scheduleAnchor || 0)
+        let myDelayMs = 0
+        if (myPosition !== -1) {
+            myDelayMs = (myPosition + 1) * config.blockTime
+            // substitutes wait a little longer so a healthy scheduled leader with a
+            // slightly slow clock is not pre-empted (producer-side only, plan §5.2)
+            if (myPosition > 0) myDelayMs += (config.skipGraceMs || 0)
+        }
 
-        if (mineInMs) {
-            mineInMs -= (new Date().getTime()-block.timestamp)
-            mineInMs += 20
+        if (myPosition !== -1) {
+            mineInMs = myDelayMs - (new Date().getTime() - anchorTs) + 20
             logr.debug('Trying to mine in '+mineInMs+'ms')
             consensus.observer = false
             if (mineInMs < config.blockTime/2) {
-                logr.warn('Slow performance detected, will not try to mine next block')
-                return
+                // still overdue: restart the ladder from now so that every position
+                // keeps its own slot instead of colliding with the other leaders
+                mineInMs = myDelayMs + 20
+                logr.warn('Slow performance detected, re-anchoring ladder (mine in '+mineInMs+'ms)')
             }
             chain.worker = setTimeout(function(){
                 chain.mineBlock(function(error, finalBlock) {
@@ -554,37 +581,36 @@ let chain = {
             cb(false); return
         }
 
-        // check if miner is normal scheduled one
-        let minerPriority = 0
-        if (chain.schedule.shuffle[(newBlock._id-1)%config.leaders] != null && chain.schedule.shuffle[(newBlock._id-1)%config.leaders].name === newBlock.miner)
-            minerPriority = 1
-        else if (chain.schedule.shuffle[(newBlock._id-1)%config.leaders] == null)
-            minerPriority = 1
-        // allow miners of n blocks away
-        // to mine after (n+1)*blockTime as 'backups'
-        // so that the network can keep going even if 1,2,3...n node(s) have issues
-        else
-            for (let i = 1; i <= config.leaders; i++) 
-                if (chain.recentBlocks.length - i >= 0) {
-                    if (!chain.recentBlocks[chain.recentBlocks.length - i])
-                        break
-                    if (chain.recentBlocks[chain.recentBlocks.length - i].miner === newBlock.miner) {
-                        minerPriority = i+1
-                        break
-                    }
-                }
-            
-                
-
-        if (minerPriority === 0) {
+        // check if miner is authorized: it must appear in the turn ladder, and its
+        // position (0 = scheduled, 1.. = backups, then standbys) sets the earliest
+        // timestamp it may produce at (plan §3.1 / §5.3)
+        const ladder = chain.leaderLadder(newBlock._id)
+        const ladderPosition = leaderHealth.positionOf(ladder, newBlock.miner)
+        if (ladderPosition === -1) {
             logr.error('unauthorized miner')
             cb(false); return
         }
+        const minerPriority = ladderPosition + 1
 
         // check if new block isnt too early
         if (newBlock.timestamp - previousBlock.timestamp < minerPriority*config.blockTime && skip_check_early_blocks.indexOf(newBlock._id) === -1) {
             logr.error('block too early for miner with priority #'+minerPriority)
             cb(false); return
+        }
+
+        // skip attestation (plan §5.3): Layer S warns, Layer H rejects.
+        // Only checked on signed blocks (local pre-validation happens before the
+        // producer fills skips in).
+        if (config.skipRecording && verifyHashAndSignature) {
+            const attestation = leaderHealth.attestation(newBlock, ladder)
+            if (!attestation.ok) {
+                const detail = 'expected ' + JSON.stringify(attestation.expected) + ' got ' + JSON.stringify(attestation.got)
+                if (config.skipStrict) {
+                    logr.error('invalid skip attestation for block ' + newBlock._id + ' by ' + newBlock.miner + ': ' + detail)
+                    cb(false); return
+                }
+                logr.warn('skip attestation mismatch (Layer S, non-fatal) at block ' + newBlock._id + ' by ' + newBlock.miner + ': ' + detail)
+            }
         }
 
         if (!verifyTxValidity) {
@@ -688,26 +714,56 @@ let chain = {
             })
         })
     },
+    // consensus parameters of the offline-leader plan (prototype: no height gating)
+    healthParams: () => ({
+        leaders: config.leaders,
+        leaderStandbys: config.leaderStandbys,
+        jailMissThreshold: config.jailMissThreshold,
+        jailBlocks: config.jailBlocks,
+        jailBackoffMax: config.jailBackoffMax,
+        quorumMin: config.quorumMin,
+        quorumCap: config.quorumCap,
+        heartbeatTxType: config.heartbeatTxType,
+        lookback: config.leaderHealthLookback,
+        standbyEnabled: !!config.standbyEnabled,
+    }),
+    _jailCache: null,
+    jailState: () => {
+        const tip = chain.getLatestBlock()
+        const cacheKey = tip._id + ':' + chain.recentBlocks.length
+        if (chain._jailCache && chain._jailCache.key === cacheKey)
+            return chain._jailCache.state
+        const state = leaderHealth.jailState(chain.recentBlocks, chain.healthParams())
+        chain._jailCache = { key: cacheKey, state }
+        return state
+    },
+    // canonical turn ladder for a height (plan §3.1): scheduled leader, then the
+    // most recent producers, then the standby pool when Layer H is enabled
+    leaderLadder: (height) => {
+        const h = height || chain.getLatestBlock()._id + 1
+        if (!chain.schedule) return []
+        return leaderHealth.ladderFor(h, Object.assign({
+            shuffle: chain.schedule.shuffle,
+            recentBlocks: chain.recentBlocks,
+            standbys: chain.schedule.standby,
+        }, chain.healthParams()))
+    },
     minerSchedule: (block) => {
         let hash = block.hash
         let rand = parseInt('0x'+hash.substr(hash.length-config.leaderShufflePrecision))
+        if (isNaN(rand)) rand = 0
         if (!p2p.recovering)
             logr.debug('Generating schedule... NRNG: ' + rand)
-        let miners = chain.generateLeaders(true, false, config.leaders, 0)
-        miners = miners.sort(function(a,b) {
-            if(a.name < b.name) return -1
-            if(a.name > b.name) return 1
-            return 0
-        })
-        let shuffledMiners = []
-        while (miners.length > 0) {
-            let i = rand%miners.length
-            shuffledMiners.push(miners[i])
-            miners.splice(i, 1)
-        }
-        
+        const params = chain.healthParams()
+        // include the block that triggers the epoch so its skips are accounted
+        const state = leaderHealth.jailState(chain.recentBlocks.concat([block]), params)
+        const candidates = chain.generateLeaders(true, false, Number.MAX_SAFE_INTEGER, 0)
+            .filter(c => !leaderHealth.isJailed(state, c.name, block._id))
+        const ranked = leaderHealth.rankCandidates(candidates, params)
+        let shuffledMiners = leaderHealth.shuffleEpoch(ranked.active, hash, config.leaderShufflePrecision)
+
         let y = 0
-        while (shuffledMiners.length < config.leaders) {
+        while (shuffledMiners.length > 0 && shuffledMiners.length < config.leaders) {
             shuffledMiners.push(shuffledMiners[y])
             y++
         }
@@ -717,7 +773,11 @@ let chain = {
 
         return {
             block: block,
-            shuffle: shuffledMiners
+            shuffle: shuffledMiners,
+            // Layer H: standbys are appended to the ladder tail, so they can produce
+            // (and sign) when the leaders above them are gone, without changing keys
+            standby: ranked.standby,
+            activeSet: ranked.active.map(c => c.name),
         }
     },
     generateLeaders: (withLeaderPub, withWs, limit, start) => {
@@ -743,7 +803,9 @@ let chain = {
             leaders.push(leaderDetails)
         })
         leaders = leaders.sort(function(a,b) {
-            return b.node_appr - a.node_appr
+            // canonical order (fixes F6): node_appr desc, then name asc, so that
+            // ties do not depend on the mongodb natural order of cache.leaders
+            return leaderHealth.compareCandidates(a, b)
         })
         return leaders.slice(start, limit)
     },

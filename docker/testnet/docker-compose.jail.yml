@@ -1,0 +1,241 @@
+# Isolated testnet for the offline-leader prototype (jail + adaptive quorum).
+#
+#   cd docker/testnet
+#   docker compose -p avalon-jail -f docker-compose.jail.yml up -d --build
+#
+# Nothing here collides with the existing 3-miner testnet (avalon-testnet-*):
+# separate project name, container names, ports, volumes and mongo instance.
+#
+# Topology: 1 bootstrap node (master, always in the rotation because its node_appr
+# is the genesis balance) + 4 miner accounts. leaders=3, so the rotation is
+# [dtube, miner1, miner2] and miner3/miner4 are the standby pool.
+
+x-jail-params: &jail-params
+  # rotation: 3 leaders (dtube + the 2 highest node_appr miners)
+  LEADERS_OVERRIDE: "3"
+  # Testnet carve-out: at genesis the network has a *single* leader (dtube, the
+  # master), so the floor must be allowed to reach 1 or block #1 can never be
+  # finalised. On mainnet quorumMin stays 3 (there is no single-leader genesis).
+  # With E >= 2 the floor is irrelevant: q = min(4, max(1, E)) = E.
+  QUORUM_MIN: "1"
+  QUORUM_CAP: "4"
+  # demo-timed jail: 3 proven misses (~9 s) then 20 blocks (~60 s)
+  JAIL_MISS_THRESHOLD: "3"
+  JAIL_BLOCKS: "20"
+  JAIL_BACKOFF_MAX: "4"
+  # Layer H: standbys enter the rotation when a leader is jailed
+  LEADER_STANDBYS: "2"
+  STANDBY_ENABLED: "1"
+  # Layer S: attestation is written and verified, mismatches only warn
+  SKIP_STRICT: "0"
+  SKIP_GRACE_MS: "500"
+  # the only wall-clock element: recovery round after 15 s without finality
+  HALT_BREAKER: "1"
+  HALT_BREAKER_MS: "15000"
+  HEARTBEAT_TX_TYPE: "18"
+  LEADER_HEALTH_LOOKBACK: "5000"
+  # the master must be able to create accounts and to transfer (type 3) to fund the
+  # miners; identical on every node because it is part of block validation
+  MASTER_DAO_TXS: "0,1,2,3,4,5,6,7,8,10,11,12,13,14,15,17,18,19,20,21,23,24,25,26,27,28,29,30,32"
+
+x-node: &node
+  build:
+    context: ../..
+    dockerfile: docker/testnet/Dockerfile
+  image: avalon-jail-node:latest
+  # tini as PID 1: the node scripts spawn child processes and without a reaper the
+  # containers become un-stoppable zombies ("cannot stop container ... is zombie")
+  init: true
+  volumes:
+    - ../../src:/avalon/src
+    - ./scripts:/avalon/scripts:ro
+    - ../../scripts:/avalon/project-scripts:ro
+    - jail_config:/avalon/config/testnet-keys
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "3"
+
+services:
+  mongodb:
+    image: mongo:6.0.2
+    hostname: mongodb
+    container_name: avalon-jail-mongodb
+    ports:
+      - "37018:27017"
+    volumes:
+      - jail_mongo_data:/data/db
+    healthcheck:
+      test: echo "db.runCommand({ping:1})" | mongosh --quiet
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  bootstrap:
+    <<: *node
+    hostname: bootstrap
+    container_name: avalon-jail-bootstrap
+    ports:
+      - "3201:3001"
+      - "6201:6001"
+    environment:
+      <<: *jail-params
+      HTTP_PORT: "3001"
+      HTTP_HOST: "0.0.0.0"
+      P2P_PORT: "6001"
+      DB_NAME: "avalon"
+      DB_URL: "mongodb://mongodb:27017"
+      NODE_OWNER: "dtube"
+      NODE_OWNER_PUB: "dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz"
+      NODE_OWNER_PRIV: "34EpMEDFJwKbxaF7FhhLyEe3AhpM4dwHMLVfs4JyRto5"
+      LOG_LEVEL: "cons"
+      NO_DISCOVERY: "1"
+      MAX_PEERS: "20"
+      WARMUP_ACCOUNTS: "1000"
+      WARMUP_CONTENTS: "0"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    command: ["bash", "/avalon/scripts/testnet-jail-genesis.sh"]
+
+  setup:
+    <<: *node
+    hostname: setup
+    container_name: avalon-jail-setup
+    environment:
+      <<: *jail-params
+      HTTP_PORT: "3001"
+      BOOTSTRAP_HOST: "bootstrap"
+      MINERS: "4"
+      MINER_BALANCES: "100000,90000,80000,70000"
+      NODE_OWNER: "dtube"
+      NODE_OWNER_PUB: "dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz"
+      NODE_OWNER_PRIV: "34EpMEDFJwKbxaF7FhhLyEe3AhpM4dwHMLVfs4JyRto5"
+    depends_on:
+      - bootstrap
+    command: ["bash", "/avalon/scripts/testnet-jail-setup.sh"]
+
+  miner1:
+    <<: *node
+    hostname: miner1
+    container_name: avalon-jail-miner1
+    ports:
+      - "3202:3001"
+      - "6202:6001"
+    environment:
+      <<: *jail-params
+      HTTP_PORT: "3001"
+      HTTP_HOST: "0.0.0.0"
+      P2P_PORT: "6001"
+      DB_NAME: "avalon_miner1"
+      DB_URL: "mongodb://mongodb:27017"
+      NODE_OWNER: "miner1"
+      NODE_OWNER_PUB: ""
+      NODE_OWNER_PRIV: ""
+      PEERS: "ws://bootstrap:6001"
+      LOG_LEVEL: "cons"
+      NO_DISCOVERY: "1"
+      MAX_PEERS: "20"
+      WARMUP_ACCOUNTS: "1000"
+      WARMUP_CONTENTS: "0"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      setup:
+        condition: service_started
+    command: ["bash", "/avalon/scripts/testnet-jail-miner.sh"]
+
+  miner2:
+    <<: *node
+    hostname: miner2
+    container_name: avalon-jail-miner2
+    ports:
+      - "3203:3001"
+      - "6203:6001"
+    environment:
+      <<: *jail-params
+      HTTP_PORT: "3001"
+      HTTP_HOST: "0.0.0.0"
+      P2P_PORT: "6001"
+      DB_NAME: "avalon_miner2"
+      DB_URL: "mongodb://mongodb:27017"
+      NODE_OWNER: "miner2"
+      NODE_OWNER_PUB: ""
+      NODE_OWNER_PRIV: ""
+      PEERS: "ws://bootstrap:6001"
+      LOG_LEVEL: "cons"
+      NO_DISCOVERY: "1"
+      MAX_PEERS: "20"
+      WARMUP_ACCOUNTS: "1000"
+      WARMUP_CONTENTS: "0"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      setup:
+        condition: service_started
+    command: ["bash", "/avalon/scripts/testnet-jail-miner.sh"]
+
+  miner3:
+    <<: *node
+    hostname: miner3
+    container_name: avalon-jail-miner3
+    ports:
+      - "3204:3001"
+      - "6204:6001"
+    environment:
+      <<: *jail-params
+      HTTP_PORT: "3001"
+      HTTP_HOST: "0.0.0.0"
+      P2P_PORT: "6001"
+      DB_NAME: "avalon_miner3"
+      DB_URL: "mongodb://mongodb:27017"
+      NODE_OWNER: "miner3"
+      NODE_OWNER_PUB: ""
+      NODE_OWNER_PRIV: ""
+      PEERS: "ws://bootstrap:6001"
+      LOG_LEVEL: "cons"
+      NO_DISCOVERY: "1"
+      MAX_PEERS: "20"
+      WARMUP_ACCOUNTS: "1000"
+      WARMUP_CONTENTS: "0"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      setup:
+        condition: service_started
+    command: ["bash", "/avalon/scripts/testnet-jail-miner.sh"]
+
+  miner4:
+    <<: *node
+    hostname: miner4
+    container_name: avalon-jail-miner4
+    ports:
+      - "3205:3001"
+      - "6205:6001"
+    environment:
+      <<: *jail-params
+      HTTP_PORT: "3001"
+      HTTP_HOST: "0.0.0.0"
+      P2P_PORT: "6001"
+      DB_NAME: "avalon_miner4"
+      DB_URL: "mongodb://mongodb:27017"
+      NODE_OWNER: "miner4"
+      NODE_OWNER_PUB: ""
+      NODE_OWNER_PRIV: ""
+      PEERS: "ws://bootstrap:6001"
+      LOG_LEVEL: "cons"
+      NO_DISCOVERY: "1"
+      MAX_PEERS: "20"
+      WARMUP_ACCOUNTS: "1000"
+      WARMUP_CONTENTS: "0"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      setup:
+        condition: service_started
+    command: ["bash", "/avalon/scripts/testnet-jail-miner.sh"]
+
+volumes:
+  jail_mongo_data:
+  jail_config:

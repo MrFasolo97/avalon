@@ -1,3 +1,11 @@
+// Prototype/testnet only: the offline-leader parameters can be overridden from the
+// environment so a testnet can run short jail windows without patching sources inside
+// the containers. Unset on mainnet => the canonical values below apply.
+const intEnv = (name, def) => {
+    const n = parseInt(process.env[name], 10)
+    return isNaN(n) ? def : n
+}
+
 let config = {
     history: {
         0: {
@@ -63,7 +71,8 @@ let config = {
             // how many max leaders there can be, and how much tokens and VT they earn per "mined" block
             leaderReward: 1,
             leaderRewardVT: 100,
-            leaders: 5,
+            // the number of leaders in the rotation
+            leaders: intEnv('LEADERS_OVERRIDE', 5),
             // how long of the end of the block hash is used for the leader pseudo random generator shuffle
             leaderShufflePrecision: 6,
             // the maximum number of leaders an account can vote for
@@ -150,7 +159,13 @@ let config = {
 
             // master dao
             masterDao: true,
-            masterDaoTxs: [0,4,5,6,10,11,12,13,14,15,17,19,20,21,23,24,25,26,27,28,29,30,32],
+            // Prototype/testnet only: allow a wider set of master tx types from the
+            // environment (e.g. 3 = transfer, needed to fund testnet miners) instead of
+            // patching this file inside the running containers. Must be identical on
+            // every node, it is part of the block validation rules.
+            masterDaoTxs: process.env.MASTER_DAO_TXS
+                ? process.env.MASTER_DAO_TXS.split(',').map(n => parseInt(n, 10))
+                : [0,4,5,6,10,11,12,13,14,15,17,19,20,21,23,24,25,26,27,28,29,30,32],
             masterDaoTxExp: 259200000,
 
             // block size increase
@@ -183,6 +198,33 @@ let config = {
             // WARNING: enabling fallback can create a permanent fork during network
             // partitions. When false, the chain halts until quorum is reached — safer.
             forceFinalizeFallback: false,
+
+            // --- offline / unresponsive leaders (doc/consensus-offline-leaders-plan.en.md) ---
+            // Layer S (soft fork): producers attest the turns they skipped, absence is
+            // counted from the chain only, the quorum is jail-aware. No validity change.
+            skipRecording: process.env.SKIP_RECORDING !== '0',
+            skipStrict: process.env.SKIP_STRICT === '1',
+            jailMissThreshold: intEnv('JAIL_MISS_THRESHOLD', 30),
+            jailBlocks: intEnv('JAIL_BLOCKS', 200),
+            jailBackoffMax: intEnv('JAIL_BACKOFF_MAX', 4),
+            // Layer H (height gated in production): standbys enter the rotation when a
+            // leader is jailed. On mainnet this stays off until the flag day.
+            leaderStandbys: intEnv('LEADER_STANDBYS', 5),
+            standbyEnabled: process.env.STANDBY_ENABLED === '1',
+            skipGraceMs: intEnv('SKIP_GRACE_MS', 500),
+            // adaptive quorum: q = min(quorumCap, max(quorumMin, E))
+            quorumMin: intEnv('QUORUM_MIN', 3),
+            quorumCap: intEnv('QUORUM_CAP', 4),
+            // wake-up envelope: existing ENABLE_NODE tx re-sent as a heartbeat
+            heartbeatTxType: intEnv('HEARTBEAT_TX_TYPE', 18),
+            leaderHealthLookback: intEnv('LEADER_HEALTH_LOOKBACK', 5000),
+            // the only wall-clock element: recovery round when no block is finalised
+            haltBreaker: process.env.HALT_BREAKER !== '0',
+            haltBreakerMs: intEnv('HALT_BREAKER_MS', 21000),
+            // per-height commit lock: a node commits at most one hash per height, so
+            // two competing blocks at the same height cannot both gather full quorums
+            // when visibility is asymmetric (COMMIT_LOCK=0 restores the old behaviour)
+            commitLock: process.env.COMMIT_LOCK !== '0',
         },
         // 241600: only txLimits change — matches existing new_net deploy
         241600: {

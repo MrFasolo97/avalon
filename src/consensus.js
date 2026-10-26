@@ -2,9 +2,9 @@ const secp256k1 = require('secp256k1')
 const crypto = require('crypto')
 const bs58 = require('base-x')(config.b58Alphabet)
 const cloneDeep = require('clone-deep')
-const consensus_need = 2
-const consensus_total = 3
-const consensus_threshold = consensus_need/consensus_total
+const leaderHealth = require('./leaderHealth')
+// The 2/3 rule is now expressed by the adaptive quorum (plan §6.3):
+// q = min(quorumCap, max(quorumMin, E)) — see src/leaderHealth.js
 
 // all p2p.sockets referenced here are verified nodes with a node_status
 
@@ -20,6 +20,16 @@ let consensus = {
     forceFinalizeTimeout: null,
     ffProposals: null,
     ffResolveTimeout: null,
+    haltBreakerTimeout: null,
+    haltBreakerHeight: 0,
+    breaker: null,
+    // per-height commit lock: at most one hash per height is committed by this node
+    // (see leaderHealth.commitDecision). `breakerOverride` is set for one height by a
+    // haltBreaker recovery round and is the only way to commit a second hash.
+    commitLocks: {},
+    breakerOverride: null,
+    lockRefusals: 0,
+    lockOverrides: 0,
     possBlocks: [],
     getActiveLeaderKey: (name) => {
         let shuffle = chain.schedule.shuffle
@@ -65,6 +75,80 @@ let consensus = {
         // logr.cons('Leaders: ' + actives.join(','))
         return actives
     },
+    // --- offline-leader plan (prototype): adaptive quorum + halt breaker ---
+
+    // Eligible leaders for the quorum (plan §6.3): the current rotation, minus the
+    // leaders that are jailed or whose most recent scheduled turn was proven skipped
+    // on-chain. Purely chain-derived, so every node computes the same E.
+    leaderQuorum: () => {
+        const names = []
+        const schedule = chain.schedule
+        if (schedule && schedule.shuffle)
+            for (let i = 0; i < schedule.shuffle.length; i++) {
+                const s = schedule.shuffle[i]
+                if (s && s.name && names.indexOf(s.name) === -1) names.push(s.name)
+            }
+        return leaderHealth.quorumFor(names, chain.jailState(),
+            chain.getLatestBlock()._id, chain.healthParams())
+    },
+    quorumThreshold: () => consensus.leaderQuorum().q,
+    scheduleHaltBreaker: () => {
+        if (!config.haltBreaker || consensus.finalizing) return
+        const height = chain.getLatestBlock()._id + 1
+        if (!consensus.possBlocks.some(pb => pb.block._id === height)) return
+        if (consensus.haltBreakerTimeout && consensus.haltBreakerHeight === height) return
+        if (consensus.haltBreakerTimeout) clearTimeout(consensus.haltBreakerTimeout)
+        consensus.haltBreakerHeight = height
+        const delay = Math.max(1000, config.haltBreakerMs)
+        consensus.haltBreakerTimeout = setTimeout(() => {
+            consensus.haltBreakerTimeout = null
+            consensus._haltBreaker(height)
+        }, delay)
+        if (consensus.haltBreakerTimeout.unref) consensus.haltBreakerTimeout.unref()
+        logr.debug('haltBreaker armed for height ' + height + ' in ' + delay + 'ms')
+    },
+    cancelHaltBreaker: () => {
+        if (consensus.haltBreakerTimeout) clearTimeout(consensus.haltBreakerTimeout)
+        consensus.haltBreakerTimeout = null
+        consensus.breaker = null
+        consensus.breakerOverride = null
+    },
+    // Recovery round (plan §6.3.1): the ONLY wall-clock element of the design. It
+    // only changes *when* this node accepts an already produced block, never which
+    // block is valid. Requires the unanimity of the live eligible signers; if the
+    // missing signers are more than the tolerated 2, it halts instead of forking.
+    _haltBreaker: (height) => {
+        if (!config.haltBreaker || consensus.finalizing) return
+        if (height !== chain.getLatestBlock()._id + 1) return
+        const candidates = consensus.possBlocks.filter(pb => pb.block._id === height)
+        if (candidates.length === 0) return
+        candidates.sort((a, b) => {
+            if (a.block.timestamp !== b.block.timestamp)
+                return a.block.timestamp - b.block.timestamp
+            return a.block.hash < b.block.hash ? -1 : 1
+        })
+        const winner = candidates[0]
+        const q = consensus.leaderQuorum()
+        const signers = (winner[0] || []).filter(n => q.eligible.indexOf(n) !== -1)
+        const missing = q.eligible.length - signers.length
+        if (signers.length < 2 || missing < 1 || missing > 2) {
+            logr.warn('haltBreaker: recovery not possible at height ' + height +
+                ' (signers=' + signers.length + ' eligible=' + q.eligible.length +
+                '), halting instead of forking')
+            return
+        }
+        logr.warn('haltBreaker: recovery round at height ' + height + ' with ' +
+            signers.length + '/' + q.eligible.length + ' eligible signers (q=' + q.q + '), ' +
+            'block by ' + winner.block.miner)
+        // the recovery round is wall-clock and may outlast blockTime: re-anchor the
+        // next mining ladder on this instant (see chain.minerWorker)
+        chain.scheduleAnchor = Date.now()
+        // the only sanctioned way to commit a second hash at the same height: the
+        // breaker winner is chosen by the same deterministic rule on every node
+        consensus.breakerOverride = { height: height, hash: winner.block.hash }
+        consensus.breaker = { height, threshold: signers.length }
+        consensus.tryNextStep()
+    },
     tryNextStepBusy: false,
     tryNextStep: () => {
         if (consensus.finalizing || consensus.tryNextStepBusy) {
@@ -73,13 +157,15 @@ let consensus = {
         }
         consensus.tryNextStepBusy = true
         try {
-            let consensus_size = consensus.activeLeaders().length
-            // smallest integer STRICTLY above 2/3 (floor+1): `ceil` + `>=` would drop
-            // the quorum to exactly 2/3 when consensus_size is a multiple of 3
-            let threshold = Math.floor(consensus_size * consensus_threshold) + 1
+            // adaptive quorum (plan §6.3): q = min(quorumCap, max(quorumMin, E)),
+            // E = chain-derived eligible leaders (jailed / proven-skipped excluded)
+            let threshold = consensus.quorumThreshold()
 
-            // Require at least 3 respondents so no 50% partition can reach consensus alone
-            if (threshold < 3) threshold = 3
+            // halt breaker recovery round (plan §6.3.1): if the eligible set is stale
+            // (a leader died before any skip could be recorded) the requirement is
+            // lowered to the live eligible signers already observed
+            if (consensus.breaker && consensus.breaker.height === chain.getLatestBlock()._id + 1)
+                threshold = Math.min(threshold, consensus.breaker.threshold)
 
             // if we are observing, we need +1 to pass consensus as we want to manage our own rounds
             if (!consensus.isActive())
@@ -150,6 +236,11 @@ let consensus = {
                     
                             consensus.possBlocks = newPossBlocks
                             consensus.finalizing = false
+                            consensus.cancelHaltBreaker()
+                            // drop the commit locks of blocks that are now final
+                            for (const h of Object.keys(consensus.commitLocks))
+                                if (Number(h) <= possBlock.block._id)
+                                    delete consensus.commitLocks[h]
                             if (config.forceFinalize)
                                 consensus.cancelForceFinalize()
                         } catch (e) {
@@ -262,14 +353,38 @@ let consensus = {
                     if (cb) cb(1)
                 }
             })
-        } else
-            // commit stage
-            for (let b = 0; b < consensus.possBlocks.length; b++) 
+        } else {
+            // commit stage: at most one block per height (plan §6.4). Without the
+            // lock a node commits every candidate that reached a polka, so two blocks
+            // at the same height both carry the same signatures and only the
+            // deterministic tie-break (which requires seeing both) keeps the chain
+            // together. With the lock only a haltBreaker recovery round may override.
+            for (let b = 0; b < consensus.possBlocks.length; b++)
                 if (consensus.possBlocks[b].block.hash === block.hash
                 && consensus.possBlocks[b][round].indexOf(process.env.NODE_OWNER) === -1) {
+                    if (config.commitLock) {
+                        const decision = leaderHealth.commitDecision(
+                            consensus.commitLocks, block._id, block, consensus.breakerOverride)
+                        if (!decision.allow) {
+                            consensus.lockRefusals++
+                            logr.warn('commit lock: refusing to commit block ' + block._id +
+                                '#' + String(block.hash).substr(0, 8) + ' by ' + block.miner +
+                                ', already committed ' + String(decision.lockedHash || '').substr(0, 8) +
+                                ' by ' + decision.lockedMiner)
+                            continue
+                        }
+                        if (decision.overridden) {
+                            consensus.lockOverrides++
+                            logr.warn('commit lock: override by haltBreaker at height ' + block._id +
+                                '#' + String(block.hash).substr(0, 8) + ' by ' + block.miner)
+                        }
+                        if (decision.lock)
+                            consensus.commitLocks[block._id] = { hash: block.hash, miner: block.miner }
+                    }
                     consensus.possBlocks[b][round].push(process.env.NODE_OWNER)
                     consensus.endRound(round, block)
                 }
+        }
     },
     endRound: (round, block) => {
         if (consensus.isActive()) {
@@ -285,6 +400,7 @@ let consensus = {
         }
 
         // try to move to next consensus step
+        consensus.scheduleHaltBreaker()
         consensus.tryNextStep()
     },
     remoteRoundConfirm: (message) => {

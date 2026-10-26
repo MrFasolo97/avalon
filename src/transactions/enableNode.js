@@ -2,11 +2,12 @@ module.exports = {
     fields: ['pub'],
     validate: (tx, ts, legitUser, cb) => {
         // ENABLE_NODE is reused as a heartbeat (type 18). A heartbeat must come
-        // from an account that has been a leader (pub_leader set) so random
-        // accounts cannot spam zero-bandwidth txs. The pub field is validated
-        // during execution; an invalid pub simply unsets the leader key.
-        if (!legitUser || !legitUser.pub_leader) {
-            cb(false, 'heartbeat sender is not a registered leader')
+        // from an account that is a leader candidate (has a leader key or has
+        // been approved as a node, i.e. node_appr > 0). This prevents random
+        // accounts from spamming zero-bandwidth txs while still allowing a
+        // former leader whose key was temporarily unset to re-register.
+        if (!legitUser || (!legitUser.pub_leader && !(legitUser.node_appr > 0))) {
+            cb(false, 'heartbeat sender is not a registered leader candidate')
             return
         }
         cb(true)

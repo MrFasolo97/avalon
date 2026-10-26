@@ -3,6 +3,7 @@ const default_port = 6001
 const replay_interval = 1500
 const discovery_interval = 60000
 const keep_alive_interval = 2500
+const status_refresh_interval = 30000
 const max_blocks_buffer = 100
 const max_peers = process.env.MAX_PEERS || 15
 const max_recover_attempts = 25
@@ -79,6 +80,7 @@ let p2p = {
             p2p.discoveryWorker(true)
         }
         setInterval(function(){p2p.cleanRoundConfHistory()}, history_interval)
+        setInterval(function(){p2p.broadcastNodeStatus()}, status_refresh_interval)
     },
     generateNodeId: () => {
         p2p.nodeId = chain.getNewKeyPair()
@@ -199,6 +201,26 @@ let p2p = {
                 random: random
             }
         })
+    },
+    // Periodically refresh peer node_status so that stale head_block values
+    // (e.g. after a restart while no new blocks are produced) are corrected.
+    // This only re-issues the existing QUERY_NODE_STATUS / NODE_STATUS handshake,
+    // so it does not change consensus or force-finalize semantics.
+    refreshNodeStatus: (ws) => {
+        if (!ws || ws.readyState !== 1) return
+        let random = randomBytes(config.randomBytesLength).toString('hex')
+        ws.challengeHash = random
+        p2p.sendJSON(ws, {
+            t: MessageType.QUERY_NODE_STATUS,
+            d: {
+                nodeId: p2p.nodeId.pub,
+                random: random
+            }
+        })
+    },
+    broadcastNodeStatus: () => {
+        for (let i = 0; i < p2p.sockets.length; i++)
+            p2p.refreshNodeStatus(p2p.sockets[i])
     },
     messageHandler: (ws) => {
         // Throttle cost-driving message types per socket. NODE_STATUS messages

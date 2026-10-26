@@ -10,6 +10,8 @@
 const fs = require('fs')
 const path = require('path')
 
+const INDEX_VERSION = 1
+
 function filePath() {
     const owner = process.env.NODE_OWNER || 'unknown'
     const dir = process.env.COMMIT_LOCK_DIR || '/avalon/config/testnet-keys'
@@ -22,7 +24,16 @@ function load() {
     const f = filePath()
     if (!fs.existsSync(f)) return null
     try {
-        return JSON.parse(fs.readFileSync(f, 'utf8'))
+        const idx = JSON.parse(fs.readFileSync(f, 'utf8'))
+        if (!idx || idx.version !== INDEX_VERSION) {
+            process.stderr.write('[jailIndex] version mismatch, recomputing\n')
+            return null
+        }
+        if (!idx.tipHash || typeof idx.tipHeight !== 'number' || !idx.state) {
+            process.stderr.write('[jailIndex] malformed index, recomputing\n')
+            return null
+        }
+        return idx
     } catch (e) {
         process.stderr.write('[jailIndex] failed to load index: ' + e.message + '\n')
         return null
@@ -32,7 +43,13 @@ function load() {
 function save(tipHeight, tipHash, state) {
     const f = filePath()
     const tmp = f + '.tmp'
-    fs.writeFileSync(tmp, JSON.stringify({ tipHeight, tipHash, state }, null, 2))
+    fs.writeFileSync(tmp, JSON.stringify({
+        version: INDEX_VERSION,
+        tipHeight,
+        tipHash,
+        state,
+        savedAt: Date.now()
+    }, null, 2))
     fs.renameSync(tmp, f)
 }
 

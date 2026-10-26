@@ -736,6 +736,7 @@ let chain = {
         }
     },
     _jailCache: null,
+    _jailIndexSavedHeight: -1,
     jailState: (height) => {
         const h = height || chain.getLatestBlock()._id
         const cacheKey = h + ':' + chain.recentBlocks.length
@@ -743,10 +744,12 @@ let chain = {
             return chain._jailCache.state
         const state = leaderHealth.jailState(chain.recentBlocks, chain.healthParams(h))
         chain._jailCache = { key: cacheKey, state }
-        // persist the computed state so restarts do not re-scan the full window
+        // persist the computed state at most once per tip height
         const tip = chain.getLatestBlock()
-        if (tip && tip._id === h)
+        if (tip && tip._id === h && tip._id !== chain._jailIndexSavedHeight) {
             jailIndex.save(h, tip.hash, state)
+            chain._jailIndexSavedHeight = h
+        }
         return state
     },
     loadJailIndex: () => {
@@ -758,6 +761,7 @@ let chain = {
                 key: idx.tipHeight + ':' + chain.recentBlocks.length,
                 state: idx.state
             }
+            chain._jailIndexSavedHeight = idx.tipHeight
         }
     },
     // canonical turn ladder for a height (plan §3.1): scheduled leader, then the

@@ -227,6 +227,8 @@ let config = {
             // the only wall-clock element: recovery round when no block is finalised
             haltBreaker: process.env.HALT_BREAKER !== '0',
             haltBreakerMs: intEnv('HALT_BREAKER_MS', 21000),
+            // degraded mode: log CRITICAL after this many consecutive blocks with E < quorumMin
+            degradedCriticalConsecutive: intEnv('DEGRADED_CRITICAL_CONSECUTIVE', 100),
             // per-height commit lock: a node commits at most one hash per height, so
             // two competing blocks at the same height cannot both gather full quorums
             // when visibility is asymmetric (COMMIT_LOCK=0 restores the old behaviour)

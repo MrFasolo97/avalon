@@ -155,7 +155,13 @@ let consensus = {
         // the only sanctioned way to commit a second hash at the same height: the
         // breaker winner is chosen by the same deterministic rule on every node
         consensus.breakerOverride = { height: height, hash: winner.block.hash }
-        consensus.breaker = { height, threshold: signers.length }
+        // Degraded-mode safety: when E < quorumMin require unanimity of the eligible set
+        // (threshold = E) instead of just a majority. This is stronger than the normal
+        // breaker and compensates for the smaller eligible set. The haltBreakerMs delay
+        // already provides the finalization-delay window.
+        const degradedMode = q.E < q.q
+        const breakerThreshold = degradedMode ? q.E : signers.length
+        consensus.breaker = { height, threshold: breakerThreshold }
         consensus.tryNextStep()
     },
     tryNextStepBusy: false,
@@ -192,7 +198,7 @@ let consensus = {
                         }
                         consensus._degradedState.lastHeight = hh
                         logr.warn('DEGRADED MODE: E=' + qq.E + ' < quorumMin=' + hhealth.quorumMin + ', q=' + qq.q + ', eligible=' + JSON.stringify(qq.eligible) + ', consecutive=' + consensus._degradedState.consecutive)
-                        if (consensus._degradedState.consecutive >= 100) {
+                        if (consensus._degradedState.consecutive >= config.degradedCriticalConsecutive) {
                             logr.error('CRITICAL: chain in degraded mode for ' + consensus._degradedState.consecutive + ' consecutive blocks since height ' + consensus._degradedState.since)
                         }
                     }
@@ -375,28 +381,6 @@ let consensus = {
                 return
             }
                 
-            // Canonical precommit (fix): only precommit the canonical candidate for this height
-            // before validation completes. We compute canonical from all candidates we already know
-            // about plus this candidate.
-            if (block._id && block._id === chain.getLatestBlock()._id + 1) {
-                let candidatesForPrecommit = []
-                for (let c = 0; c < consensus.possBlocks.length; c++) {
-                    if (consensus.possBlocks[c].block._id === block._id)
-                        candidatesForPrecommit.push(consensus.possBlocks[c].block)
-                }
-                candidatesForPrecommit.push(block)
-                candidatesForPrecommit.sort((a,b) => {
-                    if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp
-                    return a.hash < b.hash ? -1 : (a.hash > b.hash ? 1 : 0)
-                })
-                const canonicalPreHash = candidatesForPrecommit[0].hash
-                if (canonicalPreHash !== block.hash) {
-                    // Don't precommit non-canonical candidates; still validate/store but don't sign round 0
-                    // We'll wait for the canonical candidate to be propagated
-                    logr.cons('Non-canonical block received for height '+block._id+'#'+block.hash.substr(0,4)+' by '+block.miner+', waiting for canonical')
-                }
-            }
-                
             consensus.validating.push(block.hash)
 
             // its a new possible block, set up the empty possible block
@@ -417,10 +401,43 @@ let consensus = {
                     if (cb) cb(-1)
                 } else {
                     // adding to possible blocks
-                    if (consensus.possBlocks.length >= consensus.activeLeaders().length * 2)
-                        logr.warn('possBlocks at capacity, not adding new block')
-                    else
+                    let possBlocksCapacity = consensus.possBlocks.length >= consensus.activeLeaders().length * 2
+                    if (possBlocksCapacity) {
+                        // Never drop the canonical candidate for this height; if necessary evict a non-canonical one
+                        let canonicalHash = null
+                        let cands = []
+                        for (let c = 0; c < consensus.possBlocks.length; c++) {
+                            if (consensus.possBlocks[c].block._id === block._id)
+                                cands.push(consensus.possBlocks[c].block)
+                        }
+                        cands.push(block)
+                        cands.sort((a,b) => {
+                            if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp
+                            return a.hash < b.hash ? -1 : (a.hash > b.hash ? 1 : 0)
+                        })
+                        canonicalHash = cands.length ? cands[0].hash : block.hash
+                        if (canonicalHash === block.hash) {
+                            // Evict a non-canonical block for the same height, if any
+                            let evicted = false
+                            for (let c = 0; c < consensus.possBlocks.length; c++) {
+                                if (consensus.possBlocks[c].block._id === block._id && consensus.possBlocks[c].block.hash !== canonicalHash) {
+                                    consensus.possBlocks.splice(c, 1)
+                                    evicted = true
+                                    break
+                                }
+                            }
+                            if (evicted) {
+                                logr.warn('possBlocks at capacity, evicted non-canonical block to make room for canonical')
+                                consensus.possBlocks.push(possBlock)
+                            } else {
+                                logr.warn('possBlocks at capacity, not adding new block')
+                            }
+                        } else {
+                            logr.warn('possBlocks at capacity, not adding non-canonical block')
+                        }
+                    } else {
                         consensus.possBlocks.push(possBlock)
+                    }
                     if (config.forceFinalize)
                         consensus.scheduleForceFinalize()
                     // adding ourselves to precommit list only for canonical block (or if we mined it)

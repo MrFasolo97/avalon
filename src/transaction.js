@@ -5,6 +5,7 @@ const cloneDeep = require('clone-deep')
 const bson = require('bson')
 const Transaction = require('./transactions')
 const TransactionType = Transaction.Types
+const leaderHealth = require('./leaderHealth')
 const max_mempool = process.env.MEMPOOL_SIZE || 2000
 
 // probably due to non standard utf8 characters that were not properly written to mongodb/bson file
@@ -236,9 +237,19 @@ let transaction = {
             }
 
             // Heartbeat (ENABLE_NODE, type 18) is the wake-up envelope for a jailed
-            // leader. It must be free so a leader with zero bandwidth can still
-            // un-jail itself. Idempotency is handled by execution (sets pub_leader).
-            const isHeartbeat = tx.type === config.heartbeatTxType
+            // leader. It must be free so a jailed leader with zero bandwidth can still
+            // un-jail itself. To prevent spam, the zero-bandwidth path is allowed only
+            // for accounts that are currently jailed OR currently in the leader schedule
+            // (active or standby). All other accounts (including bottom-of-leaderboard
+            // candidates with tiny self-votes) pay normal bandwidth.
+            const isJailed = chain.jailState && typeof chain.jailState === 'function'
+                ? leaderHealth.isJailed(chain.jailState(), tx.sender, chain.getLatestBlock()._id)
+                : false
+            const inSchedule = chain.schedule && (
+                (chain.schedule.shuffle || []).some(s => s && s.name === tx.sender) ||
+                (chain.schedule.standby || []).some(s => (typeof s === 'string' ? s : (s && s.name)) === tx.sender)
+            )
+            const isHeartbeat = tx.type === config.heartbeatTxType && (isJailed || inSchedule)
             const txSize = isHeartbeat ? 0 : Buffer.byteLength(JSON.stringify(tx), 'utf8')
 
             // checking if the user has enough bandwidth

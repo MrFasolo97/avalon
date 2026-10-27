@@ -14,6 +14,7 @@ module.exports = {
             const quorum = consensus.leaderQuorum()
             const health = chain.healthParams(height)
             const degraded = health.jailEnabled && quorum.E < health.quorumMin
+            // Read-only: _degradedState is owned by consensus.tryNextStep()
             const degradedState = consensus._degradedState || { since: 0, consecutive: 0, lastHeight: -1 }
 
             // Fork detector: compare our tip hash with peer head hashes at the same height

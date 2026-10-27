@@ -14,21 +14,32 @@ module.exports = {
             const quorum = consensus.leaderQuorum()
             const health = chain.healthParams(height)
             const degraded = health.jailEnabled && quorum.E < health.quorumMin
-            const chainHeight = height
-            if (!consensus._degradedState) consensus._degradedState = { since: 0, consecutive: 0, lastHeight: -1 }
-            if (degraded) {
-                if (consensus._degradedState.lastHeight !== chainHeight) {
-                    if (consensus._degradedState.since === 0 || consensus._degradedState.lastHeight !== chainHeight - 1) {
-                        consensus._degradedState.since = chainHeight
-                        consensus._degradedState.consecutive = 1
-                    } else {
-                        consensus._degradedState.consecutive++
+            const degradedState = consensus._degradedState || { since: 0, consecutive: 0, lastHeight: -1 }
+
+            // Fork detector: compare our tip hash with peer head hashes at the same height
+            let forkSuspect = false
+            const forkPeers = []
+            try {
+                if (p2p && p2p.sockets && p2p.sockets.length > 0) {
+                    const localHash = tip.hash
+                    for (let i = 0; i < p2p.sockets.length; i++) {
+                        const peer = p2p.sockets[i]
+                        if (peer && peer.node_status
+                            && peer.node_status.head_block === height
+                            && peer.node_status.head_block_hash
+                            && peer.node_status.head_block_hash !== localHash) {
+                            forkSuspect = true
+                            forkPeers.push({
+                                nodeId: peer.node_status.nodeId,
+                                ip: peer._socket && peer._socket.remoteAddress ? peer._socket.remoteAddress : null,
+                                head_block: peer.node_status.head_block,
+                                head_block_hash: peer.node_status.head_block_hash,
+                                previous_block_hash: peer.node_status.previous_block_hash,
+                            })
+                        }
                     }
-                    consensus._degradedState.lastHeight = chainHeight
                 }
-            } else {
-                consensus._degradedState = { since: 0, consecutive: 0, lastHeight: -1 }
-            }
+            } catch (e) {}
 
             const jailed = []
             const streaks = {}
@@ -80,8 +91,10 @@ module.exports = {
                     q: quorum.q,
                 },
                 degraded: degraded,
-                degradedSinceHeight: degraded ? consensus._degradedState.since : 0,
-                consecutiveDegradedBlocks: degraded ? consensus._degradedState.consecutive : 0,
+                degradedSinceHeight: degraded ? degradedState.since : 0,
+                consecutiveDegradedBlocks: degraded ? degradedState.consecutive : 0,
+                forkSuspect,
+                forkPeers,
                 breaker: consensus.breaker,
                 commitLock: {
                     enabled: !!config.commitLock,

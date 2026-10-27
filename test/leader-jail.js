@@ -275,6 +275,48 @@ test('breaker threshold: majority of the eligible set', () => {
     assert.strictEqual(lh.breakerThreshold(6), 4)
 })
 
+test('breaker recovery: all eligible signed recovers when E < quorumMin', () => {
+    // regression: E=1, q=3 used to be a permanent halt because the breaker
+    // required at least one missing signer and nobody was left to wait for
+    const r = lh.breakerRecovery(1, 1)
+    assert.strictEqual(r.allowed, true)
+    assert.strictEqual(r.reason, 'all-eligible-signed')
+    assert.strictEqual(r.missing, 0)
+    assert.strictEqual(r.threshold, 1)
+})
+
+test('breaker recovery: E=2 below quorumMin=3 recovers when both sign', () => {
+    const r = lh.breakerRecovery(2, 2)
+    assert.strictEqual(r.allowed, true)
+    assert.strictEqual(r.threshold, 2)
+    assert.strictEqual(r.missing, 0)
+})
+
+test('breaker recovery: requires a majority of the eligible set', () => {
+    assert.strictEqual(lh.breakerRecovery(3, 1).allowed, false) // needs 2
+    assert.strictEqual(lh.breakerRecovery(3, 2).allowed, true)
+    assert.strictEqual(lh.breakerRecovery(4, 2).allowed, false) // needs 3
+    assert.strictEqual(lh.breakerRecovery(4, 3).allowed, true)
+    assert.strictEqual(lh.breakerRecovery(5, 2).allowed, false) // needs 3
+    assert.strictEqual(lh.breakerRecovery(5, 3).allowed, true)
+    assert.strictEqual(lh.breakerRecovery(5, 5).allowed, true)
+})
+
+test('breaker recovery: never recovers without an eligible signer', () => {
+    assert.strictEqual(lh.breakerRecovery(0, 0).allowed, false)
+    assert.strictEqual(lh.breakerRecovery(0, 3).allowed, false)
+    assert.strictEqual(lh.breakerRecovery(1, 0).allowed, false)
+    assert.strictEqual(lh.breakerRecovery(3, 0).allowed, false)
+    assert.strictEqual(lh.breakerRecovery(0, 0).reason, 'no-eligible-leaders')
+})
+
+test('breaker recovery: reports how many eligible signers are missing', () => {
+    const r = lh.breakerRecovery(5, 3)
+    assert.strictEqual(r.missing, 2)
+    assert.strictEqual(r.maxMissing, 2)
+    assert.strictEqual(r.reason, 'majority-of-eligible')
+})
+
 // 8. edge cases ---------------------------------------------------------------
 test('edge case: E=1 quorum is the floor', () => {
     const q = lh.quorumFor(['miner1'], lh.jailState([], {}), 1, { quorumMin: 3, quorumCap: 4 })

@@ -1,13 +1,13 @@
 module.exports = {
     fields: ['pub'],
     validate: (tx, ts, legitUser, cb) => {
-        // ENABLE_NODE is reused as a heartbeat (type 18). A heartbeat must come
-        // from an account that is a leader candidate (has a leader key or has
-        // been approved as a node, i.e. node_appr > 0). This prevents random
-        // accounts from spamming zero-bandwidth txs while still allowing a
-        // former leader whose key was temporarily unset to re-register.
-        if (!legitUser || (!legitUser.pub_leader && !(legitUser.node_appr > 0))) {
-            cb(false, 'heartbeat sender is not a registered leader candidate')
+        // ENABLE_NODE is reused as a heartbeat (type 18). It serves both initial
+        // leader registration (account has no pub_leader yet) and the wake-up
+        // envelope for a jailed leader. Therefore we only require a valid,
+        // existing account. The jail kernel ignores heartbeats from accounts
+        // that are not actually jailed, so this does not weaken consensus.
+        if (!legitUser) {
+            cb(false, 'heartbeat sender account not found')
             return
         }
         cb(true)

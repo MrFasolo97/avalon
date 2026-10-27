@@ -283,7 +283,6 @@ class Scheduler {
             const eligible = n.eligibleAt(h)
             const E = eligible.length
             const q = lh.quorumSize(E, SimParams)
-            const breakerThresh = lh.breakerThreshold(E)
 
             // candidates this node received, sorted by deterministic tie-break
             const received = Object.values(n.receivedCandidates[h] || {}).sort((a, b) => {
@@ -297,8 +296,9 @@ class Scheduler {
                     ? [...n.round0Signs[h][block.hash]].filter(s => eligible.indexOf(s) !== -1)
                     : []
                 const normalOk = r0.length >= q
-                const missing = E - r0.length
-                const breakerOk = r0.length >= breakerThresh && missing >= 1 && missing <= (E - breakerThresh)
+                // Same rule as consensus.js: majority of the eligible set is enough,
+                // including the missing === 0 case (E collapsed below quorumMin).
+                const breakerOk = lh.breakerRecovery(E, r0.length).allowed
 
                 if (!normalOk && !breakerOk) continue
 

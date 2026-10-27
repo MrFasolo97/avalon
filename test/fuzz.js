@@ -101,7 +101,23 @@ for (let i = 0; i < 500; i++) {
     })
 }
 
-// 5. height gating: before H_S the active set is never jailed and bootstrap quorum applies
+// 5. halt-breaker recovery: allowed iff a majority of the eligible set signed,
+// and never when the eligible set is empty (E=0 must always halt)
+for (let i = 0; i < 400; i++) {
+    check('breaker recovery follows the majority rule', () => {
+        const E = Math.floor(rand() * 8)
+        const S = Math.floor(rand() * 9)
+        const r = lh.breakerRecovery(E, S)
+        if (E === 0) assert(!r.allowed, 'must not recover with no eligible leaders')
+        else {
+            assert.strictEqual(r.allowed, S >= lh.breakerThreshold(E),
+                'recovery mismatch for E=' + E + ' S=' + S)
+            assert.strictEqual(r.missing, Math.max(0, E - S), 'missing count mismatch')
+        }
+    })
+}
+
+// 6. height gating: before H_S the active set is never jailed and bootstrap quorum applies
 for (let i = 0; i < 200; i++) {
     check('pre-H_S bootstrap mode', () => {
         const blocks = randomChain(20)

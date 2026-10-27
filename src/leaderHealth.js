@@ -272,6 +272,38 @@ function breakerThreshold(eligibleCount) {
     return Math.floor(eligibleCount / 2) + 1
 }
 
+// Halt-breaker recovery decision (plan §6.3.1), extracted so the rule is testable
+// and identical in consensus.js and in the simulator.
+//
+// The breaker may finalise a candidate that carries the signatures of a *majority
+// of the eligible set*, even when that majority is below quorumMin. This is the
+// only exit from the E < quorumMin state: the normal path needs q >= quorumMin
+// signatures but only E < quorumMin leaders are eligible, so it can never be
+// satisfied. Requiring at least one missing signer (the old rule) made that state
+// a permanent halt, because when every eligible leader has already signed there is
+// nobody left to wait for. `missing === 0` is therefore a *valid* recovery case,
+// not an error: it is exactly the "eligible set collapsed below quorumMin" case.
+function breakerRecovery(eligibleCount, signerCount) {
+    const E = Math.max(0, Math.floor(Number(eligibleCount) || 0))
+    const S = Math.max(0, Math.floor(Number(signerCount) || 0))
+    const threshold = breakerThreshold(E)
+    const missing = Math.max(0, E - Math.min(S, E))
+    const maxMissing = Math.max(0, E - threshold)
+    if (E < 1)
+        return { allowed: false, threshold, missing, maxMissing, reason: 'no-eligible-leaders' }
+    if (S < threshold)
+        return { allowed: false, threshold, missing, maxMissing, reason: 'not-enough-eligible-signers' }
+    if (missing > maxMissing)
+        return { allowed: false, threshold, missing, maxMissing, reason: 'too-many-missing-signers' }
+    return {
+        allowed: true,
+        threshold,
+        missing,
+        maxMissing,
+        reason: missing === 0 ? 'all-eligible-signed' : 'majority-of-eligible',
+    }
+}
+
 function quorumFor(leaderNames, state, height, overrides) {
     const p = params(overrides)
     const eligible = eligibleLeaders(leaderNames, state, height)
@@ -331,4 +363,5 @@ module.exports = {
     quorumFor,
     commitDecision,
     breakerThreshold,
+    breakerRecovery,
 }

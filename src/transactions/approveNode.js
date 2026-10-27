@@ -1,3 +1,5 @@
+const leaderHealth = require('../leaderHealth')
+
 module.exports = {
     fields: ['target'],
     validate: (tx, ts, legitUser, cb) => {
@@ -19,7 +21,13 @@ module.exports = {
                         cb(false, 'invalid tx target does not exist')
                     else if (config.disallowVotingInactiveLeader && !account.pub_leader)
                         cb(false, 'target does not have an activated leader signing key')
-                    else
+                    else if (config.disallowVotingJailedLeader && chain && chain.healthParams && leaderHealth) {
+                        const health = chain.healthParams()
+                        if (health.jailEnabled && leaderHealth.isJailed(chain.jailState(), account.name, chain.getLatestBlock()._id))
+                            cb(false, 'target is currently jailed')
+                        else
+                            cb(true)
+                    } else
                         cb(true)
                     
                 })

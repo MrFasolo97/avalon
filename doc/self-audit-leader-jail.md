@@ -154,6 +154,17 @@ capabilities. This may not work in all Docker runtimes.
 **Recommendation:** Provide an alternative using Docker network namespaces or
 `docker network disconnect`.
 
+#### M2: New leader votes for jailed accounts are rejected at blockchain level — ADDED
+**Files:** `src/transactions/approveNode.js`, `src/config.js`, `test/approveNode-jailed.js`  
+**Details:** The existing `disallowVotingInactiveLeader` rule rejected votes for
+accounts without `pub_leader`, but a jailed leader keeps `pub_leader` set, so it
+could still receive new votes. A new `disallowVotingJailedLeader` flag
+(default `true`) rejects `approveNode` transactions whose target is currently
+jailed. The check is height-gated through `chain.healthParams()` and only
+activates after `H_S`. Existing votes are **not** retroactively removed; they
+continue to contribute `node_appr` until their owners unvote, which is the
+least-invasive behaviour.
+
 ## 4. Recommendations before mainnet
 
 1. ~~Fix H1 (heartbeat validation for former leaders).~~ Done.
@@ -161,16 +172,18 @@ capabilities. This may not work in all Docker runtimes.
 3. ~~Reduce `jailIndex.save` frequency (M1).~~ Done.
 4. ~~Fix H3 (`E < quorumMin` permanent halt).~~ Done.
 5. ~~Decide/implement the degraded-mode policy (§7).~~ Done.
-6. Run the 48-hour Docker integration scenarios.
-7. Engage an **external, independent** auditor.
-8. Publish activation heights and validator upgrade window.
-9. Consider frontend exposure of jailed leaders (e.g. disable voting in dtube2/dtubego) — product decision, not consensus-critical.
+6. ~~Disable new leader votes for jailed leaders at blockchain level.~~ Done (`disallowVotingJailedLeader`).
+7. Run the 48-hour Docker integration scenarios.
+8. Engage an **external, independent** auditor.
+9. Publish activation heights and validator upgrade window.
+10. Consider frontend exposure of jailed leaders (e.g. disable voting in dtube2/dtubego) — product decision, not consensus-critical.
 
 ## 5. Test summary
 
 | Suite | Count | Result |
 |-------|-------|--------|
 | Unit tests | 35 | PASS |
+| approveNode jailed-vote unit tests | 3 | PASS |
 | Simulation | 2 scenarios | PASS, 0 safety violations |
 | Chaos tests | 9 scenarios incl. 10k healthy, partitions, force-finalize | PASS, 0 safety violations |
 | Fuzz checks | 3600 | PASS |
@@ -178,9 +191,10 @@ capabilities. This may not work in all Docker runtimes.
 ## 6. Conclusion
 
 The prototype implements the approved design correctly and the test coverage is
-strong for a prototype. H1, H2 and H3 were found and fixed. The remaining
-blockers for mainnet are operational (48h integration run, external audit,
-validator communication) plus the degraded-mode policy in §7.
+strong for a prototype. H1, H2 and H3 were found and fixed. Leader votes for
+jailed accounts are now blocked at blockchain level. The remaining blockers for
+mainnet are operational (48h integration run, external audit, validator
+communication).
 
 ## 7. Degraded-mode policy (implemented)
 

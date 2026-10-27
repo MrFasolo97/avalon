@@ -187,6 +187,8 @@ let config = {
             hotfix1: true,
             maxKeys: 25,
             disallowVotingInactiveLeader: true,
+            // reject leader votes for accounts that are currently jailed (after H_S)
+            disallowVotingJailedLeader: true,
             burnAccount: 'dtube.airdrop',
             preloadVt: 50, // 50% of vtPerBurn
             preloadBwGrowth: 2, // x2 more time of bwGrowth

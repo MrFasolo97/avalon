@@ -341,3 +341,26 @@ The production plan must use the majority breaker threshold, not a fixed
 This preserves liveness for single/double failures while preventing a split in
 the worst partition case.
 
+### 10.5 Live finding (2026-10-27): `E < quorumMin` was a permanent halt
+
+A 300-block healthy run on the isolated testnet (`leaders=3`, `quorumMin=3`,
+`H_S=200`) halted at height 514. One height recorded two skips
+(`skips: ["miner2","miner1"]`, 500 ms grace on a loaded host), so the eligible
+set collapsed to `E=1` while the normal quorum stayed at `q=3`:
+
+```
+T3 R0-1 R1-0
+haltBreaker: recovery not possible at height 514 (signers=1/1 need>=1 missing<=0)
+```
+
+The `missing < 1` guard made the breaker refuse the only state in which it is
+structurally required: the single eligible leader had already signed and nobody
+was left to wait for. With no blocks produced, the heartbeat transactions that
+would clear the skips could never be included, so the halt was permanent.
+
+Fixed by extracting the rule into `leaderHealth.breakerRecovery(E, S)` and using
+it both in `consensus.js` and in the simulator: recovery is allowed iff
+`S >= breakerThreshold(E)` and `E >= 1`, and `missing === 0` is explicitly a
+valid case. `E = 0` still halts. The 2|2 partition (`E=4`, `S=2`, threshold 3)
+still halts on both sides, so partition safety is unchanged.
+

@@ -38,12 +38,14 @@ Run with mainnet-like params compressed in time.
 
 ## 3. Integration tests on isolated Docker testnet
 
-- [~] 48h+ stable run with `LEADERS_OVERRIDE=3` (default prototype). *Needs long-running environment; helper scripts created.*
+- [~] 48h+ stable run with `LEADERS_OVERRIDE=3` (default prototype). *Needs long-running environment; helper scripts created. First attempt on 2026-10-27 halted at block 514 and exposed H3; clock restarts after the fix.*
 - [~] Kill a leader via `docker stop`, verify standby promotion after `N` misses. *Script `jail-kill.sh` created.*
 - [~] Restart a jailed node and send heartbeat tx; verify un-jailing. *Script `jail-restart.sh` created.*
 - [~] 2|2 partition via `iptables`/network namespaces. *Scripts `jail-partition.sh` / `jail-heal.sh` created.*
 - [ ] Upgrade test: start chain without jail, activate jail params, verify continuity.
 - [~] Restart all nodes one by one; verify no fork and lock files reloaded. *Persistent commit lock + jail index implemented; needs manual run.*
+- [x] Height-gated activation live: at block 200 the testnet switched to `skipStrict`, `standbyEnabled`, `jailEnabled` with `bootstrap=false` and kept producing blocks.
+- [~] Liveness when the eligible set collapses below `quorumMin`: H3 fix implemented and unit/simulation-tested; **live re-run pending**.
 
 ## 4. Productionization required before mainnet
 
@@ -55,7 +57,9 @@ Run with mainnet-like params compressed in time.
 - [x] Robust commit lock store: sync cleanup, corruption handling.
 - [x] Heartbeat tx type 18: validation (sender must be registered leader), zero bandwidth fee, idempotent execution.
 - [x] Logging and metrics: jail events, quorum changes, breaker fires, lock refusals exposed via `/leaderhealth`.
-- [x] Peer handshake stability after restart: implemented periodic node_status refresh in `src/p2p.js`. *Live verification blocked by testnet bootstrap DB issue.*
+- [x] Peer handshake stability after restart: implemented periodic node_status refresh in `src/p2p.js`. **Verified live on 2026-10-27** (all peers report the current `head_block` after a restart).
+- [x] Liveness invariant: recovery always exists when at least one leader is eligible (`leaderHealth.breakerRecovery`, H3).
+- [ ] Degraded-mode policy when `E < quorumMin` (flag + metric + operator alert + bound). *Decision pending, see self-audit §7.*
 
 ## 5. Code quality / audit
 
@@ -84,10 +88,12 @@ Resolved in this pass:
 - persistent jail index + commit lock store,
 - heartbeat validation/zero fee,
 - fuzz/property tests,
-- Docker helper scripts.
+- Docker helper scripts,
+- peer handshake stability (verified live),
+- H3: `E < quorumMin` is no longer a permanent halt.
 
 Remaining hard blockers:
-- peer handshake stability after restart (§4),
-- 48h+ Docker integration run (§3),
+- live re-run of the liveness scenarios and the 48h+ Docker integration run (§3),
+- degraded-mode policy decision and implementation (§4),
 - external audit (excluded by request),
 - validator communication + canary rollout (§6).

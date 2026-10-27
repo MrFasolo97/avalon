@@ -45,7 +45,7 @@ Run with mainnet-like params compressed in time.
 - [ ] Upgrade test: start chain without jail, activate jail params, verify continuity.
 - [~] Restart all nodes one by one; verify no fork and lock files reloaded. *Persistent commit lock + jail index implemented; needs manual run.*
 - [x] Height-gated activation live: at block 200 the testnet switched to `skipStrict`, `standbyEnabled`, `jailEnabled` with `bootstrap=false` and kept producing blocks.
-- [~] Liveness when the eligible set collapses below `quorumMin`: H3 fix implemented and unit/simulation-tested; **live re-run pending**.
+- [x] Liveness when the eligible set collapses below `quorumMin`: H3 fix implemented, unit/simulation-tested and **live-verified** (testnet produced blocks past height 200 with `E=3,q=3`, no degraded/fork events).
 
 ## 4. Productionization required before mainnet
 
@@ -59,7 +59,8 @@ Run with mainnet-like params compressed in time.
 - [x] Logging and metrics: jail events, quorum changes, breaker fires, lock refusals exposed via `/leaderhealth`.
 - [x] Peer handshake stability after restart: implemented periodic node_status refresh in `src/p2p.js`. **Verified live on 2026-10-27** (all peers report the current `head_block` after a restart).
 - [x] Liveness invariant: recovery always exists when at least one leader is eligible (`leaderHealth.breakerRecovery`, H3).
-- [ ] Degraded-mode policy when `E < quorumMin` (flag + metric + operator alert + bound). *Decision pending, see self-audit §7.*
+- [x] Degraded-mode policy when `E < quorumMin`: unanimity in breaker, `/leaderhealth` flag, metric/operator alert, configurable bound.
+- [x] Fork detector in `/leaderhealth` (`forkSuspect` + `forkPeers`).
 
 ## 5. Code quality / audit
 

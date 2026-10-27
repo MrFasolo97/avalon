@@ -90,17 +90,18 @@ haltBreaker: recovery not possible at height 514 (signers=1/1 need>=1 missing<=0
 - `missing === 0` is a valid recovery case ("all-eligible-signed"), not an error;
 - `E = 0` (all leaders jailed) still halts: no eligible signer exists.
 
+When `E < quorumMin` (degraded mode), the breaker threshold is raised to `E`,
+i.e. **unanimità dell'eligible set**, for extra safety (see §7).
+
 `consensus.js` and the simulator both call this function, so the rule cannot
 diverge between the model and production code.
 
-**Residual risk (accepted, documented):** allowing `missing === 0` means that
-when `E` collapses to 1, a single eligible leader can finalise. Nodes that see a
-different eligible set can only finalise candidates signed by *their* eligible
-majority, so both sides cannot finalise conflicting candidates unless they
-disagree on eligibility *and* each sees a majority of its own set. The commit
-lock still forbids a double commit per node. This is the same relaxation the
-plan already accepted for the breaker; it is now reachable in the `E=1` case,
-which is why degraded operation must be observable and bounded (see §7).
+**Residual risk (accepted, documented):** canonical selection ensures that,
+given the same view of all candidates, every node picks the same winner. It
+cannot prevent a fork when partitions have genuinely different candidate sets
+(a known Avalon collision-resolution limitation). Unanimity in degraded mode
+and the commit lock limit the surface; observability flags it immediately
+(see §7).
 
 **Verification:** 35 unit tests (5 new for `breakerRecovery`), 3600 fuzz checks
 (new majority property, 400 iterations), simulation and chaos scenarios still
@@ -159,10 +160,11 @@ capabilities. This may not work in all Docker runtimes.
 2. ~~Harden `jailIndex.js` against corruption (H2).~~ Done.
 3. ~~Reduce `jailIndex.save` frequency (M1).~~ Done.
 4. ~~Fix H3 (`E < quorumMin` permanent halt).~~ Done.
-5. Decide the degraded-mode policy (§7) and implement it.
+5. ~~Decide/implement the degraded-mode policy (§7).~~ Done.
 6. Run the 48-hour Docker integration scenarios.
 7. Engage an **external, independent** auditor.
 8. Publish activation heights and validator upgrade window.
+9. Consider frontend exposure of jailed leaders (e.g. disable voting in dtube2/dtubego) — product decision, not consensus-critical.
 
 ## 5. Test summary
 
@@ -180,24 +182,28 @@ strong for a prototype. H1, H2 and H3 were found and fixed. The remaining
 blockers for mainnet are operational (48h integration run, external audit,
 validator communication) plus the degraded-mode policy in §7.
 
-## 7. Open design decision: degraded-mode policy
+## 7. Degraded-mode policy (implemented)
 
 After H3, `E < quorumMin` no longer halts the chain: it degrades to
-majority-of-eligible, and at `E = 1` a single leader finalises. That is the
-plan's documented breaker relaxation, but it must not be silent or unbounded.
-Two candidate policies were evaluated; the recommended one is (C):
+majority-of-eligible. The implemented policy hardens this path:
 
-- **(B) Raise the skip grace / exclude only jailed leaders from `E`.**
-  Symptomatic: it reduces the frequency of `E` collapse but not the structural
-  case (`leaders=3, quorumMin=3` cannot reach `q` with one ineligible leader),
-  it changes a consensus-relevant rule (needs its own flag day), and removing
-  the `streak > 0` exclusion would turn every real death into one breaker round
-  per block until the jail threshold is reached.
-- **(C) Keep the eligibility rule and make degraded operation explicit.**
-  Emit a `degraded` flag from `/leaderhealth`, a metric and an operator alert
-  whenever `E < quorumMin`, and bound it (e.g. halt after K consecutive degraded
-  blocks and require operator action). This keeps the fast, deterministic
-  quorum shrink, makes the safety relaxation visible in real time, and does not
-  mask the underlying liveness problem.
+- **Unanimity in degraded mode**: when `E < quorumMin`, the halt breaker now
+  requires **all `E` eligible signers** (`breaker.threshold = E`) instead of a
+  simple majority. With the approved mainnet params (`quorumMin=3`) this means
+  `E=1` needs 1/1 and `E=2` needs 2/2 — the safest possible recovery.
+- **Finalization delay**: the existing `haltBreakerMs` wall-clock wait already
+  provides the delay window; no extra timer was added.
+- **Observability**: `/leaderhealth` exposes `degraded`,
+  `degradedSinceHeight`, `consecutiveDegradedBlocks`; logs emit `DEGRADED MODE`
+  and `CRITICAL` after `config.degradedCriticalConsecutive` consecutive blocks
+  (configurable via `DEGRADED_CRITICAL_CONSECUTIVE`, default 100).
+- **Fork detector**: `/leaderhealth` exposes `forkSuspect` and `forkPeers` when
+  a peer reports the same `head_block` with a different hash.
 
-Status: **not implemented** — pending decision.
+**Residual risk**: canonical selection ensures that, *given the same view of
+all candidates*, every node picks the same winner. It cannot prevent a fork
+when partitions have genuinely different candidate sets: a node that has not
+received the global canonical block may finalise its local canonical. The
+breaker unanimity rule and the commit lock limit this surface, but do not
+eliminate it entirely. This is documented as a known limitation of the
+Avalon collision-resolution design.

@@ -13,6 +13,22 @@ module.exports = {
             const state = chain.jailState(height)
             const quorum = consensus.leaderQuorum()
             const health = chain.healthParams(height)
+            const degraded = health.jailEnabled && quorum.E < health.quorumMin
+            const chainHeight = height
+            if (!consensus._degradedState) consensus._degradedState = { since: 0, consecutive: 0, lastHeight: -1 }
+            if (degraded) {
+                if (consensus._degradedState.lastHeight !== chainHeight) {
+                    if (consensus._degradedState.since === 0 || consensus._degradedState.lastHeight !== chainHeight - 1) {
+                        consensus._degradedState.since = chainHeight
+                        consensus._degradedState.consecutive = 1
+                    } else {
+                        consensus._degradedState.consecutive++
+                    }
+                    consensus._degradedState.lastHeight = chainHeight
+                }
+            } else {
+                consensus._degradedState = { since: 0, consecutive: 0, lastHeight: -1 }
+            }
 
             const jailed = []
             const streaks = {}
@@ -63,6 +79,9 @@ module.exports = {
                     E: quorum.E,
                     q: quorum.q,
                 },
+                degraded: degraded,
+                degradedSinceHeight: degraded ? consensus._degradedState.since : 0,
+                consecutiveDegradedBlocks: degraded ? consensus._degradedState.consecutive : 0,
                 breaker: consensus.breaker,
                 commitLock: {
                     enabled: !!config.commitLock,

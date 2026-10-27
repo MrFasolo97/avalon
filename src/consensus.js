@@ -24,6 +24,7 @@ let consensus = {
     haltBreakerTimeout: null,
     haltBreakerHeight: 0,
     breaker: null,
+    _degradedState: { since: 0, consecutive: 0, lastHeight: -1 },
     // per-height commit lock: at most one hash per height is committed by this node
     // (see leaderHealth.commitDecision). `breakerOverride` is set for one height by a
     // haltBreaker recovery round and is the only way to commit a second hash.
@@ -137,19 +138,17 @@ let consensus = {
         const winner = candidates[0]
         const q = consensus.leaderQuorum()
         const signers = (winner[0] || []).filter(n => q.eligible.indexOf(n) !== -1)
-        const missing = q.eligible.length - signers.length
-        const minSigners = leaderHealth.breakerThreshold(q.eligible.length)
-        const maxMissing = q.eligible.length - minSigners
-        if (signers.length < minSigners || missing < 1 || missing > maxMissing) {
+        const recovery = leaderHealth.breakerRecovery(q.eligible.length, signers.length)
+        if (!recovery.allowed) {
             logr.warn('haltBreaker: recovery not possible at height ' + height +
-                ' (signers=' + signers.length + '/' + q.eligible.length +
-                ' need>=' + minSigners + ' missing<=' + maxMissing +
-                '), halting instead of forking')
+                ' (' + recovery.reason + ', signers=' + signers.length + '/' + q.eligible.length +
+                ' need>=' + recovery.threshold + ' missing=' + recovery.missing +
+                '/max ' + recovery.maxMissing + '), halting instead of forking')
             return
         }
         logr.warn('haltBreaker: recovery round at height ' + height + ' with ' +
-            signers.length + '/' + q.eligible.length + ' eligible signers (q=' + q.q + '), ' +
-            'block by ' + winner.block.miner)
+            signers.length + '/' + q.eligible.length + ' eligible signers (q=' + q.q +
+            ', ' + recovery.reason + '), block by ' + winner.block.miner)
         // the recovery round is wall-clock and may outlast blockTime: re-anchor the
         // next mining ladder on this instant (see chain.minerWorker)
         chain.scheduleAnchor = Date.now()
@@ -177,6 +176,32 @@ let consensus = {
             if (consensus.breaker && consensus.breaker.height === chain.getLatestBlock()._id + 1)
                 threshold = Math.min(threshold, consensus.breaker.threshold)
 
+            // Degraded mode observability
+            try {
+                const qq = consensus.leaderQuorum()
+                const hh = chain.getLatestBlock()._id + 1
+                const hhealth = chain.healthParams(hh)
+                if (hhealth.jailEnabled && qq.E < hhealth.quorumMin) {
+                    if (!consensus._degradedState) consensus._degradedState = { since: 0, consecutive: 0, lastHeight: -1 }
+                    if (consensus._degradedState.lastHeight !== hh) {
+                        if (consensus._degradedState.since === 0 || consensus._degradedState.lastHeight !== hh - 1) {
+                            consensus._degradedState.since = hh
+                            consensus._degradedState.consecutive = 1
+                        } else {
+                            consensus._degradedState.consecutive++
+                        }
+                        consensus._degradedState.lastHeight = hh
+                        logr.warn('DEGRADED MODE: E=' + qq.E + ' < quorumMin=' + hhealth.quorumMin + ', q=' + qq.q + ', eligible=' + JSON.stringify(qq.eligible) + ', consecutive=' + consensus._degradedState.consecutive)
+                        if (consensus._degradedState.consecutive >= 100) {
+                            logr.error('CRITICAL: chain in degraded mode for ' + consensus._degradedState.consecutive + ' consecutive blocks since height ' + consensus._degradedState.since)
+                        }
+                    }
+                } else if (consensus._degradedState && consensus._degradedState.consecutive > 0) {
+                    logr.info('Degraded mode ended')
+                    consensus._degradedState = { since: 0, consecutive: 0, lastHeight: -1 }
+                }
+            } catch (e) {}
+
             // if we are observing, we need +1 to pass consensus as we want to manage our own rounds
             if (!consensus.isActive())
                 threshold += 1
@@ -203,13 +228,39 @@ let consensus = {
                 })
             }
 
+            // Canonical selection per height (fix fork from asymmetric views):
+            // determine the canonical block for the next height by earliest timestamp, then lowest hash.
+            // Only the canonical block can be finalized; all other candidates for the same height are ignored
+            // regardless of whether they reached quorum. This ensures all nodes converge on the same block.
+            const nextHeight = chain.getLatestBlock()._id + 1
+            let canonicalByHeight = {}
+            for (const hid of Object.keys(possBlocksById)) {
+                const hNum = Number(hid)
+                if (hNum !== nextHeight) continue
+                const candidates = possBlocksById[hid]
+                if (candidates.length === 0) continue
+                let best = candidates[0]
+                for (let k = 1; k < candidates.length; k++) {
+                    const c = candidates[k]
+                    if (c.block.timestamp < best.block.timestamp ||
+                        (c.block.timestamp === best.block.timestamp && c.block.hash < best.block.hash)) {
+                        best = c
+                    }
+                }
+                canonicalByHeight[hNum] = best.block.hash
+            }
+
             for (let i = 0; i < consensus.possBlocks.length; i++) {
                 const possBlock = consensus.possBlocks[i]
                 logr.cons('T'+Math.ceil(threshold)+' R0-'+(possBlock[0]?possBlock[0].length:'?')+' R1-'+(possBlock[1]?possBlock[1].length:'?'))
+                // Only finalize the canonical block for the next height; ignore non-canonical candidates
+                if (possBlock.block._id === nextHeight && canonicalByHeight[nextHeight] && canonicalByHeight[nextHeight] !== possBlock.block.hash) {
+                    continue
+                }
                 // if 2/3+ of the final round and not already finalizing another block
                 if (possBlock[config.consensusRounds-1].length >= threshold 
             && !consensus.finalizing 
-            && possBlock.block._id === chain.getLatestBlock()._id+1
+            && possBlock.block._id === nextHeight
             && possBlock[0] && possBlock[0].indexOf(process.env.NODE_OWNER) !== -1) {
                 // per-height commit lock: do not finalise a second block at this height
                 if (config.commitLock) {
@@ -324,6 +375,28 @@ let consensus = {
                 return
             }
                 
+            // Canonical precommit (fix): only precommit the canonical candidate for this height
+            // before validation completes. We compute canonical from all candidates we already know
+            // about plus this candidate.
+            if (block._id && block._id === chain.getLatestBlock()._id + 1) {
+                let candidatesForPrecommit = []
+                for (let c = 0; c < consensus.possBlocks.length; c++) {
+                    if (consensus.possBlocks[c].block._id === block._id)
+                        candidatesForPrecommit.push(consensus.possBlocks[c].block)
+                }
+                candidatesForPrecommit.push(block)
+                candidatesForPrecommit.sort((a,b) => {
+                    if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp
+                    return a.hash < b.hash ? -1 : (a.hash > b.hash ? 1 : 0)
+                })
+                const canonicalPreHash = candidatesForPrecommit[0].hash
+                if (canonicalPreHash !== block.hash) {
+                    // Don't precommit non-canonical candidates; still validate/store but don't sign round 0
+                    // We'll wait for the canonical candidate to be propagated
+                    logr.cons('Non-canonical block received for height '+block._id+'#'+block.hash.substr(0,4)+' by '+block.miner+', waiting for canonical')
+                }
+            }
+                
             consensus.validating.push(block.hash)
 
             // its a new possible block, set up the empty possible block
@@ -343,8 +416,6 @@ let consensus = {
                     logr.error('Received invalid new block from '+block.miner, block.hash)
                     if (cb) cb(-1)
                 } else {
-                    logr.cons('Precommitting block '+block._id+'#'+block.hash.substr(0,4))
-
                     // adding to possible blocks
                     if (consensus.possBlocks.length >= consensus.activeLeaders().length * 2)
                         logr.warn('possBlocks at capacity, not adding new block')
@@ -352,11 +423,28 @@ let consensus = {
                         consensus.possBlocks.push(possBlock)
                     if (config.forceFinalize)
                         consensus.scheduleForceFinalize()
-                    // adding ourselves to precommit list
+                    // adding ourselves to precommit list only for canonical block (or if we mined it)
                     for (let i = 0; i < consensus.possBlocks.length; i++) 
                         if (block.hash === consensus.possBlocks[i].block.hash
-                        && consensus.possBlocks[i][0].indexOf(process.env.NODE_OWNER) === -1)
-                            possBlock[0].push(process.env.NODE_OWNER)
+                        && consensus.possBlocks[i][0].indexOf(process.env.NODE_OWNER) === -1) {
+                            // Compute canonical for this height
+                            let cands = []
+                            for (let c = 0; c < consensus.possBlocks.length; c++) {
+                                if (consensus.possBlocks[c].block._id === block._id)
+                                    cands.push(consensus.possBlocks[c].block)
+                            }
+                            cands.sort((a,b) => {
+                                if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp
+                                return a.hash < b.hash ? -1 : (a.hash > b.hash ? 1 : 0)
+                            })
+                            const canon = cands.length ? cands[0].hash : block.hash
+                            if (canon === block.hash || block.miner === process.env.NODE_OWNER) {
+                                possBlock[0].push(process.env.NODE_OWNER)
+                                logr.cons('Precommitting block '+block._id+'#'+block.hash.substr(0,4))
+                            } else {
+                                logr.cons('Holding off precommit for non-canonical block '+block._id+'#'+block.hash.substr(0,4)+' by '+block.miner)
+                            }
+                        }
 
                     // processing queued messages for this block
                     for (let i = 0; i < consensus.queue.length; i++) {

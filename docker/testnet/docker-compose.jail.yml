@@ -14,10 +14,12 @@ x-jail-params: &jail-params
   # rotation: 3 leaders (dtube + the 2 highest node_appr miners)
   LEADERS_OVERRIDE: "3"
   # On mainnet H_S/H_strict/H_standby are set to the planned flag-day heights.
-  # On the isolated testnet they are 0 so all layers are active from genesis.
-  H_S: "0"
-  H_STRICT: "0"
-  H_STANDBY: "0"
+  # On the isolated testnet they are set to a small positive height so the
+  # bootstrap carve-out (q = E when E < quorumMin) lets the single-leader
+  # genesis finalise blocks, then all layers activate together.
+  H_S: "200"
+  H_strict: "200"
+  H_standby: "200"
   QUORUM_MIN: "3"
   QUORUM_CAP: "4"
   # demo-timed jail: 3 proven misses (~9 s) then 20 blocks (~60 s)

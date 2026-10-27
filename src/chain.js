@@ -614,6 +614,24 @@ let chain = {
                 logr.warn('skip attestation mismatch (Layer S, non-fatal) at block ' + newBlock._id + ' by ' + newBlock.miner + ': ' + detail)
             }
         }
+        // Safety check: prevent fork extension when skipped leaders claim to be the producer
+        // A forked chain could try to extend with blocks from leaders that should be skipped.
+        // Verify the producer is legitimate according to our current view of the ladder.
+        // Also check that if this block claims skips, they match the canonical ladder.
+        if (health.skipRecording !== false && verifyHashAndSignature) {
+            const gotSkips = leaderHealth.skipList(newBlock)
+            if (gotSkips && gotSkips.length > 0) {
+                // All skipped leaders must appear before the producer in the canonical ladder
+                const expectedSkips = leaderHealth.canonicalSkips(ladder, ladderPosition)
+                if (!leaderHealth.sameSkips(expectedSkips, gotSkips)) {
+                    if (health.skipStrict) {
+                        logr.error('fork-protection: invalid skip list for block ' + newBlock._id + ' by ' + newBlock.miner)
+                        cb(false); return
+                    }
+                    logr.warn('fork-protection: skip list mismatch at block ' + newBlock._id + ' by ' + newBlock.miner)
+                }
+            }
+        }
 
         if (!verifyTxValidity) {
             if (!verifyHashAndSignature) {

@@ -56,7 +56,7 @@ Run with mainnet-like params compressed in time.
 - [x] Persistent/checkpointed jail index (`src/jailIndex.js`, loaded in `main.js`).
 - [x] Robust commit lock store: sync cleanup, corruption handling.
 - [x] Heartbeat tx type 18: validation (sender must be registered leader), zero bandwidth fee, idempotent execution.
-- [x] Blockchain-level vote disabling for jailed leaders (`disallowVotingJailedLeader` in `approveNode.js`, height-gated after `H_S`).
+- [x] Blockchain-level vote disabling for jailed leaders (`disallowVotingJailedLeader` in `approveNode.js`, height-gated after `H_S`). Unit-tested; live verification pending Docker host recovery.
 - [x] Logging and metrics: jail events, quorum changes, breaker fires, lock refusals exposed via `/leaderhealth`.
 - [x] Peer handshake stability after restart: implemented periodic node_status refresh in `src/p2p.js`. **Verified live on 2026-10-27** (all peers report the current `head_block` after a restart).
 - [x] Liveness invariant: recovery always exists when at least one leader is eligible (`leaderHealth.breakerRecovery`, H3).

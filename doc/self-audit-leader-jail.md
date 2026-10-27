@@ -165,6 +165,14 @@ activates after `H_S`. Existing votes are **not** retroactively removed; they
 continue to contribute `node_appr` until their owners unvote, which is the
 least-invasive behaviour.
 
+**Live verification:** attempted on the isolated Docker testnet on 2026-10-27,
+but the local Docker daemon entered a degraded state after the earlier jail
+prototype runs (a MongoDB container became zombie/defunct and could not be
+removed through normal Docker commands). The daemon was recovered, but starting
+the testnet containers was still impractically slow. The feature is covered by
+dedicated unit tests (`test/approveNode-jailed.js`) and should be re-verified
+live once the Docker host is rebooted or otherwise restored.
+
 ## 4. Recommendations before mainnet
 
 1. ~~Fix H1 (heartbeat validation for former leaders).~~ Done.

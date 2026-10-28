@@ -8,7 +8,7 @@ WORKDIR /avalon
 RUN apt-get update && apt-get install -y --no-install-recommends curl vim && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY src/ src/
 COPY docker/testnet/scripts/ scripts/

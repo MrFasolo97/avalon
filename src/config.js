@@ -208,10 +208,11 @@ let config = {
             rewardPoolYearlyRate: 0.10,
             vtReferenceTotal: 15500000
         },
-        // Hard fork at ~13,925,000 (~3 weeks from block 13,320,067):
+        // Hard fork at 13,325,000 (just above the resume head 13,320,067, ~4 h after
+        // the resume; moved down from 13,925,000 while the chain is halted):
         // - forceFinalize: enables anti-fork safety net if consensus stalls
         // - consensusSigVersion: 2 (sorted keys) prevents key-ordering mismatches
-        13925000: {
+        13325000: {
             forceFinalize: true,
             consensusSigVersion: 2
         }

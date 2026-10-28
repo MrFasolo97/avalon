@@ -11,3 +11,4 @@ apidoc
 .DS_Store
 .commandcode
 opencode.bash
+/.env

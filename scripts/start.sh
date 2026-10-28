@@ -18,6 +18,20 @@
 #export NO_DISCOVERY=1
 #export DISCOVERY_EXCLUDE=dtube
 
+# HTTP & security (new in 2.0.x — defaults change client behaviour,
+# see doc/migration-runbook-no-econs.en.md S3 and the .env.example at the repo root)
+#export CORS_ORIGIN='*'           # default: false -> no CORS headers (browsers can't read the API)
+#export TRUST_PROXY=1             # trust X-Forwarded-For from the first proxy hop (default: off)
+#export ADMIN_TOKEN=              # protects /mineBlock /recover /debug (unset -> open, dev only)
+#export LOG_ADMIN_TOKEN=          # protects the in-node log viewer (/logs)
+#export CONTENT_MAX_COMMENTS=2000
+#export CONTENT_MAX_RESULTS=10000
+#export IMG_MAX_BYTES=10485760    # 10 MB max image download
+#export IMG_MAX_PIXELS=20000000   # 20 MPixels max image input
+#export LOG_FULL=1                # log viewer: keep unredacted messages
+#export LOG_PAGE=0                # log viewer: disable the web page
+#export SKIP_EARLY_CHECK_BLOCKS=3889058
+
 # Enable more modules
 #export NOTIFICATIONS=1
 #export RANKINGS=1

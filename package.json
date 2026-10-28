@@ -30,7 +30,7 @@
     "run-series": "^1.1.9",
     "secp256k1": "^4.0.4",
     "sha256-file": "^1.0.0",
-    "sharp": "^0.32.6",
+    "sharp": "^0.35.5",
     "signale": "^1.4.0",
     "simple-youtube-api": "^5.2.1",
     "ws": "^7.5.11"

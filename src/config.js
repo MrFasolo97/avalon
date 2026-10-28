@@ -15,8 +15,9 @@ let config = {
             allowRevotes: false,
             // the base58 encoding alphabet
             b58Alphabet: '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz',
-            // the block #0 genesis timestamp
-            block0ts: 1601477849000,
+            // the block #0 genesis timestamp (public testnet: fixed launch
+            // reference — must be identical on every testnet node)
+            block0ts: 1767225600000,
             // the block hash serialization revision (overridden below)
             // the consensus message serialization version
             // 1: insertion order (no sort) — legacy
@@ -81,10 +82,11 @@ let config = {
             masterName: 'dtube',
             // if false master can create accounts with usernames without burning tokens
             masterPaysForUsernames: false,
-            // the master account public original key (irrelevant if using genesis)
-            masterPub: 'dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz',
-            // the master account public leader key  (irrelevant if using genesis)
-            masterPubLeader: 'dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz',
+            // the master account public original key (public testnet keypair;
+            // the private key is NOT in the repo — the coordinator keeps it)
+            masterPub: '2AV8nB9KTcHcQQJQ8BGvaUDXX5Yr3fU3hTFhoqMZkExrz',
+            // the master account public leader key  (same testnet keypair)
+            masterPubLeader: '2AV8nB9KTcHcQQJQ8BGvaUDXX5Yr3fU3hTFhoqMZkExrz',
             masterNoPreloadAcc: true,
             // the maximum time drift in ms before a block is invalid
             maxDrift: 200,
@@ -97,8 +99,9 @@ let config = {
             notifPurgeAfter: 56,
             // the maximum number of mentions triggering a notification
             notifMaxMentions: 10,
-            // the sha256sum hash of block 0 (new origin hash -> new chain)
-            originHash: '89b3b910f5a465a273d017b9df3d4ab3b4ba571e8e87dffdfecc39dfef2741dd',
+            // block #0 hash -> chain id. The public testnet uses its own value so
+            // its nodes never peer with mainnet (P2P rejects a mismatching origin_block).
+            originHash: '12968579b1537d511e834dd4b6095f8ff4e1144f823b13e8b6af83de03e52a2f',
             // the default number of random bytes to use for new key generation
             randomBytesLength: 32,
             // the maximum share of the reward pool a single distribution can generate
@@ -150,7 +153,8 @@ let config = {
 
             // master dao
             masterDao: true,
-            masterDaoTxs: [0,4,5,6,10,11,12,13,14,15,17,19,20,21,23,24,25,26,27,28,29,30,32],
+            // public testnet: master may create accounts, transfer, enable and vote
+            masterDaoTxs: [0,1,2,3,4,5,6,7,8,10,11,12,13,14,15,17,18,19,20,21,23,24,25,26,27,28,29,30,32],
             masterDaoTxExp: 259200000,
 
             // block size increase
@@ -183,6 +187,11 @@ let config = {
             // WARNING: enabling fallback can create a permanent fork during network
             // partitions. When false, the chain halts until quorum is reached — safer.
             forceFinalizeFallback: false,
+        },
+        // Public testnet only: enable the anti-fork safety net almost immediately
+        // so it can be exercised on a young chain. NEVER ship this entry to mainnet.
+        100: {
+            forceFinalize: true
         },
         // 241600: only txLimits change — matches existing new_net deploy
         241600: {

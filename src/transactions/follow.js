@@ -6,7 +6,7 @@ module.exports = {
         }
 
         cache.findOne('accounts', {name: tx.sender}, function(err, acc) {
-            if (err) throw err
+            if (err) { logr.error('follow error', err); return cb(false, 'internal error') }
             if (!acc.follows) acc.follows = []
             if (acc.follows.indexOf(tx.data.target) > -1) {
                 cb(false, 'invalid tx already following'); return

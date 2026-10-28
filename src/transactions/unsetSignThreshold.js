@@ -7,7 +7,7 @@ module.exports = {
         if (!validate.array(tx.data.types))
             return cb(false, 'types is not a valid array')
         
-        for (let t in tx.data.types)
+        for (let t = 0; t < tx.data.types.length; t++)
             if (!validate.integer(tx.data.types[t],true,false))
                 return cb(false, 'invalid type ' + tx.data.types[t] + ' at index ' + t)
         
@@ -17,7 +17,7 @@ module.exports = {
         cache.findOne('accounts', {name: tx.sender}, (e,acc) => {
             let newThresholds = acc.thresholds
             if (newThresholds) {
-                for (let t in tx.data.types)
+                for (let t = 0; t < tx.data.types.length; t++)
                     delete newThresholds[tx.data.types[t]]
                 cache.updateOne('accounts', {name: tx.sender}, { $set: { thresholds: newThresholds } }, () => cb(true))
             } else

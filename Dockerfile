@@ -3,8 +3,10 @@ LABEL "project.home"="https://github.com/nannal/avalon"
 RUN git clone git://github.com/skzap/avalon
 WORKDIR /avalon
 RUN npm install
+RUN mkdir -p /avalon/genesis /avalon/dump && chown -R node:node /avalon
 EXPOSE 6001
 EXPOSE 3001
+USER node
 ENV DB_URL 'mongodb://localhost:27017'
 ENV DB_NAME 'avalon'
 ENV NODE_OWNER 'default user'

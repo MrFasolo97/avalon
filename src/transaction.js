@@ -1,5 +1,5 @@
 const GrowInt = require('growint')
-const CryptoJS = require('crypto-js')
+const crypto = require('crypto')
 const { EventEmitter } = require('events')
 const cloneDeep = require('clone-deep')
 const bson = require('bson')
@@ -16,20 +16,60 @@ const skiphash = {
 let transaction = {
     pool: [], // the pool holds temporary txs that havent been published on chain yet
     eventConfirmation: new EventEmitter(),
-    addToPool: (txs) => {
-        if (transaction.isPoolFull())
+    poolQueue: [],
+    poolLock: false,
+    maxPoolQueue: 1000,
+    processPoolQueue: () => {
+        if (transaction.poolQueue.length === 0 || transaction.poolLock) return
+        const item = transaction.poolQueue.shift()
+        if (!item) return
+        transaction.addToPool(item, true)
+    },
+    addToPool: (txs, fromQueue) => {
+        if (!fromQueue && transaction.poolLock) {
+            if (transaction.poolQueue.length >= transaction.maxPoolQueue) {
+                transaction.poolQueue.shift()
+                logr.warn('Pool queue overflow, evicting oldest')
+            }
+            transaction.poolQueue.push(txs)
             return
-
-        for (let y = 0; y < txs.length; y++) {
-            let exists = false
-            for (let i = 0; i < transaction.pool.length; i++)
-                if (transaction.pool[i].hash === txs[y].hash)
-                    exists = true
-            
-            if (!exists)
-                transaction.pool.push(txs[y])
         }
-        
+        if (transaction.isPoolFull()) {
+            transaction.poolQueue = []
+            return
+        }
+        transaction.poolLock = true
+        try {
+            for (let y = 0; y < txs.length; y++) {
+                if (transaction.isPoolFull()) break
+                let exists = false
+                for (let i = 0; i < transaction.pool.length; i++)
+                    if (transaction.pool[i].hash === txs[y].hash)
+                        exists = true
+                
+                if (!exists)
+                    transaction.pool.push(txs[y])
+            }
+            // drain queue while we hold the lock
+            while (transaction.poolQueue.length > 0) {
+                if (transaction.isPoolFull()) {
+                    transaction.poolQueue = []
+                    break
+                }
+                const qItem = transaction.poolQueue.shift()
+                for (let y = 0; y < qItem.length; y++) {
+                    if (transaction.isPoolFull()) break
+                    let exists = false
+                    for (let i = 0; i < transaction.pool.length; i++)
+                        if (transaction.pool[i].hash === qItem[y].hash)
+                            exists = true
+                    if (!exists)
+                        transaction.pool.push(qItem[y])
+                }
+            }
+        } finally {
+            transaction.poolLock = false
+        }
     },
     isPoolFull: () => {
         if (transaction.pool.length >= max_mempool) {
@@ -39,19 +79,56 @@ let transaction = {
         return false
     },
     removeFromPool: (txs) => {
-        for (let y = 0; y < txs.length; y++)
-            for (let i = 0; i < transaction.pool.length; i++)
-                if (transaction.pool[i].hash === txs[y].hash) {
-                    transaction.pool.splice(i, 1)
-                    break
-                }
+        if (transaction.poolLock) {
+            transaction.removalQueue = transaction.removalQueue || []
+            for (let y = 0; y < txs.length; y++)
+                transaction.removalQueue.push(txs[y])
+            return
+        }
+        transaction.poolLock = true
+        try {
+            for (let y = 0; y < txs.length; y++)
+                for (let i = transaction.pool.length - 1; i >= 0; i--)
+                    if (transaction.pool[i].hash === txs[y].hash) {
+                        transaction.pool.splice(i, 1)
+                        break
+                    }
+            // drain pending removals while we hold the lock
+            if (transaction.removalQueue)
+                for (let y = 0; y < transaction.removalQueue.length; y++)
+                    for (let i = transaction.pool.length - 1; i >= 0; i--)
+                        if (transaction.pool[i].hash === transaction.removalQueue[y].hash) {
+                            transaction.pool.splice(i, 1)
+                            break
+                        }
+            transaction.removalQueue = []
+        } finally {
+            transaction.poolLock = false
+        }
     },
     cleanPool: () => {
-        for (let i = 0; i < transaction.pool.length; i++)
-            if (transaction.pool[i].ts + config.txExpirationTime < new Date().getTime()) {
-                transaction.pool.splice(i,1)
-                i--
-            }
+        if (transaction.poolLock) {
+            transaction.cleanPoolPending = true
+            return
+        }
+        transaction.poolLock = true
+        try {
+            for (let i = transaction.pool.length - 1; i >= 0; i--)
+                if (transaction.pool[i].ts + config.txExpirationTime < new Date().getTime())
+                    transaction.pool.splice(i,1)
+            // also drain removal queue if any
+            if (transaction.removalQueue)
+                for (let y = 0; y < transaction.removalQueue.length; y++)
+                    for (let i = transaction.pool.length - 1; i >= 0; i--)
+                        if (transaction.pool[i].hash === transaction.removalQueue[y].hash) {
+                            transaction.pool.splice(i, 1)
+                            break
+                        }
+            transaction.removalQueue = []
+            transaction.cleanPoolPending = false
+        } finally {
+            transaction.poolLock = false
+        }
     },
     isInPool: (tx) => {
         let isInPool = false
@@ -63,7 +140,7 @@ let transaction = {
         return isInPool
     },
     isPublished: (tx) => {
-        if (!tx.hash) return
+        if (!tx.hash) return false
         if (chain.recentTxs[tx.hash])
             return true
         return false
@@ -125,7 +202,9 @@ let transaction = {
         let newTx = cloneDeep(tx)
         delete newTx.signature
         delete newTx.hash
-        let computedHash = CryptoJS.SHA256(JSON.stringify(newTx)).toString()
+        let computedHash = crypto.createHash('sha256').update(JSON.stringify(newTx)).digest('hex')
+        if (skiphash[tx.hash] && skiphash[tx.hash] === computedHash && !(!p2p.recovering && chain.getLatestBlock()._id > chain.restoredBlocks))
+            logr.warn('SKIPHASH used for tx', tx.hash, tx)
         if (computedHash !== tx.hash && (skiphash[tx.hash] !== computedHash || (!p2p.recovering && chain.getLatestBlock()._id > chain.restoredBlocks))) {
             cb(false, 'invalid tx hash does not match'); return
         }
@@ -133,7 +212,7 @@ let transaction = {
         // skipped during replays or rebuilds
         if (!p2p.recovering && chain.getLatestBlock()._id > chain.restoredBlocks && Transaction.transactions[tx.type].bsonValidate) {
             let bsonified = bson.deserialize(bson.serialize(newTx))
-            let bsonifiedHash = CryptoJS.SHA256(JSON.stringify(bsonified)).toString()
+            let bsonifiedHash = crypto.createHash('sha256').update(JSON.stringify(bsonified)).digest('hex')
             if (computedHash !== bsonifiedHash)
                 return cb(false, 'unserializable transaction, perhaps due to non-utf8 character?')
         }
@@ -157,8 +236,8 @@ let transaction = {
             }
 
             // checking if the user has enough bandwidth
-            if (JSON.stringify(tx).length > newBw.v && tx.sender !== config.masterName) {
-                cb(false, 'need more bandwidth ('+(JSON.stringify(tx).length-newBw.v)+' B)'); return
+            if (Buffer.byteLength(JSON.stringify(tx), 'utf8') > newBw.v) {
+                cb(false, 'need more bandwidth ('+(Buffer.byteLength(JSON.stringify(tx), 'utf8')-newBw.v)+' B)'); return
             }
 
             // check transaction specifics
@@ -191,7 +270,7 @@ let transaction = {
                 growth: Math.max(account.baseBwGrowth || 0, account.balance)/(config.bwGrowth),
                 max: config.bwMax
             })
-            let needed_bytes = JSON.stringify(tx).length
+            let needed_bytes = Buffer.byteLength(JSON.stringify(tx), 'utf8')
             let bw = bandwidth.grow(ts)
             if (!bw) 
                 throw 'No bandwidth error'

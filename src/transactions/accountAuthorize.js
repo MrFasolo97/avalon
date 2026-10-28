@@ -30,7 +30,7 @@ module.exports = {
                 else if (config.maxKeys && account.auths && account.auths.length >= config.maxKeys)
                     return cb(false, 'cannot add more than ' + config.maxKeys + ' account auths')
                 else if (account.auths)
-                    for (let i in account.auths)
+                    for (let i = 0; i < account.auths.length; i++)
                         if (account.auths[i].user === tx.data.user && account.auths[i].id === tx.data.id)
                             return cb(false, 'account auth already exist')
                 cb(true)

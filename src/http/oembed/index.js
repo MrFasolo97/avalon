@@ -1,23 +1,33 @@
 const { extract } = require('oembed-parser')
+const rateLimit = require('express-rate-limit')
+const { isPrivateURL } = require('../ssrf')
+
+const oembedLimiter = rateLimit({
+    windowMs: 60000,
+    max: 20,
+    message: { error: 'too many requests' }
+})
 
 module.exports = {
     init: (app) => {
-        // get oembed for any url
-        /**
-         * @api {get} /oembed/:url OEmbed
-         * @apiName oembed
-         * @apiGroup External
-         * 
-         * @apiParam {String} url The URL to query oembed data of
-         * 
-         * @apiSuccess {Object} info The oembed data
-         */
-        app.get('/oembed/:url', (req, res) => {
-            if (!req.params.url) {
+        app.get('/oembed/:url', oembedLimiter, async (req, res) => {
+            const url = req.params.url
+            if (!url) {
                 res.sendStatus(500)
                 return
             }
-            extract(req.params.url).then((data) => {
+            // Only http(s) URLs are accepted. The user-supplied URL is passed to
+            // oembed-parser, which never fetches it: it is matched against the
+            // bundled provider list and then forwarded as a `?url=` query
+            // parameter to the provider's hard-coded oEmbed endpoint. Pinning or
+            // rewriting the URL here would break provider matching (and thus the
+            // endpoint), so the check stays on the raw URL to reject internal /
+            // non-routable targets.
+            if (!/^https?:\/\//i.test(url) || await isPrivateURL(url)) {
+                res.status(400).send({error: 'invalid url'})
+                return
+            }
+            extract(url).then((data) => {
                 res.send(data)
             }).catch(() => {
                 res.sendStatus(404)

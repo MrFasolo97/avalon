@@ -47,10 +47,16 @@ module.exports = {
          * 
          * @apiSuccess {Object[]} contents List of ranked trending contents filtered
          */
+        function isValidFilterValue(val) {
+            return /^[a-zA-Z0-9_\-.\u00C0-\u024F]+$/.test(val)
+        }
+
         app.get('/trending/:filter', (req, res) => {
             let filterParam = req.params.filter
             let filter = filterParam.split(':')
             let filterBy = filter[1]
+            if (!filterBy)
+                return res.status(400).send({error: 'invalid filter'})
             let filterAttrs = filterBy.split('&')
 
             let filterMap = {}
@@ -80,7 +86,7 @@ module.exports = {
                         filterMap['tags'] = []
                         filterMap['tags'].push('all')
                     } else if (key === 'limit') 
-                        filterMap['limit'] = Number.MAX_SAFE_INTEGER
+                        filterMap['limit'] = 50
             }
 
             let tags = filterMap['tags']
@@ -93,14 +99,18 @@ module.exports = {
                 else 
                     tags_in.push(tags[i])
 
+            for (let v of tags_in.concat(tags_ex))
+                if (v !== 'all' && !isValidFilterValue(v))
+                    return res.status(400).send({error: 'invalid filter value'})
+
             let limit = filterMap['limit']
 
-            if(limit === -1 || isNaN(limit)) 
-                limit = Number.MAX_SAFE_INTEGER
+            if (isNaN(limit) || limit < 1 || limit > 100)
+                limit = 50
 
             let minTs = new Date().getTime() - rankings.types['trending'].halfLife*rankings.expireFactor
 
-            if (tags.includes('all')) 
+            if (tags.includes('all'))
                 db.collection('contents').find(
                     {
                         $and: [
@@ -110,7 +120,7 @@ module.exports = {
                             { ts: {'$gt': minTs} }
                         ]
                     },
-                    {sort: {ts: -1}}).toArray(function(err, contents) {
+                    {sort: {ts: -1}, limit: 5000}).toArray(function(err, contents) {
                     for (let i = 0; i < contents.length; i++) {
                         contents[i].score = 0
                         contents[i].ups = 0
@@ -127,6 +137,7 @@ module.exports = {
                     contents = contents.sort(function(a,b) {
                         return b.score - a.score
                     })
+                    //rankings.contents['hot'] = contents
                     res.send(contents.slice(0, limit))
                 })
             else 
@@ -164,7 +175,7 @@ module.exports = {
                             if (contents[i].votes[y].vt < 0)
                                 contents[i].downs += Math.abs(contents[i].votes[y].vt)
                         }
-                        contents[i].score = rankings.types['hot'].score(contents[i].ups, contents[i].downs, new Date(contents[i].ts))
+                        contents[i].score = rankings.types['trending'].score(contents[i].ups, contents[i].downs, new Date(contents[i].ts))
                     }
                     contents = contents.sort(function(a,b) {
                         return b.score - a.score

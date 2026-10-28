@@ -14,19 +14,20 @@ let daoMaster = {
         cache.findOne('accounts',{name: config.masterName},(e,acc) => transactions.validate(op,ts,acc,cb))
     },
     executeOperation: (operation,ts) => {
-        return new Promise(async (rs) => {
-            let adj = await daoMaster.adjustOperation(operation)
-            // revalidate, error if invalid at time of execution
-            daoMaster.validateOperation(operation.type,operation.data,ts,(isvalid,em) => {
-                if (isvalid)
-                    transactions.execute({
-                        type: operation.type,
-                        data: operation.data,
-                        sender: config.masterName,
-                        ts: ts
-                    },ts,() => cache.updateOne('masterdao',{_id: operation._id},{$set: { executed: ts, adjustments: adj }},() => rs(true)))
-                else
-                    cache.updateOne('masterdao',{_id: operation._id},{$set: { executed: ts, error: em }},() => rs(true))
+        return new Promise((rs) => {
+            daoMaster.adjustOperation(operation).then(adj => {
+                // revalidate, error if invalid at time of execution
+                daoMaster.validateOperation(operation.type,operation.data,ts,(isvalid,em) => {
+                    if (isvalid)
+                        transactions.execute({
+                            type: operation.type,
+                            data: operation.data,
+                            sender: config.masterName,
+                            ts: ts
+                        },ts,() => cache.updateOne('masterdao',{_id: operation._id},{$set: { executed: ts, adjustments: adj }},() => rs(true)))
+                    else
+                        cache.updateOne('masterdao',{_id: operation._id},{$set: { executed: ts, error: em }},() => rs(true))
+                })
             })
         })
     },

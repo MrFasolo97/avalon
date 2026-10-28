@@ -28,7 +28,7 @@ notifications = {
                 ts: ts
             }
             db.collection('notifications').insertOne(notif, function(err) {
-                if (err) throw err
+                if (err) logr.error('Notification insert failed', err)
             })
             break
 
@@ -39,7 +39,7 @@ notifications = {
                 ts: ts
             }
             db.collection('notifications').insertOne(notif, function(err) {
-                if (err) throw err
+                if (err) logr.error('Notification transfer insert failed', err)
             })
             break
 
@@ -49,14 +49,15 @@ notifications = {
                 
             /** Find replies */
             if (tx.data.pa && tx.data.pa !== tx.sender) {
+                const txClone = JSON.parse(JSON.stringify(tx))
                 notif = {
                     u: tx.data.pa,
-                    tx: tx,
+                    tx: txClone,
                     ts: ts
                 }
-                notif.tx.data.json = {}
+                delete notif.tx.data.json
                 db.collection('notifications').insertOne(notif, function(err) {
-                    if (err) throw err
+                    if (err) logr.error('Notification insert failed', err)
                 })
             }
         
@@ -69,14 +70,19 @@ notifications = {
                 for (let y = 0; y < words[i].length; y++) 
                     if (config.allowedUsernameChars.indexOf(words[i][y]) === -1) {
                         if (y > 0) {
-                            notif = {
-                                u: words[i].substring(0,y),
-                                tx: tx,
-                                ts: ts
-                            }
-                            delete notif.tx.data.json
-                            db.collection('notifications').insertOne(notif, function(err) {
-                                if (err) throw err
+                            let candidate = words[i].substring(0,y)
+                            cache.findOne('accounts', {name: candidate}, function(err, account) {
+                                if (!err && account) {
+                                    let mNotif = {
+                                        u: candidate,
+                                        tx: tx,
+                                        ts: ts
+                                    }
+                                    delete mNotif.tx.data.json
+                                    db.collection('notifications').insertOne(mNotif, function(err2) {
+                                        if (err2) logr.error('Notification mention insert failed', err2)
+                                    })
+                                }
                             })
                             mentions++
                         }
@@ -95,7 +101,7 @@ notifications = {
                 ts: ts
             }
             db.collection('notifications').insertOne(notif, function(err) {
-                if (err) throw err
+                if (err) logr.error('Notification vote insert failed', err)
             })
             break
         

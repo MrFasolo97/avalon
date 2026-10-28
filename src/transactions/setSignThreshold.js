@@ -7,7 +7,9 @@ module.exports = {
         if (!validate.json(tx.data.thresholds,config.jsonMaxBytes))
             return cb(false, 'invalid tx data.threshold json')
         
-        for (let t in tx.data.thresholds) {
+        const thresholdKeys = Object.keys(tx.data.thresholds)
+        for (let ti = 0; ti < thresholdKeys.length; ti++) {
+            const t = thresholdKeys[ti]
             if (t !== 'default' && (t !== parseInt(t).toString() || !validate.integer(parseInt(t),true,false)))
                 return cb(false, 'invalid tx type ' + t)
 

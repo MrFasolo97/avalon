@@ -23,7 +23,9 @@ module.exports = {
         'rankings': 'writable',
         'newRankings': 'writable',
         'consensus': 'writable',
-        'leaderStats': 'writable'
+        'leaderStats': 'writable',
+        'dao': 'writable',
+        'daoMaster': 'writable'
     },
     'parserOptions': {
         'ecmaVersion': 2020

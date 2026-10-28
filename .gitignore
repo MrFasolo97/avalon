@@ -1,5 +1,4 @@
 node_modules
-package-lock.json
 npm-debug.log
 .idea
 keys
@@ -10,3 +9,5 @@ dump
 genesis
 apidoc
 .DS_Store
+.commandcode
+opencode.bash

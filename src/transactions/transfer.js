@@ -18,12 +18,12 @@ module.exports = {
         }
 
         cache.findOne('accounts', {name: tx.sender}, function(err, account) {
-            if (err) throw err
+            if (err) { logr.error('transfer error', err); return cb(false, 'internal error') }
             if (dao.availableBalance(account,ts) < tx.data.amount)
                 return cb(false, 'invalid tx not enough balance')
 
             cache.findOne('accounts', {name: tx.data.receiver}, function(err, account) {
-                if (err) throw err
+                if (err) { logr.error('transfer error', err); return cb(false, 'internal error') }
                 if (!account) cb(false, 'invalid tx receiver does not exist')
                 else cb(true)
             })
@@ -36,7 +36,7 @@ module.exports = {
             {$inc: {balance: -tx.data.amount}},
             function() {
                 cache.findOne('accounts', {name: tx.sender}, function(err, accSender) {
-                    if (err) throw err
+                    if (err) { logr.error('transfer error', err); return cb(false, 'internal error') }
                     // update his bandwidth
                     accSender.balance += tx.data.amount
                     transaction.updateGrowInts(accSender, ts, function() {
@@ -49,7 +49,7 @@ module.exports = {
                                 {$inc: {balance: tx.data.amount}},
                                 function() {
                                     cache.findOne('accounts', {name: tx.data.receiver}, function(err, accReceiver) {
-                                        if (err) throw err
+                                        if (err) { logr.error('transfer error', err); return cb(false, 'internal error') }
                                         // update his bandwidth
                                         accReceiver.balance -= tx.data.amount
                                         transaction.updateGrowInts(accReceiver, ts, function() {

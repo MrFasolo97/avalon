@@ -24,7 +24,7 @@ module.exports = {
             return cb(false, 'invalid author tip value')
         
         cache.findOne('contents', {_id: tx.data.author+'/'+tx.data.link}, (err, content) => {
-            if (err) throw err
+            if (err) { logr.error('tippedVote error', err); return cb(false, 'internal error') }
             if (!content) return cb(false, 'cannot vote and tip non-existent content')
             if (content.votes.length === 0) return cb(false, 'no votes in this content to tip author with')
 

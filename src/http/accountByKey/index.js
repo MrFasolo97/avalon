@@ -18,7 +18,7 @@ module.exports = {
             ]
             parallel(ops,(errors,results) => {
                 if (errors)
-                    return res.status(500).send(errors)
+                    return res.status(500).send({error: 'query failed'})
                 return res.send(results)
             })
         })

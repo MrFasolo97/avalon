@@ -25,12 +25,12 @@ module.exports = {
         }
 
         cache.findOne('accounts', {name: lowerUser}, function(err, account) {
-            if (err) throw err
+            if (err) { logr.error('newAccount error', err); return cb(false, 'internal error') }
             if (account)
                 cb(false, 'invalid tx data.name already exists')
             else
                 cache.findOne('accounts', {name: tx.sender}, function(err, account) {
-                    if (err) throw err
+                    if (err) { logr.error('newAccount error', err); return cb(false, 'internal error') }
                     if (dao.availableBalance(account,ts) < eco.accountPrice(lowerUser))
                         cb(false, 'invalid tx not enough balance')
                     else
@@ -70,7 +70,7 @@ module.exports = {
                     {name: tx.sender},
                     {$inc: {balance: -eco.accountPrice(tx.data.name)}}, function() {
                         cache.findOne('accounts', {name: tx.sender}, function(err, acc) {
-                            if (err) throw err
+                            if (err) { logr.error('newAccount error', err); return cb(false, 'internal error') }
                             // update his bandwidth
                             acc.balance += eco.accountPrice(tx.data.name)
                             transaction.updateGrowInts(acc, ts, function() {

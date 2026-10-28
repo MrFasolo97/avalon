@@ -59,10 +59,12 @@ module.exports = {
             let filterParam = req.params.filter
             let filter = filterParam.split(':')
             let filterBy = filter[1]
+            if (!filterBy)
+                return res.status(400).send({error: 'invalid filter'})
             let filterAttrs = []
-            if (filterBy !== null) {
+            if (filterBy !== null)
                 filterAttrs = filterBy.split('&')
-            }
+            
 
             let filterMap = {}
             let defaultKeys = ['authors', 'tags', 'limit', 'tsrange']
@@ -128,16 +130,16 @@ module.exports = {
 
             let limit = filterMap['limit']
 
-            if(limit === -1 || isNaN(limit)) 
-                limit = Number.MAX_SAFE_INTEGER
+            if (isNaN(limit) || limit < 1 || limit > 100)
+                limit = 50
 
             let tsrange = filterMap['tsrange']
             let tsfrom, tsto
             if (tsrange.length === 2) {
                 tsfrom = parseInt(tsrange[0]) * 1000
                 tsto = parseInt(tsrange[1]) * 1000
-            } else 
-                return
+            } else
+                return res.status(400).send({error: 'invalid tsrange'})
 
             if (authors.includes('all') && !tags.includes('all')) 
                 db.collection('contents').find({

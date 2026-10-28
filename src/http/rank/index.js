@@ -49,8 +49,10 @@ module.exports = {
                 aggregation.push(matching)
 
             db.collection('accounts').aggregate(aggregation).toArray((e,r) => {
-                if (e)
-                    return res.status(500).send(e)
+                if (e) {
+                    logr.error('rank query failed', e)
+                    return res.status(500).send({error: 'query failed'})
+                }
                 if (req.params.key !== 'leaders')
                     return res.send(r)
                 else {

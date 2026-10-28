@@ -1,4 +1,10 @@
-const timeout_transact_async = 7500
+const rateLimit = require('express-rate-limit')
+
+const txLimiter = rateLimit({
+    windowMs: 1000,
+    max: 5,
+    message: { error: 'too many requests' }
+})
 
 module.exports = {
     init: (app) => {
@@ -8,8 +14,8 @@ module.exports = {
          * @apiGroup Broadcast
          * @apiDeprecated Use /transact instead
          */
-        app.post('/transactWaitConfirm', (req, res) => {
-            res.redirect(307, "/transact")
+        app.post('/transactWaitConfirm', txLimiter, (req, res) => {
+            res.redirect(307, '/transact')
         })
     }
 }

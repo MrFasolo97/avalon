@@ -75,12 +75,16 @@ function requireAuth(...tokenEnvVars) {
 
         const candidates = tokenEnvVars.length ? tokenEnvVars.map(v => process.env[v]).filter(Boolean) : adminTokens()
 
-        // No token configured anywhere: there is nothing to verify a login
-        // against (/auth/login 401s too), so the login popup is a dead end.
-        // Accept the request instead, keeping unconfigured nodes usable with
-        // plain curl (e.g. /mineBlock, /recover) as documented in the README.
-        if (!candidates.length)
-            return next()
+        // No token configured anywhere: fail closed. The same HTTP_HOST=0.0.0.0
+        // that publishes the public API also publishes these admin endpoints
+        // (/mineBlock, /debug, /recover, /logs), so an unconfigured node must
+        // not serve them anonymously. Operators who deliberately want token-less
+        // access (local curl) opt in explicitly with ADMIN_ALLOW_ANONYMOUS=1.
+        if (!candidates.length) {
+            if (process.env.ADMIN_ALLOW_ANONYMOUS === '1')
+                return next()
+            return res.status(401).json({ error: 'admin token not configured' })
+        }
 
         const token = getToken(req)
         if (token) {

@@ -120,11 +120,13 @@ test('mineBlock: no token required when MINE_TOKEN unset', () => {
     assert.strictEqual(r.status, 200)
 })
 
-test('requireAuth: passes through when no admin token is set', () => {
+test('requireAuth: fails closed when no admin token is set', () => {
     const auth = require('../src/http/auth')
     const saved = {}
     const vars = ['ADMIN_TOKEN', 'LOG_ADMIN_TOKEN', 'MINE_TOKEN', 'DEBUG_TOKEN', 'RECOVER_TOKEN']
     for (const v of vars) { saved[v] = process.env[v]; delete process.env[v] }
+    const savedAnon = process.env.ADMIN_ALLOW_ANONYMOUS
+    delete process.env.ADMIN_ALLOW_ANONYMOUS
 
     // Mock req/res as seen from `curl http://localhost:3001/mineBlock`
     const req = {
@@ -141,11 +143,20 @@ test('requireAuth: passes through when no admin token is set', () => {
         send(b) { this.body = b; return this }
     })
 
-    // No tokens configured -> request is accepted (no login HTML)
+    // No tokens configured -> FAIL CLOSED: no anonymous admin access
     let nextCalled = false
     res = newRes()
     auth.requireAuth()(req, res, () => { nextCalled = true })
-    assert.strictEqual(nextCalled, true, 'no tokens set: next() should be called')
+    assert.strictEqual(nextCalled, false, 'no tokens set: next() must NOT be called (fail closed)')
+    assert.strictEqual(res.statusCode, 401, 'no tokens set: must answer 401')
+
+    // ...unless the operator explicitly opts in to anonymous access
+    process.env.ADMIN_ALLOW_ANONYMOUS = '1'
+    nextCalled = false
+    res = newRes()
+    auth.requireAuth()(req, res, () => { nextCalled = true })
+    assert.strictEqual(nextCalled, true, 'ADMIN_ALLOW_ANONYMOUS=1: next() should be called')
+    delete process.env.ADMIN_ALLOW_ANONYMOUS
 
     // With ADMIN_TOKEN set -> curl without token still gets 401 + login HTML
     process.env.ADMIN_TOKEN = 'secret'

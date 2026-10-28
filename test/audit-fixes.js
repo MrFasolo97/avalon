@@ -320,6 +320,35 @@ test('auto_resolve_halt.sh has BSON << 8n', () => {
     assert.ok(!c.includes('<< 32n'))
 })
 
+// N. TRUST_PROXY parsing (http/index.js)
+console.log('\n--- http/index.js: TRUST_PROXY parsing ---')
+const { parseTrustProxy } = require('../src/http/index')
+
+test('TRUST_PROXY: a hop count becomes a number', () => {
+    assert.strictEqual(parseTrustProxy('1'), 1)
+    assert.strictEqual(parseTrustProxy('2'), 2)
+})
+
+test('TRUST_PROXY: off values disable trusting (undefined)', () => {
+    for (const v of ['0', 'false', 'FALSE', 'no', 'off', '', '  ', undefined, null])
+        assert.strictEqual(parseTrustProxy(v), undefined, 'value ' + JSON.stringify(v))
+})
+
+test('TRUST_PROXY: keywords accepted, case-insensitive', () => {
+    assert.strictEqual(parseTrustProxy('loopback'), 'loopback')
+    assert.strictEqual(parseTrustProxy('LinkLocal'), 'linklocal')
+    assert.strictEqual(parseTrustProxy('uniquelocal'), 'uniquelocal')
+})
+
+test('TRUST_PROXY: true/yes/on refused with a clear message', () => {
+    for (const v of ['true', 'yes', 'on'])
+        assert.throws(() => parseTrustProxy(v), /TRUST_PROXY/)
+})
+
+test('TRUST_PROXY: an explicit IP / subnet list passes through', () => {
+    assert.strictEqual(parseTrustProxy('127.0.0.1,10.0.0.0/8'), '127.0.0.1,10.0.0.0/8')
+})
+
 // Summary
 console.log('\n=== Results: ' + passed + ' passed, ' + failed + ' failed ===')
 process.exit(failed > 0 ? 1 : 0)

@@ -12,15 +12,40 @@ const globalLimiter = rateLimit({
     message: { error: 'too many requests' }
 })
 
+// Express accepts a hop count (number), a boolean, or a keyword / IP-list
+// string; anything else is parsed as an IP by proxy-addr and throws a cryptic
+// "invalid IP address" at startup, killing the node before it listens.
+// Normalise the common spellings here so e.g. TRUST_PROXY=true fails with a
+// clear message instead.
+// "Trust every proxy" (express's boolean `true`) is deliberately refused: it
+// makes X-Forwarded-For spoofable, which defeats the rate limiting and the
+// session address binding that rely on req.ip.
+function parseTrustProxy(raw) {
+    if (raw === undefined || raw === null) return undefined
+    const v = String(raw).trim().toLowerCase()
+    if (v === '' || v === '0' || v === 'false' || v === 'no' || v === 'off') return undefined
+    if (/^\d+$/.test(v)) return parseInt(v, 10)
+    if (v === 'loopback' || v === 'linklocal' || v === 'uniquelocal') return v
+    if (v === 'true' || v === 'yes' || v === 'on')
+        throw new Error("TRUST_PROXY: refusing '" + raw + "' (trusting every proxy makes " +
+            "X-Forwarded-For spoofable); use a hop count (e.g. TRUST_PROXY=1) or loopback|linklocal|uniquelocal")
+    return v
+}
+
 let http = {
     init: () => {
         let app = express()
         // Only honour X-Forwarded-* when explicitly told the node sits behind a
         // trusted proxy, otherwise req.ip (used for rate limiting and session
         // address binding) would be client-spoofable.
-        const trustProxy = process.env.TRUST_PROXY
-        if (trustProxy && trustProxy !== '0' && trustProxy !== 'false')
-            app.set('trust proxy', /^\d+$/.test(trustProxy) ? parseInt(trustProxy) : trustProxy)
+        try {
+            const trustProxy = parseTrustProxy(process.env.TRUST_PROXY)
+            if (trustProxy !== undefined)
+                app.set('trust proxy', trustProxy)
+        } catch (error) {
+            logr.fatal(error.message)
+            process.exit(1)
+        }
         app.use(cors({
             origin: process.env.CORS_ORIGIN || false
         }))
@@ -43,4 +68,5 @@ let http = {
     }
 }
 
+http.parseTrustProxy = parseTrustProxy
 module.exports = http

@@ -15,7 +15,7 @@ Checks performed for this runbook (in a throwaway worktree; re-run on 20 October
 
 - reverting the econs commit **applies with no conflicts** (5 modified files + `D test/supply-anchor.js`; 6 files, +10 / −432);
 - **zero residue** of econs symbols in `src/`, `test/`, `scripts/` on the reverted tree (the `doc/` folder is not scanned on purpose: the companion and migration documents legitimately discuss these tokens — see the corrected grep in S2);
-- `node test/audit-fixes.js` → **19 passed, 0 failed** (also after the revert); `node test/force-finalize.js` → **All tests passed**;
+- `node test/audit-fixes.js` → **24 passed, 0 failed** (also after the revert); `node test/force-finalize.js` → **All tests passed**;
 - `npx eslint ./src/*` → identical to the baseline (**1 pre-existing error**: `src/http/auth/index.js:86`, `curly`; 244 warnings);
 - the resulting history is `{0, 241600, 13325000}`: **the force-finalization fork stays intact** (config one-liner in S2 returns `FF@13325000: true | sigVer: 2`, and the reverted `src/` contains no `13330000` entry).
 
@@ -219,7 +219,7 @@ console.log("econs:",p.rewardPoolYearlyRate,p.vtReferenceTotal,p.initialSupplyBl
 
 # 3. Quality gates
 npm run lint                      # expected: 2 pre-existing `curly` errors (auth/index.js:90, p2p.js:533) + ~251 warnings
-node test/audit-fixes.js          # expected: 19 passed, 0 failed
+node test/audit-fixes.js          # expected: 24 passed, 0 failed
 node test/force-finalize.js       # expected: All tests passed
 # test/supply-anchor.js: it must NOT exist (the revert deletes it; in V3 delete it by hand)
 

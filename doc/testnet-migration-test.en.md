@@ -179,7 +179,9 @@ the **new** create-account path (which added a bandwidth check). The canaries
 ## 6. Force-finalization drill
 
 Two leaders mine a block at the same height. In two terminals, almost
-simultaneously:
+simultaneously (the testnet nodes set `ADMIN_ALLOW_ANONYMOUS=1` in
+`docker-compose.yml`, so these token-less `/mineBlock` calls are accepted; a
+public node would need `Authorization: Bearer <token>`):
 
 ```bash
 curl -s http://localhost:3102/mineBlock   # miner1

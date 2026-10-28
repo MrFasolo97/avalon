@@ -2,9 +2,9 @@
 //   docker compose run --rm setup node /avalon/scripts/s4-fake-txs.js          (pre-migration)
 //   docker compose run --rm setup node /avalon/scripts/s4-fake-txs.js --post   (post-migration)
 // User keys are persisted in the testnet_config volume (s4users.json) so the
-// same accounts keep acting after the code switch. Accounts s4alice/s4bob/
-// s4carol were created in round 1 before keys were persisted — they stay as
-// passive balance canaries (must keep balance=20000 across the migration).
+// same accounts keep acting after the code switch. The pre-migration run also
+// creates and funds the passive balance canaries s4alice/s4bob/s4carol
+// (balance=20000); they must keep that balance across the migration.
 const { execFileSync } = require('child_process')
 const { randomBytes } = require('crypto')
 const secp256k1 = require('secp256k1')
@@ -82,12 +82,27 @@ function ensureUsers(users) {
     return actors.slice(0, 3)
 }
 
+function ensureCanaries() {
+    // passive balance canaries: keys are throwaway (like the original round-1
+    // accounts). Created+funded only in the pre-migration run so criterion #4
+    // can check that their balance survives the code switch.
+    for (const c of ['s4alice', 's4bob', 's4carol']) {
+        if (accountExists(c)) { console.log('  (canary ' + c + ' already exists)'); continue }
+        const kp = keypair()
+        if (tryTx('account ' + c + ' (canary)', ['account', kp.pub, c], MPRIV, MASTER))
+            tryTx('transfer 20000 -> ' + c + ' (canary)', ['transfer', c, '20000'], MPRIV, MASTER)
+    }
+}
+
 async function main() {
     console.log('=== S4 fake txs ===', POST ? '(post-migration mode)' : '(pre-migration mode)', 'API:', API, 'h=' + height())
     const users = loadUsers()
     const miner1 = envVal('MINER1_PRIV'), miner2 = envVal('MINER2_PRIV')
 
     if (!POST) {
+        console.log('--- balance canaries (s4alice/s4bob/s4carol, 20000 each) ---')
+        ensureCanaries()
+
         console.log('--- ensuring actor accounts (master) ---')
         const actors = ensureUsers(users)   // [a, b, c]
         const [a, b, c] = actors

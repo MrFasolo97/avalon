@@ -261,7 +261,8 @@ function checkHeightAndRun() {
 
         if(createNet) {
             if (prevbHeight == curbHeight) {
-                var mineStartCmd = "curl http://localhost:3001/mineBlock"
+                var adminToken = process.env.ADMIN_TOKEN || process.env.MINE_TOKEN || ''
+                var mineStartCmd = "curl -fsS -H 'Authorization: Bearer " + adminToken + "' http://localhost:3001/mineBlock"
                 runCmd(mineStartCmd)
             }
         } else if (prevbHeight == curbHeight) {

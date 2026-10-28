@@ -28,6 +28,7 @@ The `start.sh` shows the list of available environment variables you can set to 
 ## [Syncing your node](./doc/syncing-your-node.md)
 ## [Become a leader and produce blocks](./doc/leader-101.md)
 ## [Debian 10 quick install procedure](./doc/debian-10.md)
+## [Public testnet guide (multi-operator)](./doc/public-testnet.md)
 
 ## Get helped
 We have a discord channel dedicated to node owners (aka leaders), where you can get support to get set up. Join [discorg.gg/dtube](https://discord.gg/dtube) and go to `DTube Chain -> #leader-candidates`

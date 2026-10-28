@@ -37,6 +37,20 @@ L'avvio automatico:
 
 Tutti i nodi sono sulla stessa rete Docker e si scoprono via `PEERS=ws://bootstrap:6001`.
 
+## Isolamento della chain (chain id)
+
+Questo dev net è **locale**: usa `NO_DISCOVERY=1` e si connette solo a `ws://bootstrap:6001`,
+quindi non parla con la mainnet per costruzione. Nessuna porta P2P va esposta su internet.
+
+Sulla chain id (`originHash` in `src/config.js`) questo dev net **non** la sovrascrive a runtime:
+
+- sul branch `testnet/public` `originHash` è già quella della testnet pubblica → isolato;
+- sulla linea di release/mainnet il dev net eredita l'`originHash` della mainnet, ed è
+  **voluto**: la prova di migrazione S4 (`doc/testnet-migration-test.en.md`) cambia versione di
+  codice mantenendo la chain, quindi la chain id deve restare stabile tra le due versioni.
+  Cambiarla romperebbe la continuità del test (il nodo fallisce con
+  `Block #0 hash doesn't match config`). Tenerlo locale è sufficiente.
+
 ## Testare la Force Finalization
 
 ### Scenario: blocchi concorrenti

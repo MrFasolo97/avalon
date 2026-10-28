@@ -190,10 +190,16 @@ let config = {
                 28: 0
             }
         },
-        // Hard fork at ~13,925,000 (~3 weeks from block 13,320,067):
+        // Hard fork at 13,325,000, deliberately just above the resume head
+        // 13,320,067 (~4,933 blocks ≈ 4 h at 3 s). The chain has been halted
+        // since 2026-06-27, so the cutover is already a coordinated restart:
+        // the anti-fork safety net does not need to wait for the original
+        // ~21-day horizon. Must stay STRICTLY above the last produced block:
+        // lowering the key below it would change config.read(n) for blocks that
+        // were already produced.
         // - forceFinalize: enables anti-fork safety net if consensus stalls
         // - consensusSigVersion: 2 (sorted keys) prevents key-ordering mismatches
-        13925000: {
+        13325000: {
             forceFinalize: true,
             consensusSigVersion: 2
         }

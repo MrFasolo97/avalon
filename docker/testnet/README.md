@@ -84,3 +84,9 @@ docker compose down -v
 Le variabili d'ambiente principali sono in `docker-compose.yml`. Le chiavi
 generate vengono salvate in un volume condiviso `testnet_config` letto da
 tutti i miner.
+
+Le API admin (`/mineBlock`, `/recover`, `/debug`, `/logs`) sono **fail-closed**
+senza token. Per questo il compose di testnet imposta `ADMIN_ALLOW_ANONYMOUS=1`
+su bootstrap e miner: così il kickstart di mining e il drill force-finalization
+funzionano con i `curl` nudi qui sopra. È un'eccezione **solo locale**: su
+mainnet/testernet pubblici va configurato un `ADMIN_TOKEN` reale.

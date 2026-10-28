@@ -1,4 +1,6 @@
-# Migrazione da `new_net` al nuovo codice — senza la nuova economia (fork #13330000)
+# Migrazione da `new_net` al nuovo codice — senza attivare l'Economy Fork #13330000
+
+> **Nota:** questo è un *upgrade di codice*, non un cambio di economia. Si distribuisce la codebase Avalon rifattorizzata ma **non** si attivano le regole economiche dell'Hard Fork #13330000. Tutti i saldi DTC, le fee, le ricompense e i parametri economici restano invariati.
 
 **Tipo**: runbook operativo
 **Data**: 18 ottobre 2026
@@ -7,13 +9,15 @@
 **Arrivo**: nuovo codice = tag **`v2.0.2`** su `feat/auto-force-finalize` (= la punta di codice di `new_econs` `6cc3b46` meno il commit `46c77ff`; verificato 2026-10-20: il diff di codice = esattamente i 6 file econs, zero residui econs)
 **Companion**: `doc/economics_fork_13330000.md` (cosa fa la nuova economia, in dettaglio)
 
+> **Revisione 2026-10-28** — il flag day della force-finalization è stato spostato da `13.925.000` (~21 giorni) a **`13.325.000`** (~4 h dopo la ripresa), sfruttando la catena ferma: non producendo blocchi, il cutover è già un unico riavvio coordinato, quindi la rete di sicurezza non deve attendere. Questo modifica `src/config.js` su `feat/auto-force-finalize`, quindi il tag certificato `v2.0.2` non corrisponde più all'HEAD del branch — **ri-creare il tag di release prima di usare S1** (il branch è già a `package.json` 2.0.3, senza tag).
+
 Verifiche eseguite per questo runbook (in un worktree temporaneo; rieseguite il 20 ottobre 2026 sull'albero `v2.0.2`, il cui `src`/`test`/`scripts` corrisponde a `new_econs` `6cc3b46` fatta eccezione per il revert econs):
 
 - il revert del commit econs **applica senza conflitti** (5 file modificati + `D test/supply-anchor.js`; 6 file, +10 / −432);
 - **zero residui** dei simboli econs in `src/`, `test/`, `scripts/` sull'albero revertato (la cartella `doc/` non viene scansionata apposta: companion e documenti di migrazione discutono quei simboli di proposito — vedi il grep corretto in S2);
-- `node test/audit-fixes.js` → **19 passed, 0 failed** (anche dopo il revert); `node test/force-finalize.js` → **All tests passed**;
-- `npx eslint ./src/*` → identico alla baseline (**1 errore preesistente**: `src/http/auth/index.js:86`, `curly`; 244 warning);
-- la history risultante è `{0, 241600, 13925000}`: **il fork di force-finalization resta intatto** (l'one-liner di S2 restituisce `FF@13925000: true | sigVer: 2`, e l'albero revertato `src/` non contiene la entry `13330000`).
+- `node test/audit-fixes.js` → **24 passed, 0 failed** (anche dopo il revert); `node test/force-finalize.js` → **All tests passed**;
+- `npx eslint ./src/*` → identico alla baseline (**2 errori preesistenti** `curly`: `src/http/auth/index.js:90`, `src/p2p.js:533`; ~251 warning);
+- la history risultante è `{0, 241600, 13325000}`: **il fork di force-finalization resta intatto** (l'one-liner di S2 restituisce `FF@13325000: true | sigVer: 2`, e l'albero revertato `src/` non contiene la entry `13330000`).
 
 ---
 
@@ -27,7 +31,7 @@ Tre cose da tenere in testa:
 
 1. **Un solo momento pericoloso**: il *flag day*. Tutti i leader devono girare lo stesso codice **lo stesso giorno**, perché il nuovo codice cambia anche vari validatori (R2).
 2. **Cinque default nuovi che rompono i client** se non configurati: `CORS_ORIGIN`, `HTTP_HOST`, rate limit globale, `TRUST_PROXY`, body 1 MB (S3).
-3. **La rete è ferma**: la ripresa della catena *è* il cutover, e fino al blocco 13.925.000 non esiste force-finalization come rete di sicurezza (S5, R15).
+3. **La rete è ferma**: la ripresa della catena *è* il cutover, e fino al blocco 13.325.000 (~4 h dopo la ripresa) non esiste force-finalization come rete di sicurezza (S5, R15).
 
 ---
 
@@ -66,10 +70,10 @@ Tutto il resto del branch, incluso un altro hard fork **che resta**:
 ```
    0     config base (valori effettivi invariati; solo il rename interno blockHashSerialization → consensusSigVersion, valore 1)
  241600    txLimits (già attiva su new_net)
- 13925000  forceFinalize: true  +  consensusSigVersion: 2      <-- RESTA, non toccarla
+ 13325000  forceFinalize: true  +  consensusSigVersion: 2      <-- RESTA (altezza abbassata da 13925000 a catena ferma)
 ```
 
-`13925000` è il flag day *successivo*: abilita la force-finalization e passa la serializzazione dei messaggi di consenso alla versione a chiavi ordinate. **Va tenuto anche nella migrazione "senza economia"**: è la rete di sicurezza contro i fork, cioè il motivo principale per cui si migra.
+`13325000` è il flag day *successivo* — ora fissato appena sopra l'head di ripresa (13.320.067) invece del vecchio orizzonte di ~21 giorni, perché la catena ferma rende il cutover un unico riavvio coordinato. Abilita la force-finalization e passa la serializzazione dei messaggi di consenso alla versione a chiavi ordinate. **Va tenuto anche nella migrazione "senza economia"**: è la rete di sicurezza contro i fork, cioè il motivo principale per cui si migra.
 
 Nota: `new_net` **non ha nessun codice di force-finalization** (`consensus.js` 290 → 684 righe, 47 commit su halt/consenso/quorum, `scripts/auto_resolve_halt.sh` nuovo da 794 righe). Questa, non l'economia, è la sostanza della migrazione.
 
@@ -95,7 +99,7 @@ In ogni variante vale la regola d'oro: **la nuova economia si esclude solo nel c
 | Ultimo blocco | ts `2026-06-27T01:01:05Z`, miner `brianphobos`, `phash` coerente col blocco 13320066 | `GET /block/13320067` |
 | Fermi da | **~115 giorni** al 2026-10-20 (il tip non è corrotto: è un halt, non un fork sul tip) | confronto timestamp |
 | Fork econs 13.330.000 | **non ancora attivato**: mancano **9.933 blocchi** ≈ **8,3 h** di tempo-blocco (3 s) | differenza altezze |
-| Fork force-finalization 13.925.000 | mancano 604.933 blocchi ≈ **21 giorni** di produzione a 3 s | differenza altezze |
+| Fork force-finalization 13.325.000 | mancano **4.933 blocchi** ≈ **4,1 h** a 3 s — abbassata mentre la catena è ferma | differenza altezze |
 | Anchor economia | 13.320.066 = **tip − 1** | `src/config.js` |
 
 Conseguenze operative:
@@ -208,14 +212,14 @@ grep -rn "rewardPoolYearlyRate\|vtReferenceTotal\|initialSupplyBlock\|totalSuppl
 # 2. La config all'altezza del fork non attiva più nulla, e il resto resta
 node -e 'global.logr=new Proxy({},{get:()=>()=>{}});global.cache={state:{}};
 const c=require("./src/config.js");
-const p=c.read(13330000), f=c.read(13925000);
+const p=c.read(13330000), f=c.read(13325000);
 console.log("econs:",p.rewardPoolYearlyRate,p.vtReferenceTotal,p.initialSupplyBlock,
-            "| pool:",p.rewardPoolAmount,"| FF@13925000:",f.forceFinalize,"| sigVer:",f.consensusSigVersion)'
-# atteso: econs: undefined undefined undefined | pool: 150001 | FF@13925000: true | sigVer: 2
+            "| pool:",p.rewardPoolAmount,"| FF@13325000:",f.forceFinalize,"| sigVer:",f.consensusSigVersion)'
+# atteso: econs: undefined undefined undefined | pool: 150001 | FF@13325000: true | sigVer: 2
 
 # 3. Gate qualità
-npm run lint                      # atteso: 1 errore preesistente (auth/index.js:86) + 244 warning
-node test/audit-fixes.js          # atteso: 19 passed, 0 failed
+npm run lint                      # atteso: 2 errori preesistenti curly (auth/index.js:90, p2p.js:533) + ~251 warning
+node test/audit-fixes.js          # atteso: 24 passed, 0 failed
 node test/force-finalize.js       # atteso: All tests passed
 # test/supply-anchor.js: NON deve esistere (il revert lo elimina; nella V3 va cancellato a mano)
 
@@ -293,7 +297,7 @@ curl -s localhost:3001/block/13320068 | head -c 200   # phash = hash del 1332006
 curl -s localhost:3001/supply | head -c 200           # sanità (endpoint invariato, non econs)
 curl -s localhost:3001/version         # atteso: {"version":"2.0.2"} — IDENTICO su ogni nodo
 grep -c "Hard Fork #13330000" /var/log/avalon.log     # atteso: 0 (per sempre)
-grep "Hard Fork #" /var/log/avalon.log | tail -3      # attesi solo 241600 (e 13925000 dal futuro fork)
+grep "Hard Fork #" /var/log/avalon.log | tail -3      # attesi solo 241600 (e 13325000 dal futuro fork)
 ```
 
 Più, sul nodo di controllo: rebuild da genesis → stesso head **e stesso hash** degli altri nodi. Formato payout/voti: invariato (pool = 150001). Primo giorno intero di osservazione: `/count` monotono, nessun `possBlocks` crescente, peer stabili. Ogni operatore esegue `curl -s localhost:3001/version` e riporta il risultato nella chat di cutover: tutti i nodi devono rispondere `2.0.2`.
@@ -307,11 +311,11 @@ Più, sul nodo di controllo: rebuild da genesis → stesso head **e stesso hash*
 - `javalon2`: il nodo passa da `^1.1.7` a `^1.1.10` (bump del 2026-10-20, commit `04ad87b`; la 1.1.10 aggiunge il fix di fallback sul DMCA endpoint e bump di dipendenze compatibili), ma **non lo usa per la validazione di consenso** (usa `secp256k1` diretto: nessun impatto sulla catena; serve solo a `scripts/mega_generic_test.js`). Il bump cambia `signVerify` lato JS (ricostruzione dell'hash + rifiuto di `pubKey`/`signature`/`hash` mancanti): verificare gli script/tool terzi che firmavano con la vecchia formulazione.
 - `dtube-embed`, `ipfs-caching`, `DTubeGo` non sono coinvolti in questa migrazione.
 
-### S8 — Sorveglianza e secondo flag day (13.925.000)
+### S8 — Sorveglianza e secondo flag day (13.325.000)
 
-- Entro **13.925.000** (604.933 blocchi ≈ 21 giorni a 3 s dall'attuale head) **tutti i nodi devono girare il nuovo codice**: quel fork abilita `forceFinalize` e passa `consensusSigVersion` a 2 (serializzazione a chiavi ordinate). Un nodo rimasto indietro non produce/valida le stesse firme → fork o halt.
+- Entro **13.325.000** (4.933 blocchi ≈ **4 h** a 3 s dall'attuale head — appena sopra il blocco di ripresa, sfruttando l'halt) **tutti i nodi devono girare il nuovo codice**: quel fork abilita `forceFinalize` e passa `consensusSigVersion` a 2 (serializzazione a chiavi ordinate). Un nodo rimasto indietro non produce/valida le stesse firme → fork o halt.
 - Fino a quel blocco la rete ha **forza-finalization disabilitata**: un nuovo halt si risolve solo con `auto_resolve_halt.sh`.
-- Da monitorare: `Hard Fork #13925000` nei log al momento giusto, health dei peer, eventuali `possBlocks` multipli.
+- Da monitorare: `Hard Fork #13325000` nei log al momento giusto, health dei peer, eventuali `possBlocks` multipli.
 - **Backlog post-migrazione** (audit dipendenze 2026-10-20): bump `sharp` `^0.32.6` → `^0.35.5` (high: CVE libvips/libheif sull'endpoint di processing immagini utente; validare con un test upload+resize) e `apidoc` `^1.2.0` → `^0.29.0` (solo dev). Un commit, DOPO il cutover — fuori dal delta del flag day apposta.
 
 ### S9 — Rollback
@@ -336,18 +340,18 @@ Più, sul nodo di controllo: rebuild da genesis → stesso head **e stesso hash*
 | **R8** | Node: `engines >= 24` ma immagini Docker su **Node 18** (`docker/Dockerfile`, `docker/testnet/Dockerfile`) e check runtime `>= 18` — trovato in validazione | 🟠 install/runtime non supportato | bassa *(chiuso)* | **chiuso in `v2.0.2`**: immagini allineate (`setup_24.x`, `FROM node:24`, `node:24-alpine`) e guard di `main.js` portato a `>= v24`; validare con `npm ci` su Node ≥ 24 |
 | **R9** | Riattivare l'economia in futuro toccando `initialSupplyBlock`/`initialSupply` (anchor frozen, filtrato da `allowedKeys`) | 🔴 fork silenzioso | bassa | nuova entry di fork con altezza futura e anchor misurato; mai spostare le chiavi esistenti (appendice C) |
 | **R10** | `eco.totalSupplyUnits` non bootstrappato → `logr.fatal` + `process.exit(1)` al primo blocco del fork (per un nodo che attraversa l'anchor senza ripartire) | 🟠 nodo che muore | bassa (esclusa in questa migrazione) | è il motivo per cui l'anchor è al tip attuale: riavvio di tutti i nodi in occasione della ripartenza |
-| **R11** | Halt non risolto: force-finalization **non è attiva** fino a 13.925.000; i guardrail dello script (max 10 blocchi per passata, 30 totali, stato `.avalon_halt`) possono rifiutare il troncamento | 🔴 catena ferma | media | `DRY_RUN=1` prima, pianificare l'intervento manuale, backup S0, finestra di manutenzione concordata |
+| **R11** | Halt non risolto: force-finalization **non è attiva** fino a 13.325.000; i guardrail dello script (max 10 blocchi per passata, 30 totali, stato `.avalon_halt`) possono rifiutare il troncamento | 🔴 catena ferma | media | `DRY_RUN=1` prima, pianificare l'intervento manuale, backup S0, finestra di manutenzione concordata |
 | **R12** | Senza la nuova economia restano aperti: ceiling di emissione 28,7 %/anno con pool costante `150001`, e il **drenaggio del pool da parte di una singola whale** su rete inattiva (bug di value extraction, `economics_fork_13330000.md` §2) | 🟠 economico | certa | decisione di business esplicita e datata (D3): riattivare con un fork successivo |
 | **R13** | `scripts/start.sh` contiene una **chiave privata in chiaro** (`NODE_OWNER_PRIV=34Ep…`) su entrambi i branch, e nella storia ci sono commit "rimuovi chiavi private" poi annullati | 🔴 sicurezza | certa | ruotare la chiave del nodo prima di diffondere questo documento o il branch; non versionare `start.sh` reale |
 | **R14** | Bump dipendenze (`mongodb` 4.2→4.17, `sharp`, `secp256k1`, `express`, ora `javalon2` ^1.1.10): comportamento/indici diversi su DB esistenti | 🟠 errori a runtime | media | test su copia del DB; leggere i log al primo avvio; `npm ci` da lockfile |
-| **R15** | Il nuovo codice *è* una release anti-halt (consensus.js 290→684 righe) ma la force-finalization è disattivata fino a 13.925.000: la stabilità della ripresa dipende dalla nuova logica non ancora esercitata in produzione | 🟠 nuovo halt | media | testnet di force-finalization (S4); `auto_resolve_halt.sh` pronto; osservazione ravvicinata (S8) |
+| **R15** | Il nuovo codice *è* una release anti-halt (consensus.js 290→684 righe) ma la force-finalization è disattivata fino a 13.325.000: la stabilità della ripresa dipende dalla nuova logica non ancora esercitata in produzione | 🟠 nuovo halt | media | testnet di force-finalization (S4); `auto_resolve_halt.sh` pronto; osservazione ravvicinata (S8) |
 
 ---
 
 ## 6. Definition of done
 
 - [ ] Tag checkoutato su ogni nodo (`git checkout v2.0.2`) e `git diff new_econs v2.0.2 --stat -- src test scripts` mostra **solo** i 6 file dell'economia
-- [ ] `grep` residui e one-liner config di S2 → esito atteso (nessuna chiave econs, `pool: 150001`, `FF@13925000: true`, `sigVer: 2`)
+- [ ] `grep` residui e one-liner config di S2 → esito atteso (nessuna chiave econs, `pool: 150001`, `FF@13325000: true`, `sigVer: 2`)
 - [ ] `npm run lint` + `test/audit-fixes.js` + `test/force-finalize.js` verdi come da baseline
 - [ ] Node ≥ 24 su tutti i nodi e nelle immagini Docker
 - [ ] Ogni nodo sul tag certificato (`git describe --tags` = `v2.0.2`); `curl /version` restituisce `2.0.2` su ogni nodo
@@ -357,7 +361,7 @@ Più, sul nodo di controllo: rebuild da genesis → stesso head **e stesso hash*
 - [ ] Backup di blocchi, DB, `.env`, commit precedente in luogo sicuro e verificato
 - [ ] Tutti i leader fermi, nessuno su `new_net`, chat di cutover aperta
 - [ ] Dopo il cutover: `/count` avanza, hash di catena coerenti su tutti i nodi, **zero** `Hard Fork #13330000` nei log
-- [ ] Calendario condiviso con la rete: entro il blocco **13.925.000** tutti sul nuovo codice
+- [ ] Calendario condiviso con la rete: entro il blocco **13.325.000** tutti sul nuovo codice
 - [ ] Chiave privata di `scripts/start.sh` ruotata
 
 ---
@@ -376,11 +380,11 @@ Tempo di presidio umano per passo, stimato sul layout reale del nodo mainnet (`b
 | **S5 flag day** | **finestra ~45–60 min** | stop di tutti i leader 10–15, diagnosi `DRY_RUN=1` 5–10, troncamento/restart 10–15, verifica primo blocco 10–15 |
 | **S6 post-cutover** | **~15 min + 1–4 h non presidiate** | checklist curl; il rebuild da genesis sul nodo di controllo gira in background (13,3M blocchi) |
 | **S7 client/indexer** | **~1 h** | `CORS_ORIGIN` su ogni nodo pubblico di `AvalonAPINodes` (~10–15 min ciascuno) + check flussi batch dtube2 |
-| **S8 sorveglianza** | **~15 min/giorno × ~21 giorni** | fino a 13.925.000, monitoraggio leggero |
+| **S8 sorveglianza** | **~15 min in totale** | fino a 13.325.000 (≈4 h dopo la ripresa), monitoraggio leggero |
 | **S9 piano rollback** | **~30 min** | decisione D4 + backup già coperti da S0 |
 
 Totali:
-- **Un operatore sul proprio nodo: ~4–6 ore di presidio** (di cui ~1 h è la finestra di cutover), più 1–4 h di rebuild non presidiato e ~21 giorni di osservazione leggera.
+- **Un operatore sul proprio nodo: ~4–6 ore di presidio** (di cui ~1 h è la finestra di cutover), più 1–4 h di rebuild non presidiato e ~4 h di osservazione leggera.
 - **Calendario realistico: 2 giornate** — una per S0–S4 (dry-run su testnet), una per il flag day S5–S6 — più la finestra concertata con gli altri leader.
 - Il lavoro critico è tutto in **S0–S3 + S5 (~2 h)**: il resto è attesa o monitoraggio.
 
@@ -392,7 +396,7 @@ Totali:
 
 | Blocco | Esempi |
 |---|---|
-| Consenso / anti-fork | force-finalization con quorum, backoff, firma verificata, broadcast; `forceFinalizeFallback` (default `false`: la catena si ferma invece di rischiare un fork); `consensusSigVersion: 2` gated a 13.925.000 |
+| Consenso / anti-fork | force-finalization con quorum, backoff, firma verificata, broadcast; `forceFinalizeFallback` (default `false`: la catena si ferma invece di rischiare un fork); `consensusSigVersion: 2` gated a 13.325.000 |
 | Recupero halt | `scripts/auto_resolve_halt.sh` (794 righe), troncamento BSON/Mongo, guardrail anti-loop |
 | Sicurezza HTTP | SSRF (`src/http/ssrf.js`, pinning IP/TLS), validazione input, cap su query, rate limit globale e per-endpoint, `requireAuth` condiviso, sessioni legate all'IP, redazione log/credenziali |
 | Rete P2P | cap payload websocket, rate limiter dedicato, TTL su `blockSenders`, cleanup O(1) |
@@ -409,7 +413,7 @@ Totali:
 | 241600 | `txLimits` | attiva |
 | 13.320.067 | head attuale (catena ferma dal 2026-06-27; rimisurato 2026-10-20: invariato) | — |
 | **13.330.000** | **economia: pool % supply + cap voto + accumulatore** | **da escludere (mai attivata: mancano 9.933 blocchi ≈ 8,3 h a 3 s)** |
-| 13.925.000 | `forceFinalize: true`, `consensusSigVersion: 2` | resta: secondo flag day (~21 giorni di produzione) |
+| 13.325.000 | `forceFinalize: true`, `consensusSigVersion: 2` | si attiva ≈4 h dopo la ripresa (era ~21 giorni; abbassata a catena ferma) |
 
 ## Appendice C — Invarianti dell'economia (se un giorno si riattiva)
 
@@ -429,7 +433,7 @@ grep -rn "rewardPoolYearlyRate\|vtReferenceTotal\|initialSupplyBlock\|totalSuppl
 
 # Config all'altezza del fork + fork successivo intatto
 node -e 'global.logr=new Proxy({},{get:()=>()=>{}});global.cache={state:{}};const c=require("./src/config.js");
-const p=c.read(13330000),f=c.read(13925000);console.log(p.rewardPoolYearlyRate,p.vtReferenceTotal,p.initialSupplyBlock,p.rewardPoolAmount,f.forceFinalize,f.consensusSigVersion)'
+const p=c.read(13330000),f=c.read(13325000);console.log(p.rewardPoolYearlyRate,p.vtReferenceTotal,p.initialSupplyBlock,p.rewardPoolAmount,f.forceFinalize,f.consensusSigVersion)'
 
 # Stato della rete
 curl -s https://dtube.fso.ovh/count

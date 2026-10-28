@@ -260,7 +260,7 @@ state: { _id: 'schedule:<h0>', leaders: [names…], set: [names…], jailSnapsho
 ### 4.4 Config and activation
 
 All consensus-affecting parameters go into `src/config.js` `history` (same mechanism as
-`forceFinalize` @ 13 925 000; note that the `100: { forceFinalize: true }` entry currently
+`forceFinalize` @ 13 325 000; note that the `100: { forceFinalize: true }` entry currently
 present in the S4 worktree is a **testnet-only local patch, not in `v2.0.2`**):
 
 ```js
@@ -729,7 +729,7 @@ Before `H_strict`/`H_standby`:
 
 If any gate fails, `H_strict`/`H_standby` are postponed by editing the heights **before**
 the release is deployed. Heights in `config.history` are immutable once passed, so the
-decision must be made before the flag day (this mirrors the `13 925 000` pattern already
+decision must be made before the flag day (this mirrors the `13 325 000` pattern already
 used for `forceFinalize`/`consensusSigVersion`).
 
 ### 8.3 Test matrix
@@ -769,7 +769,7 @@ assert `jailed` transitions match the expected deterministic timeline.
 ### 8.4 Cutover during the current halt (operational advantage)
 
 The network is halted at block **13 320 067** (since 2026-06-27) and `forceFinalize` is
-inactive until **13 925 000**. That makes the upgrade the *cheapest possible* flag day:
+inactive until **13 325 000**. That makes the upgrade the *cheapest possible* flag day:
 
 1. All operators upgrade to `v2.1.x` **before** the resume. Because the chain is halted,
    there is no "mixed version" window at all: the resume block is produced by new code.

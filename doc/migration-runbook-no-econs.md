@@ -6,10 +6,10 @@
 **Data**: 18 ottobre 2026
 **Ultima verifica**: 20 ottobre 2026 — tutti i controlli sotto sono stati rieseguiti sull'albero del tag **`v2.0.2`** (= `v2.0.0` più i fix della review gitar-bot e l'allineamento a Node 24, S1), e lo stato della rete è stato rimisurato (head invariato)
 **Partenza**: branch `new_net` (la linea di codice su cui gira la rete attuale, oggi ferma)
-**Arrivo**: nuovo codice = tag **`v2.0.2`** su `feat/auto-force-finalize` (= la punta di codice di `new_econs` `6cc3b46` meno il commit `46c77ff`; verificato 2026-10-20: il diff di codice = esattamente i 6 file econs, zero residui econs)
+**Arrivo**: nuovo codice = tag **`v2.0.3`** su `feat/auto-force-finalize` (= la linea di codice di `new_econs` meno il commit `46c77ff`, più i fix della linea di release arrivati dopo la verifica del fork day: `src/http/auth/index.js`, `src/http/index.js`, `src/p2p.js`, `test/audit-fixes.js`, `test/image-sharp.js`)
 **Companion**: `doc/economics_fork_13330000.md` (cosa fa la nuova economia, in dettaglio)
 
-> **Revisione 2026-10-28** — il flag day della force-finalization è stato spostato da `13.925.000` (~21 giorni) a **`13.325.000`** (~4 h dopo la ripresa), sfruttando la catena ferma: non producendo blocchi, il cutover è già un unico riavvio coordinato, quindi la rete di sicurezza non deve attendere. Questo modifica `src/config.js` su `feat/auto-force-finalize`, quindi il tag certificato `v2.0.2` non corrisponde più all'HEAD del branch — **ri-creare il tag di release prima di usare S1** (il branch è già a `package.json` 2.0.3, senza tag).
+> **Revisione 2026-10-28** — il flag day della force-finalization è stato spostato da `13.925.000` (~21 giorni) a **`13.325.000`** (~4 h dopo la ripresa), sfruttando la catena ferma, e gli endpoint admin (`/mineBlock`, `/debug`, `/recover`, `/logs`) sono diventati **fail-closed** senza token. Entrambe le cose sono nel tag **`v2.0.3`** (sopra `v2.0.2`), che è il tag certificato usato in questo documento; **`v2.0.2` è precedente al cambio di flag day e non va usato per S1**. Il blocco `13330000` resta intatto.
 
 Verifiche eseguite per questo runbook (in un worktree temporaneo; rieseguite il 20 ottobre 2026 sull'albero `v2.0.2`, il cui `src`/`test`/`scripts` corrisponde a `new_econs` `6cc3b46` fatta eccezione per il revert econs):
 
@@ -79,7 +79,7 @@ Nota: `new_net` **non ha nessun codice di force-finalization** (`consensus.js` 2
 
 ### 1.3 Come è stata costruita l'esclusione (traccia d'audit)
 
-**Gli operatori non costruiscono nulla**: l'esclusione è già certificata come tag `v2.0.2` — `git checkout v2.0.2` (S1) *è* tutto il passo. Le tre varianti sotto sono il registro decisionale di come è stato prodotto quell'albero (e perché V3 è stato scartato):
+**Gli operatori non costruiscono nulla**: l'esclusione è già certificata come tag `v2.0.3` — `git checkout v2.0.3` (S1) *è* tutto il passo. Le tre varianti sotto sono il registro decisionale di come è stato prodotto quell'albero (e perché V3 è stato scartato):
 
 | Variante | Come | Diff | Pro | Contro |
 |---|---|---|---|---|
@@ -144,12 +144,12 @@ Da annotare nel foglio di cutover: altezza head, hash del blocco head, **commit*
 
 ### S1 — Ottenere il branch senza economia 🔴
 
-**Consigliato: usare il tag di release.** L'albero verificato senza econs è pubblicato come tag **`v2.0.2`** sul branch `feat/auto-force-finalize` (verificato 2026-10-20: identico a `new_econs` in ogni file tranne i 6 file econs, zero residui econs):
+**Consigliato: usare il tag di release.** L'albero verificato senza econs è pubblicato come tag **`v2.0.3`** sul branch `feat/auto-force-finalize` (verificato 2026-10-20: identico a `new_econs` in ogni file tranne i 6 file econs; l'albero ha poi guadagnato i fix della linea di release elencati sopra):
 
 ```bash
 cd /percorso/avalon
 git fetch --all --tags
-git checkout v2.0.2                 # nuovo codice senza econs, con /version + fix della review
+git checkout v2.0.3                 # nuovo codice senza econs, con /version + fix della review
 ```
 
 **Cosa aggiungono le release rispetto a `v2.0.0`** — ciascuno riverificato sull'albero reale:
@@ -162,7 +162,9 @@ git checkout v2.0.2                 # nuovo codice senza econs, con /version + f
 
 **`v2.0.2`** (stesso giorno, sopra `v2.0.1`): immagini Docker e guard di avvio allineati a **Node 24** — `docker/Dockerfile` (NodeSource `setup_24.x`), `docker/testnet/Dockerfile` (`FROM node:24`), `docker/test.dockerfile` (`node:24-alpine`) e il check di versione in `main.js` (`>= v24`, era `>= v18` mentre `engines` richiedeva ≥24): chiude R8.
 
-`v2.0.0` resta valido per la provenienza; ogni percorso operativo di questo documento usa `v2.0.2`.
+**`v2.0.3`** (28 ottobre 2026, sopra `v2.0.2`): il flag day della force-finalization è passato da `13.925.000` a **`13.325.000`**, e gli endpoint admin (`/mineBlock`, `/debug`, `/recover`, `/logs`) sono diventati **fail-closed** senza token (`ADMIN_ALLOW_ANONYMOUS=1` riabilita l'accesso anonimo). Porta anche lo scaffolding testnet S4 e il bump di `sharp` + `package-lock.json` (S8/R14).
+
+`v2.0.0` resta valido per la provenienza; ogni percorso operativo di questo documento usa `v2.0.3`.
 
 Costruire il branch a mano — **non richiesto per la migrazione** (traccia d'audit, per memoria: il tag *è* già quell'albero):
 
@@ -191,9 +193,10 @@ git cherry-pick 46c77ff..new_econs         # tutti i commit sopra l'econs:
 Controllo di equivalenza (in ogni variante — conferma anche il tag):
 
 ```bash
-# atteso: esattamente i 6 file dell'economia — il tag/branch = nuovo codice − econs
-# (limitato al codice apposta: le revisioni di doc/ possono legittimamente differire)
-git diff new_econs v2.0.2 --stat -- src test scripts   # oppure il tuo new_net_noecons
+# atteso: i 6 file dell'economia (+10/−432) più i 5 file della linea di release
+# (src/http/auth/index.js, src/http/index.js, src/p2p.js, test/audit-fixes.js,
+# test/image-sharp.js) — limitato al codice apposta: le revisioni di doc/ possono legittimamente differire
+git diff new_econs v2.0.3 --stat -- src test scripts   # oppure il tuo new_net_noecons
 ```
 
 ### S2 — Verifica statica, offline ⚠️
@@ -224,7 +227,7 @@ node test/force-finalize.js       # atteso: All tests passed
 # test/supply-anchor.js: NON deve esistere (il revert lo elimina; nella V3 va cancellato a mano)
 
 # 4. Confermare di essere sul tag di release certificato
-git describe --tags              # atteso: v2.0.2
+git describe --tags              # atteso: v2.0.3
 ```
 
 ### S3 — Config, ambiente, proxy 🔴
@@ -245,7 +248,7 @@ Delle 18 variabili nuove, solo ~10 toccano il runtime del daemon (4 di esse sono
 
 Altre variabili nuove, da valutare: `IMG_MAX_BYTES` (10 MB), `IMG_MAX_PIXELS` (20 MPixels), `CONTENT_MAX_COMMENTS` (2000), `CONTENT_MAX_RESULTS` (10000), `LOG_ADMIN_TOKEN` / `LOG_FULL` / `LOG_PAGE` (log viewer in-nodo), e le variabili usate solo dagli script di halt (`BSON_PATH`, `IDX_PATH`, `REMOVE_COUNT`, `NEW_HEIGHT`, `DRY_RUN`, `SKIP_EARLY_CHECK_BLOCKS`, `TMP_COLL`, `BOOTSTRAP_HOST`).
 
-Autenticazione: nel nuovo codice `requireAuth()` protegge `/debug`, `/recover`, `/logs`, `/mineBlock`. Attenzione: **su un nodo senza token configurato quegli endpoint risultano raggiungibili** (`cefabdd`) → impostare `ADMIN_TOKEN`/`LOG_ADMIN_TOKEN` prima di esporre il nodo.
+Autenticazione: nel nuovo codice `requireAuth()` protegge `/debug`, `/recover`, `/logs`, `/mineBlock`. Dal `v2.0.3` questi endpoint sono **fail-closed**: senza token configurato rispondono `401`, quindi un nodo non configurato non li serve più in anonimo. Impostare `ADMIN_TOKEN`/`LOG_ADMIN_TOKEN` prima di esporre il nodo; solo l'uso locale deliberato dovrebbe impostare `ADMIN_ALLOW_ANONYMOUS=1` (il `docker/testnet` locale fa esattamente questo).
 
 Dietro reverse proxy:
 
@@ -264,7 +267,7 @@ Docker: `docker/docker-compose.yml` ha perso `version:` e ora passa `HTTP_HOST=0
 
 Prima di toccare la mainnet, riprodurre la migrazione su `docker/testnet` (3 miner + bootstrap, porte 3101-3104 / 6101-6104):
 
-1. checkout del tag di release e build (`git checkout v2.0.2 && docker compose build`);
+1. checkout del tag di release e build (`git checkout v2.0.3 && docker compose build`);
 2. catena da zero: verifica che i blocchi si producano e che nei log **non compaia mai** `Hard Fork #13330000`;
 3. **prova di determinismo**: rebuild completo da genesis sul codice nuovo-senza-economia e confronto di un centinaio di hash di blocco con un nodo `new_net` → devono coincidere (i validatori sono cambiati, R2);
 4. test force-finalization (due `/mineBlock` quasi simultanei su miner diversi);
@@ -295,12 +298,12 @@ nohup ./scripts/start.sh > /var/log/avalon.log 2>&1 &   # o systemd / pm2 / scre
 curl -s localhost:3001/count                      # head che AVANZA (13.320.068+)
 curl -s localhost:3001/block/13320068 | head -c 200   # phash = hash del 13320067
 curl -s localhost:3001/supply | head -c 200           # sanità (endpoint invariato, non econs)
-curl -s localhost:3001/version         # atteso: {"version":"2.0.2"} — IDENTICO su ogni nodo
+curl -s localhost:3001/version         # atteso: {"version":"2.0.3"} — IDENTICO su ogni nodo
 grep -c "Hard Fork #13330000" /var/log/avalon.log     # atteso: 0 (per sempre)
 grep "Hard Fork #" /var/log/avalon.log | tail -3      # attesi solo 241600 (e 13325000 dal futuro fork)
 ```
 
-Più, sul nodo di controllo: rebuild da genesis → stesso head **e stesso hash** degli altri nodi. Formato payout/voti: invariato (pool = 150001). Primo giorno intero di osservazione: `/count` monotono, nessun `possBlocks` crescente, peer stabili. Ogni operatore esegue `curl -s localhost:3001/version` e riporta il risultato nella chat di cutover: tutti i nodi devono rispondere `2.0.2`.
+Più, sul nodo di controllo: rebuild da genesis → stesso head **e stesso hash** degli altri nodi. Formato payout/voti: invariato (pool = 150001). Primo giorno intero di osservazione: `/count` monotono, nessun `possBlocks` crescente, peer stabili. Ogni operatore esegue `curl -s localhost:3001/version` e riporta il risultato nella chat di cutover: tutti i nodi devono rispondere `2.0.3`.
 
 ### S7 — Client, indexer, embed
 
@@ -316,7 +319,7 @@ Più, sul nodo di controllo: rebuild da genesis → stesso head **e stesso hash*
 - Entro **13.325.000** (4.933 blocchi ≈ **4 h** a 3 s dall'attuale head — appena sopra il blocco di ripresa, sfruttando l'halt) **tutti i nodi devono girare il nuovo codice**: quel fork abilita `forceFinalize` e passa `consensusSigVersion` a 2 (serializzazione a chiavi ordinate). Un nodo rimasto indietro non produce/valida le stesse firme → fork o halt.
 - Fino a quel blocco la rete ha **forza-finalization disabilitata**: un nuovo halt si risolve solo con `auto_resolve_halt.sh`.
 - Da monitorare: `Hard Fork #13325000` nei log al momento giusto, health dei peer, eventuali `possBlocks` multipli.
-- **Backlog post-migrazione** (audit dipendenze 2026-10-20): bump `sharp` `^0.32.6` → `^0.35.5` (high: CVE libvips/libheif sull'endpoint di processing immagini utente; validare con un test upload+resize) e `apidoc` `^1.2.0` → `^0.29.0` (solo dev). Un commit, DOPO il cutover — fuori dal delta del flag day apposta.
+- **Backlog post-migrazione** (audit dipendenze 2026-10-20): `apidoc` `^1.2.0` → `^0.29.0` (solo dev) resta un commit successivo, fuori dal delta. Il bump `sharp` `^0.32.6` → `^0.35.5` (high: CVE libvips/libheif sull'endpoint di processing immagini utente) **non è più rinviato** — ora viaggia **dentro il delta del flag day** (richiesto su Node ≥ 24 e per le CVE) ed è fissato dal `package-lock.json` committato. Ogni nodo deve eseguire `npm ci` dal lockfile e passare `node test/image-sharp.js` (upload+resize); trattarlo come un cambio R14.
 
 ### S9 — Rollback
 
@@ -330,7 +333,7 @@ Più, sul nodo di controllo: rebuild da genesis → stesso head **e stesso hash*
 
 | # | Rischio | Impatto | Prob. | Mitigazione |
 |---|---|---|---|---|
-| **R1** | Esclusione applicata solo ad alcuni nodi → al blocco 13.330.000 alcuni applicano il fork e altri no: `dist`/pool diversi, **catena divisa** | 🔴 critico | media | flag day con tutti i leader; verifica S2 (one-liner su ogni nodo) + `grep "Hard Fork #13330000"` = 0 + `curl /version` = 2.0.2 su ogni nodo; nessun nodo `new_net` online |
+| **R1** | Esclusione applicata solo ad alcuni nodi → al blocco 13.330.000 alcuni applicano il fork e altri no: `dist`/pool diversi, **catena divisa** | 🔴 critico | media | flag day con tutti i leader; verifica S2 (one-liner su ogni nodo) + `grep "Hard Fork #13330000"` = 0 + `curl /version` = 2.0.3 su ogni nodo; nessun nodo `new_net` online |
 | **R2** | Il nuovo codice cambia **validatori** (`validate/json.js`, `float.js`, `integer.js`, `string.js`, controllo bandwidth su create-account, bound dimensione blocchi, JSON con chiavi `.`/`$` rifiutate): un blocco/tx accettata dai vecchi può essere rifiutata dai nuovi | 🔴 fork o rebuild impossibile | alta se il cutover non è coordinato | testnet S4 con rebuild di controllo e confronto hash; cutover simultaneo; nessun nodo misto |
 | **R3** | Rollback dopo blocchi post-cutover: la vecchia versione non riesce a validare la catena nuova | 🔴 perdita dati | media | definire in D4 il punto di non ritorno; backup S0; troncamento mirato S9 |
 | **R4** | `CORS_ORIGIN` non impostata (default `false`) → il client web non legge le API | 🔴 client rotto | alta | impostarla su tutti i nodi pubblici (S3, S7) |
@@ -343,18 +346,18 @@ Più, sul nodo di controllo: rebuild da genesis → stesso head **e stesso hash*
 | **R11** | Halt non risolto: force-finalization **non è attiva** fino a 13.325.000; i guardrail dello script (max 10 blocchi per passata, 30 totali, stato `.avalon_halt`) possono rifiutare il troncamento | 🔴 catena ferma | media | `DRY_RUN=1` prima, pianificare l'intervento manuale, backup S0, finestra di manutenzione concordata |
 | **R12** | Senza la nuova economia restano aperti: ceiling di emissione 28,7 %/anno con pool costante `150001`, e il **drenaggio del pool da parte di una singola whale** su rete inattiva (bug di value extraction, `economics_fork_13330000.md` §2) | 🟠 economico | certa | decisione di business esplicita e datata (D3): riattivare con un fork successivo |
 | **R13** | `scripts/start.sh` contiene una **chiave privata in chiaro** (`NODE_OWNER_PRIV=34Ep…`) su entrambi i branch, e nella storia ci sono commit "rimuovi chiavi private" poi annullati | 🔴 sicurezza | certa | ruotare la chiave del nodo prima di diffondere questo documento o il branch; non versionare `start.sh` reale |
-| **R14** | Bump dipendenze (`mongodb` 4.2→4.17, `sharp`, `secp256k1`, `express`, ora `javalon2` ^1.1.10): comportamento/indici diversi su DB esistenti | 🟠 errori a runtime | media | test su copia del DB; leggere i log al primo avvio; `npm ci` da lockfile |
+| **R14** | Bump dipendenze (`mongodb` 4.2→4.17, `secp256k1`, `express`, ora `javalon2` ^1.1.10, e `sharp` ^0.35.5 che ora viaggia **dentro il delta del flag day**): comportamento/indici diversi su DB esistenti | 🟠 errori a runtime | media | test su copia del DB; leggere i log al primo avvio; `npm ci` da lockfile; per `sharp` eseguire `node test/image-sharp.js` (upload+resize) su ogni nodo |
 | **R15** | Il nuovo codice *è* una release anti-halt (consensus.js 290→684 righe) ma la force-finalization è disattivata fino a 13.325.000: la stabilità della ripresa dipende dalla nuova logica non ancora esercitata in produzione | 🟠 nuovo halt | media | testnet di force-finalization (S4); `auto_resolve_halt.sh` pronto; osservazione ravvicinata (S8) |
 
 ---
 
 ## 6. Definition of done
 
-- [ ] Tag checkoutato su ogni nodo (`git checkout v2.0.2`) e `git diff new_econs v2.0.2 --stat -- src test scripts` mostra **solo** i 6 file dell'economia
+- [ ] Tag checkoutato su ogni nodo (`git checkout v2.0.3`) e `git diff new_econs v2.0.3 --stat -- src test scripts` mostra i 6 file dell'economia **più** i fix della linea di release (`src/http/auth/index.js`, `src/http/index.js`, `src/p2p.js`, `test/audit-fixes.js`, `test/image-sharp.js`)
 - [ ] `grep` residui e one-liner config di S2 → esito atteso (nessuna chiave econs, `pool: 150001`, `FF@13325000: true`, `sigVer: 2`)
 - [ ] `npm run lint` + `test/audit-fixes.js` + `test/force-finalize.js` verdi come da baseline
 - [ ] Node ≥ 24 su tutti i nodi e nelle immagini Docker
-- [ ] Ogni nodo sul tag certificato (`git describe --tags` = `v2.0.2`); `curl /version` restituisce `2.0.2` su ogni nodo
+- [ ] Ogni nodo sul tag certificato (`git describe --tags` = `v2.0.3`); `curl /version` restituisce `2.0.3` su ogni nodo
 - [ ] `CORS_ORIGIN`, `HTTP_HOST`, `TRUST_PROXY`, `ADMIN_TOKEN`/`LOG_ADMIN_TOKEN` impostate e verificate **da fuori rete locale**
 - [ ] Nuove env vars dichiarate in `scripts/start.sh` (blocco commentato) perché i operatori possano scoprirle
 - [ ] Dry-run su testnet: rebuild da genesis con hash coincidenti + force-finalization testata
@@ -373,7 +376,7 @@ Tempo di presidio umano per passo, stimato sul layout reale del nodo mainnet (`b
 | Passo | Presidio | Su cosa si basa |
 |---|---|---|
 | **S0 pre-flight** | **~15 min** | copia blocks.bson/index ≈ 1–2 min (4,3G su disco locale/1Gbit), `mongodump` 2,7G ≈ 2–3 min, snapshot git/env/chiavi ~5 min |
-| **S1 checkout della release** | **~1 min** | `git checkout v2.0.2` (tag già certificato; le varianti di self-build sono solo audit) |
+| **S1 checkout della release** | **~1 min** | `git checkout v2.0.3` (tag già certificato; le varianti di self-build sono solo audit) |
 | **S2 verifica statica** | **~10–15 min** | `npm ci` 1–5 min (a cache), grep + one-liner config + lint + 2 suite di test |
 | **S3 config/proxy** | **~30 min per nodo** | `.env` + blocco commentato nuovo in `start.sh` + nginx (`X-Forwarded-For`) + verifica dall'esterno |
 | **S4 dry-run testnet** | **~1–2 h al primo giro**, ~45 min a ripetizione | `docker compose build` 15–30 min la prima volta; catena da zero, rebuild di determinismo, test force-finalization |
@@ -438,7 +441,7 @@ const p=c.read(13330000),f=c.read(13325000);console.log(p.rewardPoolYearlyRate,p
 # Stato della rete
 curl -s https://dtube.fso.ovh/count
 
-# Stessa release su questo nodo? (atteso: 2.0.2)
+# Stessa release su questo nodo? (atteso: 2.0.3)
 curl -s localhost:3001/version
 
 # Il nodo ha attivato l'economia? (deve restare vuoto)

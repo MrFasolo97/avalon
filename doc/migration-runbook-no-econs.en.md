@@ -6,10 +6,10 @@
 **Date**: 18 October 2026
 **Last verified**: 20 October 2026 — every check below was re-run on the tree of tag **`v2.0.2`** (= `v2.0.0` plus the gitar-bot review fixes and the Node 24 alignment, S1), and the network state was re-measured (head unchanged)
 **From**: branch `new_net` (the code line the current network runs on, today halted)
-**To**: the new code = tag **`v2.0.2`** on `feat/auto-force-finalize` (= the `new_econs` code tip `6cc3b46` minus commit `46c77ff`; verified 2026-10-20: code diff = exactly the 6 econs files, zero econs residue)
+**To**: the new code = tag **`v2.0.3`** on `feat/auto-force-finalize` (= the `new_econs` code line minus the economy fork `46c77ff`, plus the release-line-only fixes landed after the fork-day verification: `src/http/auth/index.js`, `src/http/index.js`, `src/p2p.js`, `test/audit-fixes.js`, `test/image-sharp.js`)
 **Companion**: `doc/economics_fork_13330000.md` (what the new economy does, in detail)
 
-> **Revision 2026-10-28** — the force-finalization flag day was moved from `13,925,000` (~21 days) down to **`13,325,000`** (~4 h after the resume), exploiting the halted chain: with no blocks being produced, the cutover is already a single coordinated restart, so the safety net does not need to wait. This edits `src/config.js` on `feat/auto-force-finalize`, so the certified tag `v2.0.2` no longer matches the branch HEAD — **re-cut the release tag before using S1** (the branch is already at `package.json` 2.0.3, un-tagged).
+> **Revision 2026-10-28** — the force-finalization flag day was moved from `13,925,000` (~21 days) down to **`13,325,000`** (~4 h after the resume), exploiting the halted chain, and the admin endpoints (`/mineBlock`, `/debug`, `/recover`, `/logs`) became **fail-closed** when no token is configured. Both ship in tag **`v2.0.3`** (over `v2.0.2`), which is the certified tag used throughout this document; **`v2.0.2` predates the flag-day change and must not be used for S1**. Block `13330000` stays untouched.
 
 Checks performed for this runbook (in a throwaway worktree; re-run on 20 October 2026 on the `v2.0.2` tree, whose `src`/`test`/`scripts` match `new_econs` `6cc3b46` apart from the econs revert):
 
@@ -79,7 +79,7 @@ Note: `new_net` has **no force-finalization code at all** (`consensus.js` 290 �
 
 ### 1.3 How the exclusion was built (audit trail)
 
-**Operators do not build anything**: the exclusion is already certified as tag `v2.0.2` — `git checkout v2.0.2` (S1) *is* the whole step. The three variants below are the decision record of how that tree was produced (and why V3 was rejected):
+**Operators do not build anything**: the exclusion is already certified as tag `v2.0.3` — `git checkout v2.0.3` (S1) *is* the whole step. The three variants below are the decision record of how that tree was produced (and why V3 was rejected):
 
 | Variant | How | Diff | Pros | Cons |
 |---|---|---|---|---|
@@ -144,12 +144,12 @@ To record on the cutover sheet: head height, head block hash, **commit** current
 
 ### S1 — Get the no-economy branch 🔴
 
-**Recommended: use the release tag.** The verified no-econs tree is published as tag **`v2.0.2`** on branch `feat/auto-force-finalize` (verified 2026-10-20: identical to `new_econs` in every file except the 6 econs files, zero econs residue):
+**Recommended: use the release tag.** The verified no-econs tree is published as tag **`v2.0.3`** on branch `feat/auto-force-finalize` (verified 2026-10-20: identical to `new_econs` in every file except the 6 econs files; the tree has since gained the release-line-only fixes listed above):
 
 ```bash
 cd /path/avalon
 git fetch --all --tags
-git checkout v2.0.2                 # new code without econs, with /version + review fixes
+git checkout v2.0.3                 # new code without econs, with /version + review fixes
 ```
 
 **What the releases add over `v2.0.0`** — each re-verified on the real tree:
@@ -162,7 +162,9 @@ git checkout v2.0.2                 # new code without econs, with /version + re
 
 **`v2.0.2`** (same day, over `v2.0.1`): Docker images and the startup guard aligned to **Node 24** — `docker/Dockerfile` (NodeSource `setup_24.x`), `docker/testnet/Dockerfile` (`FROM node:24`), `docker/test.dockerfile` (`node:24-alpine`) and the `main.js` version check (`>= v24`, was `>= v18` while `engines` required ≥24): closes R8.
 
-`v2.0.0` stays valid for provenance; every operator path in this document uses `v2.0.2`.
+**`v2.0.3`** (28 October 2026, over `v2.0.2`): the force-finalization flag day moved from `13,925,000` down to **`13,325,000`**, and the admin endpoints (`/mineBlock`, `/debug`, `/recover`, `/logs`) became **fail-closed** when no token is configured (`ADMIN_ALLOW_ANONYMOUS=1` opts back in). It also carries the S4 testnet scaffolding and the `sharp` bump + `package-lock.json` (S8/R14).
+
+`v2.0.0` stays valid for provenance; every operator path in this document uses `v2.0.3`.
 
 Building the branch yourself — **not required for the migration** (audit trail, kept for the record: the tag already *is* this tree):
 
@@ -191,9 +193,10 @@ git cherry-pick 46c77ff..new_econs         # every commit above the econs one:
 Equivalence check (any variant — also confirms the tag):
 
 ```bash
-# expected: exactly the 6 economy files — the tag/branch = new code − econs
-# (scoped to code on purpose: doc/ revisions may legitimately differ)
-git diff new_econs v2.0.2 --stat -- src test scripts   # or your new_net_noecons branch
+# expected: the 6 economy files (+10/−432) plus the 5 release-line-only files
+# (src/http/auth/index.js, src/http/index.js, src/p2p.js, test/audit-fixes.js,
+# test/image-sharp.js) — scoped to code on purpose: doc/ revisions may legitimately differ
+git diff new_econs v2.0.3 --stat -- src test scripts   # or your new_net_noecons branch
 ```
 
 ### S2 — Static, offline verification ⚠️
@@ -224,7 +227,7 @@ node test/force-finalize.js       # expected: All tests passed
 # test/supply-anchor.js: it must NOT exist (the revert deletes it; in V3 delete it by hand)
 
 # 4. Confirm you are on the certified release tag
-git describe --tags              # expected: v2.0.2
+git describe --tags              # expected: v2.0.3
 ```
 
 ### S3 — Config, environment, proxy 🔴
@@ -245,7 +248,7 @@ Of the 18 new variables, only ~10 affect the daemon runtime (4 of them are the s
 
 Other new variables, to be evaluated: `IMG_MAX_BYTES` (10 MB), `IMG_MAX_PIXELS` (20 MPixels), `CONTENT_MAX_COMMENTS` (2000), `CONTENT_MAX_RESULTS` (10000), `LOG_ADMIN_TOKEN` / `LOG_FULL` / `LOG_PAGE` (in-node log viewer), and the variables used only by the halt scripts (`BSON_PATH`, `IDX_PATH`, `REMOVE_COUNT`, `NEW_HEIGHT`, `DRY_RUN`, `SKIP_EARLY_CHECK_BLOCKS`, `TMP_COLL`, `BOOTSTRAP_HOST`).
 
-Authentication: in the new code `requireAuth()` protects `/debug`, `/recover`, `/logs`, `/mineBlock`. Careful: **on a node with no token configured those endpoints are reachable** (`cefabdd`) → set `ADMIN_TOKEN`/`LOG_ADMIN_TOKEN` before exposing the node.
+Authentication: in the new code `requireAuth()` protects `/debug`, `/recover`, `/logs`, `/mineBlock`. Since `v2.0.3` these **fail closed**: with no token configured they return `401`, so an unconfigured node no longer serves them anonymously. Set `ADMIN_TOKEN`/`LOG_ADMIN_TOKEN` before exposing the node; only deliberate local use should set `ADMIN_ALLOW_ANONYMOUS=1` (the local `docker/testnet` does exactly that).
 
 Behind a reverse proxy:
 
@@ -264,7 +267,7 @@ Docker: `docker/docker-compose.yml` lost `version:` and now passes `HTTP_HOST=0.
 
 Before touching mainnet, reproduce the migration on `docker/testnet` (3 miners + bootstrap, ports 3101-3104 / 6101-6104):
 
-1. checkout the release tag and build (`git checkout v2.0.2 && docker compose build`);
+1. checkout the release tag and build (`git checkout v2.0.3 && docker compose build`);
 2. chain from scratch: verify that blocks are produced and that `Hard Fork #13330000` **never appears** in the logs;
 3. **determinism test**: full rebuild from genesis on the new-code-without-economy and compare around a hundred block hashes with a `new_net` node → they must match (validators changed, R2);
 4. force-finalization test (two near-simultaneous `/mineBlock` on different miners);
@@ -295,12 +298,12 @@ nohup ./scripts/start.sh > /var/log/avalon.log 2>&1 &   # or systemd / pm2 / scr
 curl -s localhost:3001/count                      # head ADVANCING (13,320,068+)
 curl -s localhost:3001/block/13320068 | head -c 200   # phash = hash of 13320067
 curl -s localhost:3001/supply | head -c 200           # sanity (endpoint unchanged, not econs)
-curl -s localhost:3001/version         # expected: {"version":"2.0.2"} — IDENTICAL on every node
+curl -s localhost:3001/version         # expected: {"version":"2.0.3"} — IDENTICAL on every node
 grep -c "Hard Fork #13330000" /var/log/avalon.log     # expected: 0 (forever)
 grep "Hard Fork #" /var/log/avalon.log | tail -3      # only 241600 expected (and 13325000 from the future fork)
 ```
 
-Plus, on the control node: rebuild from genesis → same head **and same hash** as the other nodes. Payout/vote format: unchanged (pool = 150001). First full day of observation: `/count` monotonic, no growing `possBlocks`, stable peers. Every operator runs `curl -s localhost:3001/version` and posts the result in the cutover chat: all nodes must answer `2.0.2`.
+Plus, on the control node: rebuild from genesis → same head **and same hash** as the other nodes. Payout/vote format: unchanged (pool = 150001). First full day of observation: `/count` monotonic, no growing `possBlocks`, stable peers. Every operator runs `curl -s localhost:3001/version` and posts the result in the cutover chat: all nodes must answer `2.0.3`.
 
 ### S7 — Clients, indexers, embed
 
@@ -316,7 +319,7 @@ Plus, on the control node: rebuild from genesis → same head **and same hash** 
 - By **13,325,000** (4,933 blocks ≈ **4 h** at 3 s from the current head — deliberately just above the resume block, exploiting the halt) **all nodes must run the new code**: that fork enables `forceFinalize` and moves `consensusSigVersion` to 2 (ordered-keys serialization). A node left behind does not produce/validate the same signatures → fork or halt.
 - Until that block the network has force-finalization **disabled**: a new halt can only be resolved with `auto_resolve_halt.sh`.
 - To monitor: `Hard Fork #13325000` in the logs at the right time, peer health, any multiple `possBlocks`.
-- **Post-migration backlog** (dependency audit 2026-10-20): bump `sharp` `^0.32.6` → `^0.35.5` (high: libvips/libheif CVEs on the user-image processing endpoint; validate with an upload+resize test) and `apidoc` `^1.2.0` → `^0.29.0` (dev-only). One commit, AFTER the cutover — deliberately outside the flag-day delta.
+- **Post-migration backlog** (dependency audit 2026-10-20): `apidoc` `^1.2.0` → `^0.29.0` (dev-only) stays a later, off-delta commit. The `sharp` `^0.32.6` → `^0.35.5` bump (high: libvips/libheif CVEs on the user-image processing endpoint) is **no longer deferred** — it now ships **inside the flag-day delta** (required on Node ≥ 24 and for the CVEs) and is pinned by the committed `package-lock.json`. Every node must run `npm ci` from the lockfile and pass `node test/image-sharp.js` (upload+resize); treat it as an R14 change.
 
 ### S9 — Rollback
 
@@ -330,7 +333,7 @@ Plus, on the control node: rebuild from genesis → same head **and same hash** 
 
 | # | Risk | Impact | Prob. | Mitigation |
 |---|---|---|---|---|
-| **R1** | Exclusion applied to only some nodes → at block 13,330,000 some apply the fork and others do not: different `dist`/pool, **split chain** | 🔴 critical | medium | flag day with all leaders; S2 verification (one-liner on every node) + `grep "Hard Fork #13330000"` = 0 + `curl /version` = 2.0.2 on every node; no `new_net` node online |
+| **R1** | Exclusion applied to only some nodes → at block 13,330,000 some apply the fork and others do not: different `dist`/pool, **split chain** | 🔴 critical | medium | flag day with all leaders; S2 verification (one-liner on every node) + `grep "Hard Fork #13330000"` = 0 + `curl /version` = 2.0.3 on every node; no `new_net` node online |
 | **R2** | The new code changes **validators** (`validate/json.js`, `float.js`, `integer.js`, `string.js`, bandwidth check on create-account, block size bounds, JSON with `.`/`$` keys rejected): a block/tx accepted by the old code may be rejected by the new one | 🔴 fork or impossible rebuild | high if the cutover is not coordinated | S4 testnet with a control rebuild and hash comparison; simultaneous cutover; no mixed nodes |
 | **R3** | Rollback after post-cutover blocks: the old version cannot validate the new chain | 🔴 data loss | medium | define the point of no return in D4; S0 backup; targeted truncation S9 |
 | **R4** | `CORS_ORIGIN` not set (default `false`) → the web client cannot read the APIs | 🔴 broken client | high | set it on all public nodes (S3, S7) |
@@ -343,18 +346,18 @@ Plus, on the control node: rebuild from genesis → same head **and same hash** 
 | **R11** | Unresolved halt: force-finalization is **not active** until 13,325,000; the script guardrails (max 10 blocks per pass, 30 total, `.avalon_halt` state) may refuse the truncation | 🔴 chain halted | medium | `DRY_RUN=1` first, plan the manual intervention, S0 backup, agreed maintenance window |
 | **R12** | Without the new economy these stay open: 28.7 %/year emission ceiling with a constant pool of `150001`, and **pool drainage by a single whale** on an inactive network (value-extraction bug, `economics_fork_13330000.md` §2) | 🟠 economic | certain | explicit, dated business decision (D3): re-enable with a later fork |
 | **R13** | `scripts/start.sh` contains a **plaintext private key** (`NODE_OWNER_PRIV=34Ep…`) on both branches, and history holds "remove private keys" commits that were later undone | 🔴 security | certain | rotate the node key before circulating this document or the branch; do not version the real `start.sh` |
-| **R14** | Dependency bumps (`mongodb` 4.2→4.17, `sharp`, `secp256k1`, `express`, now `javalon2` ^1.1.10): different behavior/indexes on existing DBs | 🟠 runtime errors | medium | test on a copy of the DB; read the logs on first start; `npm ci` from the lockfile |
+| **R14** | Dependency bumps (`mongodb` 4.2→4.17, `secp256k1`, `express`, now `javalon2` ^1.1.10, and `sharp` ^0.35.5 which now ships **inside the flag-day delta**): different behavior/indexes on existing DBs | 🟠 runtime errors | medium | test on a copy of the DB; read the logs on first start; `npm ci` from the lockfile; for `sharp` run `node test/image-sharp.js` (upload+resize) on every node |
 | **R15** | The new code *is* an anti-halt release (consensus.js 290→684 lines) but force-finalization is disabled until 13,325,000: the stability of the resume depends on new logic never yet exercised in production | 🟠 new halt | medium | force-finalization testnet (S4); `auto_resolve_halt.sh` ready; close observation (S8) |
 
 ---
 
 ## 6. Definition of done
 
-- [ ] Tag checked out on every node (`git checkout v2.0.2`) and `git diff new_econs v2.0.2 --stat -- src test scripts` shows **only** the 6 economy files
+- [ ] Tag checked out on every node (`git checkout v2.0.3`) and `git diff new_econs v2.0.3 --stat -- src test scripts` shows the 6 economy files **plus** the release-line-only fixes (`src/http/auth/index.js`, `src/http/index.js`, `src/p2p.js`, `test/audit-fixes.js`, `test/image-sharp.js`)
 - [ ] Residue `grep` and the S2 config one-liner → expected outcome (no econs keys, `pool: 150001`, `FF@13325000: true`, `sigVer: 2`)
 - [ ] `npm run lint` + `test/audit-fixes.js` + `test/force-finalize.js` green as per baseline
 - [ ] Node ≥ 24 on all nodes and in the Docker images
-- [ ] Every node on the certified tag (`git describe --tags` = `v2.0.2`); `curl /version` returns `2.0.2` on every node
+- [ ] Every node on the certified tag (`git describe --tags` = `v2.0.3`); `curl /version` returns `2.0.3` on every node
 - [ ] `CORS_ORIGIN`, `HTTP_HOST`, `TRUST_PROXY`, `ADMIN_TOKEN`/`LOG_ADMIN_TOKEN` set and verified **from outside the local network**
 - [ ] New env vars declared in `scripts/start.sh` (commented block) so operators can discover them
 - [ ] Testnet dry run: rebuild from genesis with matching hashes + force-finalization tested
@@ -373,7 +376,7 @@ Hands-on time per step, estimated against the real node layout (mainnet: `blocks
 | Step | Hands-on | Basis |
 |---|---|---|
 | **S0 pre-flight** | **~15 min** | blocks.bson/index copy ≈ 1–2 min (4.3 GB local disk / 1 Gbit), `mongodump` 2.7 GB ≈ 2–3 min, git/env/key snapshots ~5 min |
-| **S1 release checkout** | **~1 min** | `git checkout v2.0.2` (tag already certified; the self-build variants are audit-only) |
+| **S1 release checkout** | **~1 min** | `git checkout v2.0.3` (tag already certified; the self-build variants are audit-only) |
 | **S2 static verification** | **~10–15 min** | `npm ci` 1–5 min (warm cache), greps + config one-liner + lint + 2 test suites |
 | **S3 config/proxy** | **~30 min per node** | `.env` + new commented block in `start.sh` + nginx (`X-Forwarded-For`) + verification from outside |
 | **S4 testnet dry run** | **~1–2 h first run**, ~45 min on repeat | `docker compose build` 15–30 min first time; chain from scratch, determinism rebuild, force-finalization test |
@@ -438,7 +441,7 @@ const p=c.read(13330000),f=c.read(13325000);console.log(p.rewardPoolYearlyRate,p
 # Network state
 curl -s https://dtube.fso.ovh/count
 
-# Same release on this node? (expected: 2.0.2)
+# Same release on this node? (expected: 2.0.3)
 curl -s localhost:3001/version
 
 # Has the node activated the economy? (must stay empty)

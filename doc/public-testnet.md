@@ -1,7 +1,7 @@
 # Avalon Public Testnet — Multi-Operator Guide
 
 **Status:** pre-launch (draft for coordinator review)
-**Target release:** certified **`v2.0.2`** (branch `feat/auto-force-finalize`) — the *no-economy* line; hard fork `#13330000` is **not** included
+**Target release:** certified **`v2.0.3`** (branch `feat/auto-force-finalize`) — the *no-economy* line; hard fork `#13330000` is **not** included
 **Audience:** independent operators (entities that run their own node on their own infrastructure, with their own keys)
 **Companions:** [`mainnet-deployment-and-rollback.md`](./mainnet-deployment-and-rollback.md), [`migration-runbook-no-econs.md`](./migration-runbook-no-econs.md), local dev net in [`docker/testnet/README.md`](../docker/testnet/README.md)
 
@@ -11,7 +11,7 @@
 
 A public testnet is a **separate chain** that runs the same certified code as the upcoming mainnet migration, but on a fresh genesis and with **different, testnet-only** values for the fields that define a chain. Every independent entity runs a real node on its own machine, over the public internet, and they must agree on **two things**:
 
-1. the **same commit** (the certified `v2.0.2` tag), and
+1. the **same commit** (the certified `v2.0.3` tag), and
 2. the **same testnet config patch** (chain id, master key, fork heights).
 
 Miss either one and the entities end up on **different chains** that silently ignore each other. Everything else (ports, peers, own keys) is per-operator.
@@ -24,7 +24,7 @@ The testnet exists to rehearse, with real independent operators, exactly what th
 
 | | |
 |---|---|
-| **Runs** | certified `v2.0.2`, Node.js ≥ 24, no economy fork (`#13330000` absent) |
+| **Runs** | certified `v2.0.3`, Node.js ≥ 24, no economy fork (`#13330000` absent) |
 | **Chain** | fresh, isolated chain; block `#0` is a fixed genesis; the master account (default `dtube`) holds the testnet supply |
 | **Exercises** | multi-operator P2P, leader election/rotation, **force-finalization** (activated early), halt recovery, `CORS_ORIGIN`/`TRUST_PROXY`/rate limiting/auth, `/version` census |
 | **Does NOT contain** | any mainnet balances, contents or history; any real value |
@@ -74,7 +74,7 @@ The testnet config patch (applied to `src/config.js` on **every** node, exactly 
 | `block0ts` | genesis timestamp / bw-vt growth base | must be identical everywhere |
 | `masterName` / `masterPub` / `masterPubLeader` | **key custody.** `mongo.insertMasterAccount()` creates the master from these; put a *fresh testnet keypair* here, not the mainnet key. | the coordinator keeps the master **private** key |
 | `masterDaoTxs` | let the master create accounts, transfer, enable and vote on the fresh chain | widen as in the dev net |
-| `forceFinalize` @ a **low** height | the whole point of the testnet: exercise the anti-fork safety net early (mainnet only enables it at `13 925 000`) | e.g. block `100` |
+| `forceFinalize` @ a **low** height | the whole point of the testnet: exercise the anti-fork safety net early (mainnet only enables it at `13 325 000`) | e.g. block `100` |
 
 Reference patch (this is exactly what `docker/testnet` does, plus the isolation/master keys):
 
@@ -106,7 +106,7 @@ Goal: produce block `#0` and the first blocks, then hand every operator an accou
 
 ```bash
 # 1. Fresh code at the certified tag, on the coordinator machine
-git fetch --all --tags && git checkout v2.0.2
+git fetch --all --tags && git checkout v2.0.3
 npm ci
 
 # 2. Apply the shared testnet patch to src/config.js (§4), then confirm
@@ -122,8 +122,9 @@ export HTTP_HOST=0.0.0.0 CORS_ORIGIN='*' ADMIN_TOKEN=<token> LOG_ADMIN_TOKEN=<to
 export NODE_OWNER=dtube NODE_OWNER_PUB=<masterPub> NODE_OWNER_PRIV=<masterPriv>
 ./scripts/start.sh
 
-# 5. Kick production until the chain moves on its own
-for i in $(seq 1 20); do curl -sf localhost:3001/mineBlock; sleep 3; done
+# 5. Kick production until the chain moves on its own.
+#    /mineBlock is fail-closed without a token, so send ADMIN_TOKEN (§7)
+for i in $(seq 1 20); do curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" localhost:3001/mineBlock; sleep 3; done
 curl -s localhost:3001/count          # must advance past #0
 ```
 
@@ -144,7 +145,7 @@ Once the chain runs, publish on the shared channel: the tag, the exact config pa
 
 ```bash
 git clone https://github.com/dtube/avalon.git && cd avalon
-git fetch --all --tags && git checkout v2.0.2
+git fetch --all --tags && git checkout v2.0.3
 npm ci
 
 # Apply the coordinator's testnet config patch (§4). Verify it matches theirs:
@@ -175,7 +176,7 @@ The `v2.0.x` line adds secure-by-default behaviour and **can break clients or lo
 | `HTTP_HOST` | `127.0.0.1` | `0.0.0.0` | reachable from outside / other services |
 | `CORS_ORIGIN` | `false` (no CORS) | `*` (or the client origin) | browsers get nothing cross-origin otherwise |
 | `TRUST_PROXY` | off (`X-Forwarded-For` ignored) | `1` | only behind a reverse proxy; **not** set = rate-limit bucket shared by all clients |
-| `ADMIN_TOKEN` / `LOG_ADMIN_TOKEN` | unset → privileged endpoints accept plain requests | a real token | `/mineBlock`, `/recover`, `/debug`, `/logs` are otherwise open |
+| `ADMIN_TOKEN` / `LOG_ADMIN_TOKEN` | unset → privileged endpoints return **401** (fail closed) unless `ADMIN_ALLOW_ANONYMOUS=1` | a real token | `/mineBlock`, `/recover`, `/debug`, `/logs` need `Authorization: Bearer <token>` |
 | `HTTP_PORT` / `P2P_PORT` | `3001` / `6001` | your choice | expose the P2P port to the internet |
 | `PEERS` | empty | `ws://<bootstrap>:6001` (+ others) | initial connectivity |
 | `MAX_PEERS` | `15` | `50`+ if you are a public node | discovery fan-in |
@@ -211,7 +212,7 @@ If fewer than `leaders` accounts are eligible, `minerSchedule()` pads the shuffl
 ## 9. Verification checklist (must pass on every node)
 
 ```bash
-curl -s localhost:3001/version          # {"version":"2.0.2"} — IDENTICAL on every node
+curl -s localhost:3001/version          # {"version":"2.0.3"} — IDENTICAL on every node
 curl -s localhost:3001/count            # head advances monotonically
 curl -s localhost:3001/peers            # peers from independent entities
 curl -s localhost:3001/schedule         # leader shuffle is present and consistent
@@ -235,7 +236,8 @@ REBUILD_STATE=1 ./scripts/start.sh
 **Force-finalization drill** (only after the `forceFinalize` height): trigger two near-simultaneous blocks on two different miners and confirm the network converges:
 
 ```bash
-curl http://<minerA>:3001/mineBlock & curl http://<minerB>:3001/mineBlock &
+curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" http://<minerA>:3001/mineBlock & \
+curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" http://<minerB>:3001/mineBlock &
 # then watch:
 watch -n1 'curl -s http://<bootstrap>:3001/count'
 grep -i "force\|collision" /var/log/avalon.log

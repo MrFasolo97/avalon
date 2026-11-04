@@ -1,14 +1,14 @@
 # Avalon Testnet — Layer S/H Offline-Leader Drills
 
-Testnet esteso a **5 leader + 2 standby** per eseguire la matrice G1–G12 del piano
+A testnet extended to **5 leaders + 2 standbys** to run the G1–G12 matrix from
 `doc/consensus-offline-leaders-plan.en.md`.
 
-## Requisiti
+## Requirements
 
 - Docker + Docker Compose v2
-- ~8 GB RAM (8 nodi: bootstrap, setup, mongodb, 5 miners, 2 standbys)
+- ~8 GB RAM (8 nodes: bootstrap, setup, mongodb, 5 miners, 2 standbys)
 
-## Avvio
+## Start
 
 ```bash
 cd docker/testnet
@@ -18,24 +18,24 @@ docker compose -p avalon-drills \
   -f docker-compose.yml \
   -f docker-compose.drills.yml build
 
-# Avvia
+# Start
 docker compose -p avalon-drills \
   -f docker-compose.yml \
   -f docker-compose.drills.yml up -d
 
-# Log
+# Logs
 docker compose -p avalon-drills logs -f
 ```
 
-L'avvio segue lo stesso flusso del testnet base:
-1. `bootstrap` — genesis e primi blocchi
-2. `setup` — crea 7 account (`miner1..miner5`, `standby1..standby2`), trasferisce token, abilita i nodi, vota i leader
-3. `miner1..miner5` — leader set iniziale
-4. `standby1..standby2` — pool di standby (ordinamento canonico per nome li mette dopo i miner)
+Startup follows the same flow as the base testnet:
+1. `bootstrap` — genesis and first blocks
+2. `setup` — creates 7 accounts (`miner1..miner5`, `standby1..standby2`), transfers tokens, enables the nodes, votes the leaders
+3. `miner1..miner5` — initial leader set
+4. `standby1..standby2` — standby pool (canonical name ordering places them after the miners)
 
-## Porte host
+## Host ports
 
-| Servizio  | HTTP  | P2P   |
+| Service   | HTTP  | P2P   |
 |-----------|-------|-------|
 | bootstrap | 3201  | 6201  |
 | miner1    | 3202  | 6202  |
@@ -46,44 +46,44 @@ L'avvio segue lo stesso flusso del testnet base:
 | standby1  | 3207  | 6207  |
 | standby2  | 3208  | 6208  |
 
-## Comandi utili
+## Useful commands
 
 ```bash
-# Altezza corrente
+# Current height
 watch -n 1 'curl -s http://localhost:3201/count'
 
-# Stato consensus (leader health, quorum, possBlocks)
+# Consensus state (leader health, quorum, possBlocks)
 curl -s http://localhost:3201/consensus | jq
 
-# Hash cross-node determinismo
+# Cross-node determinism hash
 curl -s http://localhost:3201/debug/statehash | jq '.stateHash'
 curl -s http://localhost:3202/debug/statehash | jq '.stateHash'
 
 # Peer list
 curl -s http://localhost:3201/peers
 
-# Schedule corrente
+# Current schedule
 curl -s http://localhost:3201/schedule | jq
 ```
 
-## Matrice drill G1–G12
+## Drill matrix G1–G12
 
-| Id | Scenario | Comando esemplificativo | Atteso |
-|----|----------|------------------------|--------|
-| G1 | 1 leader down 60 blocchi | `docker stop avalon-drills-miner5` per 60s | catena continua, `skips` corretto, nessun jail |
-| G2 | 1 leader down 200 blocchi | `docker stop avalon-drills-miner5` per ~600s | jailed dopo 30 turni, `E=4/q=4`, nessun halt |
-| G3 | 2 leader down 400 blocchi | `docker stop avalon-drills-miner4 avalon-drills-miner5` | jailed, `E=3/q=3`, catena continua |
-| G4 | Top-5 down, standby entra (Layer H) | `docker stop avalon-drills-miner5` per >30 turni | `standby1` entra al prossimo epoch, produce a 3s |
-| G5 | Partizione 3/2 per 100 blocchi | isolare 2 nodi dalla rete Docker | maggioranza finalizza, minoranza resync |
-| G6 | Clock skew ±5s su due nodi | `docker exec ... date -s ...` | blocchi in pending, poi accettati, nessun ban |
-| G7 | Equivocazione | due `/mineBlock` quasi contemporanei | rank deterministico sceglie un blocco, no fork |
-| G8 | Force-finalize con viste asimmetriche | kill/restart rapido | fetch path converge, no halt |
-| G9 | Nodo vecchio durante S1/H1 | avviare tag `v2.0.x` | S1: segue; H1: stalla e resync, mai fork |
-| G10 | Tutti i 5 leader down | `docker stop avalon-drills-miner{1..5}` | halt deterministico, no fork |
-| G11 | 2 leader killed nello stesso round | `docker kill` due miner | dopo ~21s haltBreaker, recovery round con unanimità 3/3 |
-| G12 | 2 leader killed, HALT_BREAKER=0 | come G11 con env off | halt deterministico, restart di uno riprende |
+| Id | Scenario | Example command | Expected |
+|----|----------|-----------------|----------|
+| G1 | 1 leader down for 60 blocks | `docker stop avalon-drills-miner5` for 60s | chain continues, correct `skips`, no jail |
+| G2 | 1 leader down for 200 blocks | `docker stop avalon-drills-miner5` for ~600s | jailed after 30 turns, `E=4/q=4`, no halt |
+| G3 | 2 leaders down for 400 blocks | `docker stop avalon-drills-miner4 avalon-drills-miner5` | jailed, `E=3/q=3`, chain continues |
+| G4 | Top-5 down, standby enters (Layer H) | `docker stop avalon-drills-miner5` for >30 turns | `standby1` enters at the next epoch, produces at 3s |
+| G5 | 3/2 partition for 100 blocks | isolate 2 nodes from the Docker network | majority finalises, minority resyncs |
+| G6 | ±5s clock skew on two nodes | `docker exec ... date -s ...` | blocks held in pending, then accepted, no ban |
+| G7 | Equivocation | two near-simultaneous `/mineBlock` | deterministic rank picks one block, no fork |
+| G8 | Force-finalize with asymmetric views | fast kill/restart | fetch path converges, no halt |
+| G9 | Old node during S1/H1 | start a `v2.0.x` tag | S1: follows; H1: stalls and resyncs, never forks |
+| G10 | All 5 leaders down | `docker stop avalon-drills-miner{1..5}` | deterministic halt, no fork |
+| G11 | 2 leaders killed in the same round | `docker kill` two miners | after ~21s the haltBreaker runs a recovery round with 3/3 unanimity |
+| G12 | 3 leaders killed, HALT_BREAKER=0 | like G11 with the env off | deterministic halt, restarting one node resumes |
 
-## Fermare tutto
+## Stop everything
 
 ```bash
 docker compose -p avalon-drills \
@@ -91,151 +91,153 @@ docker compose -p avalon-drills \
   -f docker-compose.drills.yml down -v
 ```
 
-## Note
+## Notes
 
-- Layer S/H è attivo dal blocco **100** (`patch-config-testnet.js`).
-- `ADMIN_ALLOW_ANONYMOUS=1` permette `/mineBlock` senza token solo in locale.
-- Lo stato `leaderHealth` è ricostruibile dai blocchi; `/consensus` lo espone in tempo reale.
+- Layer S/H is active from block **100** (`patch-config-testnet.js`).
+- `ADMIN_ALLOW_ANONYMOUS=1` allows token-less `/mineBlock` locally only.
+- `leaderHealth` state is rebuildable from the blocks; `/consensus` exposes it live.
 
-## Esiti drill (run 2026-11-03/04 — matrice completa)
+## Drill results (run 2026-11-03/04 — full matrix)
 
-Testnet ricostruita da genesis con **2 standby** e i fix sotto, poi matrice G1–G12.
+Testnet rebuilt from genesis with **2 standbys** and the fixes below, then the
+G1–G12 matrix.
 
-| Drill | Esito | Note |
-|-------|-------|------|
-| G1  | PASS | 1 leader giù 60 blocchi, catena continua, `skips` corretto, statehash ok |
-| G2  | PASS | 1 leader in jail dopo 30 turni, `E=4`, statehash coincide |
-| G3  | PASS | 2 leader in jail, esclusi dall'eligible, catena continua |
-| G4  | PASS | `standby1` promosso nell'`activeLeaderSet` all'epoch successivo |
-| G5  | PASS | partizione 3/2: la maggioranza finalizza, la minoranza risincronizza |
-| G6  | PASS | clock skew ±5s via **libfaketime** (host clock intatto) |
-| G7  | PASS | equivocazione: rank deterministico, la catena converge |
-| G8  | PASS | force-finalize con viste asimmetriche: converge, nessun halt |
-| G9  | PASS | nodo `v2.0.3` (script nuovo): mai un blocco divergente |
-| G10 | PASS | tutti i leader giù → la catena **riprende**, nessun fork |
-| G11 | PASS | halt breaker: 2 leader uccisi, recovery round, statehash coincide |
-| G12 | PASS | breaker off: halt deterministico, il restart riprende |
+| Drill | Result | Notes |
+|-------|--------|-------|
+| G1  | PASS | 1 leader down for 60 blocks, chain continues, correct `skips`, statehash ok |
+| G2  | PASS | 1 leader jailed after 30 turns, `E=4`, statehash matches |
+| G3  | PASS | 2 leaders jailed, excluded from the eligible set, chain continues |
+| G4  | PASS | `standby1` promoted into `activeLeaderSet` at the next epoch |
+| G5  | PASS | 3/2 partition: the majority finalises, the minority resyncs |
+| G6  | PASS | ±5s clock skew via **libfaketime** (host clock untouched) |
+| G7  | PASS | equivocation: deterministic rank, the chain converges |
+| G8  | PASS | force-finalize with asymmetric views: converges, no halt |
+| G9  | PASS | `v2.0.3` node (new script): never a divergent block |
+| G10 | PASS | all leaders down → the chain **resumes**, no fork |
+| G11 | PASS | halt breaker: 2 leaders killed, recovery round, statehash matches |
+| G12 | PASS | breaker off: deterministic halt, the restart resumes |
 
-**Risultato: 12/12 PASS, 0 FAIL.**
+**Result: 12/12 PASS, 0 FAIL.**
 
-### Fix applicati
+### Fixes applied
 
-- **`leaderMaxVotes` 7 → 8** (`patch-config-testnet.js`). Il master auto-approva
-  sé stesso (`approves: ["dtube","miner1"…"standby1"]`), quindi con 7 slot
-  `standby2` non riceveva `node_appr` e la testnet aveva **un solo standby**.
-- **F2 — `eligibleLeaders()` derivato dalla catena** (`src/consensus.js`). Prima
-  usava `activeLeaders()`, che scorre i `recentBlocks` **locali** e può differire
-  di un blocco tra nodi: la soglia di quorum risultava diversa (q=3 su un nodo,
-  q=4 su un altro) e un gruppo finalizzava un blocco che l'altro ancora
-  richiedeva → fork permanente dopo un halt totale. Ora la base è
-  `chain.activeLeaderSet()` (rotazione identica su ogni nodo).
-  **Attenzione genesis:** la rotazione va usata **solo dopo** che il master è
-  uscito dallo schedule. Durante il bootstrap il master è lo scheduled leader e
-  deve restare eleggibile, altrimenti la chain fresca si blocca al primo epoch
-  dopo il voto dei miner (lo schedule "master" non può rigenerarsi perché il
-  blocco che lo rigenererebbe è quello bloccato). Il fix è quindi condizionale:
-  finché `chain.schedule.shuffle` contiene il master si usa il comportamento
-  storico, poi la rotazione deterministica.
-- **`/debug/statehash` deterministico** (`src/http/debug/index.js`). Hashava i
-  contatori cumulativi di `leaderHealth` (`produced`/`missed`, dipendenti dalla
-  finestra di rebuild locale: 641 vs 456) **e** `consensus.activeLeaders()`
-  (vista locale) → falsi positivi di divergenza a blocchi identici. Ora hash-a
-  solo i campi rilevanti al consenso, con nomi ordinati, e le due liste derivano
-  dalla catena (`activeLeaderSet()`).
-- **Retry della connessione MongoDB** (`src/mongo.js`). Un nodo riavviato insieme
-  a MongoDB (resume coordinato / flag day) raggiungeva `init()` prima che mongo
-  fosse pronto e faceva `process.exit(1)`: metà rete crashava ad ogni restart.
-  Ora ritenta con backoff (30 × 2 s) prima di arrendersi.
-- **Flag effettivo `haltBreaker`** (`src/http/consensus/index.js`). `/consensus`
-  riportava `config.haltBreaker`, non l'override per-nodo `HALT_BREAKER=0`; ora
-  riporta il valore realmente in vigore (necessario per la G12).
-- **Guard anti-crash in `consensus.round()`** (`src/consensus.js`). Un
-  `NEW_BLOCK` malformato (senza `hash`) arrivava fino a
-  `block.hash.substr(...)` e lanciava `TypeError: Cannot read properties of
-  undefined (reading 'substr')`: il nodo moriva e, via relay P2P, cadeva **metà
-  rete** a metà drill. Ora un blocco senza `hash` valido viene rifiutato.
-- **`keepAlive` a prova di eccezione** (`src/p2p.js`). È una catena async che si
-  ri-schedula **alla fine**; un'eccezione nel mezzo la rompeva e il nodo non si
-  riconnetteva **mai più** ai PEERS → miner con **0 peer** dopo un restart
-  totale (bootstrap incluso) → stallo. Inoltre saltava il peer se il
-  `dns.lookup` falliva. Ora il corpo è in `try/catch` con ri-schedulazione in
-  `finally`, e in caso di DNS fallito tenta comunque la connessione. Validato:
-  dopo un restart di tutti i nodi i peer tornano entro ~25 s.
-- **Suite idempotente — `settle_testnet`** (`lib.sh` + `run-all-drills.sh`).
-  Prima di ogni drill riavvia i container rimasti fermi e aspetta che la catena
-  avanzi di nuovo. Senza questo, un drill interrotto lasciava un nodo giù e
-  faceva fallire a cascata tutti i successivi ("not running" / "chain did not
-  produce"). Con il settle la suite completa è **11/11 PASS** in un solo run.
-- **Harness**: assert di G3/G4 robusti al quoting di Node (apici singoli);
-  `verify_statehash_match` ora usa come check **autorevole** l'hash del blocco a
-  un'altezza comune (`verify_chain_agreement`, alignment-free) e lo statehash
-  derivato solo come **warning** (diverge transitoriamente dopo restart/partizione
-  senza essere un fork); nuovo **`G9-old-node.sh`** (build/cache dell'immagine
-  `v2.0.3` + invariante no-fork).
-- **G6 con libfaketime** (`Dockerfile` + `docker-compose.drills-clock-skew.yml` +
-  `G6-clock-skew.sh`). `cap_add: [SYS_TIME]` + `date -s` **non** è sicuro: i
-  container condividono l'orologio del kernel host, quindi `date -s` sposterebbe
-  l'orologio **dell'host**. libfaketime sfasа solo il processo node
-  (`LD_PRELOAD`, `FAKETIME=±5s`), host intatto.
+- **`leaderMaxVotes` 7 → 8** (`patch-config-testnet.js`). The master approves
+  itself (`approves: ["dtube","miner1"…"standby1"]`), so with 7 slots `standby2`
+  never received a `node_appr` and the testnet had **a single standby**.
+- **F2 — `eligibleLeaders()` derived from the chain** (`src/consensus.js`). It used
+  to call `activeLeaders()`, which walks the **local** `recentBlocks` and can
+  differ by a block between nodes: the quorum threshold ended up different (q=3 on
+  one node, q=4 on another) and one group finalised a block the other still needed
+  a vote for → permanent fork after a total halt. The base is now
+  `chain.activeLeaderSet()` (a rotation identical on every node).
+  **Genesis caveat:** the rotation must be used **only after** the master has left
+  the schedule. During bootstrap the master is the scheduled leader and must stay
+  eligible, otherwise the fresh chain deadlocks at the first epoch after the
+  miners are voted in (the "master" schedule cannot be regenerated because the
+  block that would regenerate it is the one being blocked). The fix is therefore
+  conditional: while `chain.schedule.shuffle` still contains the master, the
+  historical behaviour is used; then the deterministic rotation.
+- **Deterministic `/debug/statehash`** (`src/http/debug/index.js`). It hashed the
+  cumulative `leaderHealth` counters (`produced`/`missed`, dependent on the local
+  rebuild window: 641 vs 456) **and** `consensus.activeLeaders()` (local view) →
+  false divergence alarms at identical blocks. It now hashes only the
+  consensus-relevant fields, with sorted names, and both lists derive from the
+  chain (`activeLeaderSet()`).
+- **MongoDB connection retry** (`src/mongo.js`). A node restarted together with
+  MongoDB (coordinated resume / flag day) reached `init()` before mongo was ready
+  and did `process.exit(1)`: half the network crashed on every restart. It now
+  retries with backoff (30 × 2 s) before giving up.
+- **Effective `haltBreaker` flag** (`src/http/consensus/index.js`). `/consensus`
+  reported `config.haltBreaker`, not the per-node `HALT_BREAKER=0` override; it now
+  reports the value actually in force (needed by G12).
+- **Crash guard in `consensus.round()`** (`src/consensus.js`). A malformed
+  `NEW_BLOCK` (without `hash`) reached `block.hash.substr(...)` and threw
+  `TypeError: Cannot read properties of undefined (reading 'substr')`: the node died
+  and, through the P2P relay, **half the network** fell mid-drill. A block without a
+  valid `hash` is now refused.
+- **Exception-proof `keepAlive`** (`src/p2p.js`). It is an async chain that
+  re-schedules **at the end**; an exception in the middle broke it and the node
+  **never** reconnected to its PEERS → miners with **0 peers** after a full restart
+  (bootstrap included) → stall. It also skipped a peer when `dns.lookup` failed. The
+  body is now wrapped in `try/catch` with re-scheduling in `finally`, and on a
+  failed DNS lookup it still attempts the connection. Validated: after restarting
+  all nodes, peers return within ~25 s.
+- **Idempotent suite — `settle_testnet`** (`lib.sh` + `run-all-drills.sh`). Before
+  each drill it restarts any container left down and waits for the chain to advance
+  again. Without it, an interrupted drill left a node down and cascaded into every
+  following drill ("not running" / "chain did not produce"). With the settle the
+  full suite is **11/11 PASS** in a single run.
+- **Harness**: G3/G4 asserts are robust to Node's quoting (single quotes);
+  `verify_statehash_match` now uses the block hash at a common height as the
+  **authoritative** check (`verify_chain_agreement`, alignment-free) and the
+  derived-state statehash only as a **warning** (it diverges transiently after a
+  restart/partition without being a fork); new **`G9-old-node.sh`** (builds/caches
+  the `v2.0.3` image + no-fork invariant).
+- **G6 with libfaketime** (`Dockerfile` + `docker-compose.drills-clock-skew.yml` +
+  `G6-clock-skew.sh`). `cap_add: [SYS_TIME]` + `date -s` is **not** safe: containers
+  share the host kernel clock, so `date -s` would move the **host** clock.
+  libfaketime skews only the node process (`LD_PRELOAD`, `FAKETIME=±5s`); the host
+  is untouched.
 
-### Nota di topologia
+### Topology note
 
-Con `NO_DISCOVERY=1` i miner si collegano tutti al **bootstrap** (hub): ogni
-nodo ha **1 peer** (il bootstrap), che ha 7 peer. È il comportamento atteso, non
-una mancanza di connettività. Un restart del **solo bootstrap** lascia i miner
-con 0 peer finché non si riconnettono (ora garantito dal fix `keepAlive`).
+With `NO_DISCOVERY=1` the miners all connect to the **bootstrap** (hub): each node
+has **1 peer** (the bootstrap), which has 7 peers. That is the expected behaviour,
+not a lack of connectivity. A restart of the **bootstrap only** leaves miners with
+0 peers until they reconnect (now guaranteed by the `keepAlive` fix).
 
-## Checklist operatore — lancio testnet pubblica (copia per ogni lancio)
+## Operator checklist — public testnet launch (copy for each launch)
 
-Riferimenti: guida [`doc/public-testnet.md`](../../doc/public-testnet.md), matrice
-drill sopra, runbook mainnet `doc/mainnet-deployment-and-rollback.md`.
+References: the guide [`doc/public-testnet.md`](../../doc/public-testnet.md), the
+drill matrix above, the mainnet runbook
+`doc/mainnet-deployment-and-rollback.md`.
 
-### Coordinator — prima di annunciare
+### Coordinator — before announcing
 
-- [ ] Tag **congelato e pushato**: `v2.1.0`; su ogni macchina operatore
+- [ ] Tag **frozen and pushed**: `v2.1.0`; on every operator machine
       `git describe --tags` = `v2.1.0`.
-- [ ] Config patch testnet scritta e pubblicata **come `git diff src/config.js`**:
-      `originHash` **dedicato**, `block0ts`, `masterPub`/`masterPubLeader` freschi,
-      `masterDaoTxs`, `leaderMaxVotes: 8`, `masterLeaderUntil: 0`, Layer S/H attivo
-      a un'altezza bassa (es. 100).
-- [ ] Patch ri-verificata **byte-for-byte** da una seconda persona.
-- [ ] Genesis provato su una macchina usa-e-getta: `db.dropDatabase()`, **niente**
-      `genesis.zip`, la catena supera `#0`.
-- [ ] Chiave privata del master messa al sicuro; **solo chiavi testnet**.
-- [ ] Peer list + endpoint bootstrap (`ws://<ip>:6001`) pronti da pubblicare.
-- [ ] Data/altezza di lancio e checkpoint decisi; messaggio pinnato scritto.
+- [ ] Testnet config patch written and published **as `git diff src/config.js`**:
+      dedicated `originHash`, `block0ts`, fresh `masterPub`/`masterPubLeader`,
+      `masterDaoTxs`, `leaderMaxVotes: 8`, `masterLeaderUntil: 0`, Layer S/H active
+      at a low height (e.g. 100).
+- [ ] Patch re-checked **byte-for-byte** by a second person.
+- [ ] Genesis rehearsed on a throwaway machine: `db.dropDatabase()`, **no**
+      `genesis.zip`, the chain advances past `#0`.
+- [ ] Master private key stored safely; **testnet keys only**.
+- [ ] Peer list + bootstrap endpoint (`ws://<ip>:6001`) ready to publish.
+- [ ] Launch date/height and checkpoints decided; pinned message written.
 
-### Ogni operatore — prima del lancio
+### Each operator — before the launch
 
-- [ ] Node.js ≥ 24, MongoDB attivo, **NTP/chrony attivo** (`maxDrift` = 200 ms).
-- [ ] Porta P2P (6001) **raggiungibile da internet**; porta HTTP secondo policy.
-- [ ] Coppia di chiavi **testnet** nuova (`node src/cli.js keypair`); mai chiavi mainnet.
-- [ ] `git checkout v2.1.0` + `npm ci`; `git diff src/config.js` **identico** alla patch del coordinator.
-- [ ] Avvio pulito: `db.dropDatabase()`, niente `genesis.zip`, `blocks/` vuota.
+- [ ] Node.js ≥ 24, MongoDB running, **NTP/chrony active** (`maxDrift` = 200 ms).
+- [ ] P2P port (6001) **reachable from the internet**; HTTP port per policy.
+- [ ] Fresh **testnet** keypair (`node src/cli.js keypair`); never mainnet keys.
+- [ ] `git checkout v2.1.0` + `npm ci`; `git diff src/config.js` **identical** to the coordinator's patch.
+- [ ] Clean start: `db.dropDatabase()`, no `genesis.zip`, empty `blocks/`.
 - [ ] Env: `HTTP_HOST=0.0.0.0`, `CORS_ORIGIN`, `TRUST_PROXY`, `ADMIN_TOKEN`/`LOG_ADMIN_TOKEN`,
       `PEERS=ws://<bootstrap>:6001`, `NODE_OWNER*`.
-- [ ] `NO_DISCOVERY` **non** impostato (rete pubblica); pubblica il proprio
-      endpoint con `profile … '{"node":{"ws":"ws://<ip>:6001"}}'`.
+- [ ] `NO_DISCOVERY` **not** set (public network); publish your endpoint with
+      `profile … '{"node":{"ws":"ws://<ip>:6001"}}'`.
 
-### Giorno del lancio — checkpoint
+### Launch day — checkpoints
 
-- [ ] `curl /version` → `{"version":"2.1.0"}` **identico su ogni nodo** (census).
-- [ ] `curl /count` monotono; `curl /peers` mostra peer di entità indipendenti.
+- [ ] `curl /version` → `{"version":"2.1.0"}` **identical on every node** (census).
+- [ ] `curl /count` monotonic; `curl /peers` shows peers from independent entities.
 - [ ] `grep -c "Different chain id, disconnecting"` = **0**.
 - [ ] `grep -c "Hard Fork #13330000"` = **0**.
-- [ ] Ogni operatore posta `version` / `count` / `peers` sul canale.
+- [ ] Every operator posts `version` / `count` / `peers` on the channel.
 
-### Drill da girare **sulla rete pubblica** (è la ragione per cui esiste)
+### Drills to run **on the public network** (the reason it exists)
 
-- [ ] **Discovery**: ferma brevemente il bootstrap del coordinator → gli altri nodi
-      si ri-scoprono e restano su **una sola** catena? (i drill locali **non** coprono
-      questo path: girano con `NO_DISCOVERY=1`).
-- [ ] Leader offline ~100 blocchi; clock skew (NTP spento su un nodo); partizione 3/2;
-      collisione (due `/mineBlock`); tutti-i-leader-giù con recupero.
-- [ ] Dopo **ogni** drill: tutti i nodi d'accordo su `count` e hash dei blocchi.
+- [ ] **Discovery**: briefly stop the coordinator's bootstrap → do the other nodes
+      re-discover and stay on **one** chain? (the local drills do **not** cover this
+      path: they run with `NO_DISCOVERY=1`).
+- [ ] Leader offline ~100 blocks; clock skew (NTP off on one node); 3/2 partition;
+      collision (two `/mineBlock`); all-leaders-down with recovery.
+- [ ] After **every** drill: all nodes agree on `count` and block hashes.
 
-### Se qualcosa si rompe
+### If something breaks
 
-- [ ] **Halt, don't fork**: fermati, raccogli i log, coordina sul canale.
-- [ ] Rollback: stop → commit precedente → ripristina lo snapshot Mongo +
-      `blocks.bson` pre-modifica.
+- [ ] **Halt, don't fork**: stop, collect logs, coordinate on the channel.
+- [ ] Rollback: stop → previous commit → restore the pre-change Mongo snapshot +
+      `blocks.bson`.

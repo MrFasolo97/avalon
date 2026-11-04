@@ -1,71 +1,73 @@
 # Avalon Testnet — Force Finalization Test
 
-Testnet multi-nodo per testare il meccanismo di **force finalization** in caso di blocchi concorrenti alla stessa altezza.
+A multi-node testnet to exercise the **force finalization** mechanism when
+concurrent blocks land at the same height.
 
-## Requisiti
+## Requirements
 
 - Docker + Docker Compose v2
 
-## Avvio
+## Start
 
 ```bash
 cd docker/testnet
 
-# Build le immagini
+# Build the images
 docker compose build
 
-# Avvia tutti i nodi
+# Start all nodes
 docker compose up -d
 
-# Segui i log
+# Follow the logs
 docker compose logs -f
 ```
 
-L'avvio automatico:
-1. **bootstrap** — crea la rete da zero (genesi, blocco 0, mina i primi blocchi)
-2. **setup** — genera 3 chiavi miner, crea gli account, trasferisce token, abilita i nodi, vota i leader
-3. **miner1..3** — si sincronizzano con bootstrap e iniziano a minare
+Automatic startup:
+1. **bootstrap** — creates the network from scratch (genesis, block 0, mines the first blocks)
+2. **setup** — generates 3 miner keys, creates the accounts, transfers tokens, enables the nodes, votes the leaders
+3. **miner1..3** — sync with bootstrap and start mining
 
-## Architettura
+## Architecture
 
-| Servizio | HTTP (host) | P2P (host) | Account |
-|----------|-------------|------------|---------|
+| Service | HTTP (host) | P2P (host) | Account |
+|---------|-------------|------------|---------|
 | bootstrap | `:3101` | `:6101` | dtube (master) |
 | miner1 | `:3102` | `:6102` | miner1 |
 | miner2 | `:3103` | `:6103` | miner2 |
 | miner3 | `:3104` | `:6104` | miner3 |
 
-Tutti i nodi sono sulla stessa rete Docker e si scoprono via `PEERS=ws://bootstrap:6001`.
+All nodes are on the same Docker network and discover each other via
+`PEERS=ws://bootstrap:6001`.
 
-## Testare la Force Finalization
+## Exercising Force Finalization
 
-### Scenario: blocchi concorrenti
+### Scenario: concurrent blocks
 
-Per simulare un conflitto (due leader minano blocchi diversi alla stessa altezza):
+To simulate a conflict (two leaders mine different blocks at the same height):
 
 ```bash
-# In due terminali diversi, esegui quasi contemporaneamente:
-curl http://localhost:3102/mineBlock   # miner1 forza un blocco
-curl http://localhost:3103/mineBlock   # miner2 forza un blocco
+# In two different terminals, run these almost simultaneously:
+curl http://localhost:3102/mineBlock   # miner1 forces a block
+curl http://localhost:3103/mineBlock   # miner2 forces a block
 ```
 
-Se i due `/mineBlock` partono allo stesso micro-intervallo, entrambi i minatori
-producono un blocco valido per la stessa altezza N. I nodi della rete li
-inseriscono entrambi in `possBlocks[]` e votano. Se nessuno raggiunge 2/3,
-dopo ~27 secondi (5 leader × 3s + 2 round × 3s + margine) scatta la
-**force finalization**: ogni nodo sceglie deterministicamente il vincitore
-(timestamp più basso → hash più basso) e lo finalizza, sbloccando la catena.
+If the two `/mineBlock` calls fire within the same tiny interval, both miners
+produce a valid block for the same height N. The network's nodes insert both into
+`possBlocks[]` and vote. If neither reaches 2/3, after ~27 seconds (5 leaders × 3s
++ 2 rounds × 3s + margin) **force finalization** kicks in: every node
+deterministically picks the winner (lowest timestamp → lowest hash) and finalises
+it, unblocking the chain.
 
-### Verifica
+### Verification
 
 ```bash
-# Monitora l'altezza della catena
+# Watch the chain height
 watch -n 1 'curl -s http://localhost:3101/count'
 
-# Vedi il log della force finalization
+# See the force finalization log
 docker compose logs bootstrap | grep -i "force\|collision"
 
-# Dopo un conflitto, controlla che la catena continui ad avanzare
+# After a conflict, check the chain keeps advancing
 while true; do
   h=$(curl -s http://localhost:3101/count)
   echo "Block #$h  $(date)"
@@ -73,7 +75,7 @@ while true; do
 done
 ```
 
-### Per fermare tutto
+### Stop everything
 
 ```bash
 docker compose down -v
@@ -81,12 +83,11 @@ docker compose down -v
 
 ## Config
 
-Le variabili d'ambiente principali sono in `docker-compose.yml`. Le chiavi
-generate vengono salvate in un volume condiviso `testnet_config` letto da
-tutti i miner.
+The main environment variables are in `docker-compose.yml`. The generated keys are
+saved in a shared `testnet_config` volume read by every miner.
 
-Le API admin (`/mineBlock`, `/recover`, `/debug`, `/logs`) sono **fail-closed**
-senza token. Per questo il compose di testnet imposta `ADMIN_ALLOW_ANONYMOUS=1`
-su bootstrap e miner: così il kickstart di mining e il drill force-finalization
-funzionano con i `curl` nudi qui sopra. È un'eccezione **solo locale**: su
-mainnet/testernet pubblici va configurato un `ADMIN_TOKEN` reale.
+The admin APIs (`/mineBlock`, `/recover`, `/debug`, `/logs`) are **fail-closed**
+without a token. That is why the testnet compose sets `ADMIN_ALLOW_ANONYMOUS=1` on
+bootstrap and the miners: so the mining kickstart and the force-finalization drill
+work with the bare `curl`s above. It is a **local-only** exception: on
+mainnet/public testnets a real `ADMIN_TOKEN` must be configured.

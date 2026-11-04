@@ -1,11 +1,11 @@
 # Layer S/H Drill Scripts
 
-Script di automazione per la matrice G1–G12 del piano
+Automation scripts for the G1–G12 matrix of
 `doc/consensus-offline-leaders-plan.en.md`.
 
-## Prerequisito
+## Prerequisite
 
-Il testnet drills deve essere attivo:
+The drills testnet must be running:
 
 ```bash
 cd docker/testnet
@@ -14,120 +14,120 @@ docker compose -p avalon-drills \
   -f docker-compose.drills.yml up -d --build
 ```
 
-## Uso
+## Usage
 
-Esegui uno script singolo:
+Run a single script:
 
 ```bash
 cd docker/testnet/drills
 bash G1-one-leader-down-60-blocks.sh
 ```
 
-Oppure la suite rapida:
+Or the fast suite:
 
 ```bash
 bash run-all-drills.sh
 ```
 
-Per includere anche i drill lunghi (jail, standby promotion):
+To also include the long drills (jail, standby promotion):
 
 ```bash
 bash run-all-drills.sh --long
 ```
 
-## Script disponibili
+The suite calls `settle_testnet` before every drill (restarts any container left
+down and waits for the chain to advance), so an interrupted drill no longer
+cascades into the following ones.
 
-| Script | Drill | Durata tipica | Note |
-|--------|-------|---------------|------|
+## Available scripts
+
+| Script | Drill | Typical duration | Notes |
+|--------|-------|------------------|-------|
 | `G1-one-leader-down-60-blocks.sh` | G1 | ~2 min | |
-| `G2-one-leader-jailed.sh` | G2 | ~10 min | aspetta 30 turni mancati |
+| `G2-one-leader-jailed.sh` | G2 | ~10 min | waits for 30 missed turns |
 | `G3-two-leaders-jailed.sh` | G3 | ~15 min | |
 | `G4-standby-promotion.sh` | G4 | ~12 min | Layer H |
-| `G5-network-partition.sh` | G5 | ~3 min | disconnette 2 nodi dalla rete Docker |
-| `G6-clock-skew.sh` | G6 | variabile | richiede container privilegiato, altrimenti SKIP |
-| `G7-equivocation.sh` | G7 | ~1 min | due `/mineBlock` concorrenti via docker exec |
-| `G8-force-finalize-asymmetric.sh` | G8 | ~2 min | kill + restart nodo |
-| `G10-all-leaders-down.sh` | G10 | ~2 min | halt deterministico |
-| `G11-halt-breaker-recovery.sh` | G11 | ~2 min | recovery round automatico |
-| `G12-halt-breaker-off.sh` | G12 | ~2 min | richiede testnet avviato con `docker-compose.drills-halt-breaker-off.yml` |
+| `G5-network-partition.sh` | G5 | ~3 min | disconnects 2 nodes from the Docker network |
+| `G6-clock-skew.sh` | G6 | variable | ±5s via libfaketime; SKIPs if the image lacks `faketime` |
+| `G7-equivocation.sh` | G7 | ~1 min | two concurrent `/mineBlock` via docker exec |
+| `G8-force-finalize-asymmetric.sh` | G8 | ~2 min | kill + restart a node |
+| `G9-old-node.sh` | G9 | ~4 min (first run builds the image) | previous-release (`v2.0.3`) node, no-fork invariant |
+| `G10-all-leaders-down.sh` | G10 | ~2 min | deterministic halt |
+| `G11-halt-breaker-recovery.sh` | G11 | ~2 min | automatic recovery round |
+| `G12-halt-breaker-off.sh` | G12 | ~2 min | requires the testnet started with `docker-compose.drills-halt-breaker-off.yml` |
 
-G9 (nodo vecchio) non è automatizzato perché richiede un'immagine/container della
-versione `v2.0.x`; va eseguito manualmente.
+## Implementation
 
-## Implementazione
+The drills do not rely on the testnet host ports: they use `docker exec` to call
+each container's internal HTTP API on `localhost:3001`. That keeps the scripts
+robust even where Docker Compose does not support the `!reset` YAML tag for port
+lists.
 
-I drill non si appoggiano alle porte host del testnet: usano `docker exec` per
-chiamare le API HTTP interne su `localhost:3001` di ciascun container.  Questo
-rende gli script robusti anche quando Docker Compose non supporta il tag YAML
-`!reset` per le liste di porte.
+## Output
 
-## Uscita
-
-Ogni script stampa `[PASS]` o `[FAIL]` e ripristina lo stato dei container in
+Every script prints `[PASS]` or `[FAIL]` and restores the container state in a
 `trap EXIT`.
 
-## Correzioni e limiti noti (run 2026-11-03)
+## Fixes and known limits (run 2026-11-03)
 
-Bug di codice trovati eseguendo i drill su `avalon-drills` (ora corretti):
+Code bugs found while running the drills on `avalon-drills` (now fixed):
 
-* **Auto-jail di ogni leader (bloccante).** Le tx `enable-node` del setup fanno
-  scattare la regola heartbeat, che marcava *ogni* leader `probation`; il primo
-  blocco prodotto da ciascuno lo ri-mandava in jail (`recordProduced`), la
-  rotazione collassava sugli standby e poi su un set vuoto →
-  `schedule.shuffle[...] is undefined` → crash di tutti i nodi. `heartbeat` ora
-  arma la `probation` solo per un account davvero in jail, e `recordProduced`
-  chiude la probation in ACTIVE (design §6.2).
-* **Halt breaker mai armabile.** `_resolveForceFinalize` azzerava `ffProposals`
-  subito prima di chiamare `runHaltBreaker()`, che quindi vedeva sempre
-  `0/5 respondents` e non poteva mai sparare. Ora `ffProposals` è preservato.
+* **Every leader auto-jailed (blocking).** The setup's `enable-node` txs tripped the
+  heartbeat rule, which marked *every* leader `probation`; the first block each one
+  produced re-jailed it (`recordProduced`), the rotation collapsed onto the standbys
+  and then onto an empty set → `schedule.shuffle[...] is undefined` → all nodes
+  crashed. `heartbeat` now arms `probation` only for an account actually in jail, and
+  `recordProduced` closes probation into ACTIVE (design §6.2).
+* **Halt breaker could never fire.** `_resolveForceFinalize` zeroed `ffProposals`
+  right before calling `runHaltBreaker()`, which therefore always saw
+  `0/5 respondents` and could never fire. `ffProposals` is now preserved.
 
-Bug di harness (corretti): G1 verificava lo statehash del nodo che aveva appena
-fermato; G10 confrontava l'altezza con quella pre-stop (i blocchi prodotti
-durante lo stop contavano come "avanzamento"); G2/G3/G4/G11 verificavano subito
-dopo il restart, prima del catch-up (nuovo helper `wait_node_synced`).
+Harness bugs (fixed): G1 checked the statehash of the node it had just stopped; G10
+compared the height with the pre-stop one (blocks produced during the stop counted as
+"progress"); G2/G3/G4/G11 checked right after the restart, before catch-up (new
+`wait_node_synced` helper).
 
-Altri bug di codice trovati e corretti:
+Other code bugs found and fixed:
 
-* **Resume dopo un arresto totale.** Un nodo che riparte non tentava mai di
-  produrre (`minerWorker` era chiamato solo da `addBlock`) e, quando ci provava,
-  il guard "slow performance" cedeva lo slot perché l'head era vecchio. Ora:
-  1) `main.js` fa un kick di `minerWorker` al boot; 2) `minerWorker` produce
-  comunque se l'head è vecchio (chain ferma); 3) la proposta FF viene
-  ri-trasmessa dal halt breaker a ogni tentativo, e si contano solo i
-  `respondents` *recenti* (i voti dei nodi morti scadono) — prima si azzerava
-  `ffProposals` e si vedevano sempre 0 voti.
+* **Resume after a total stop.** A node that restarted never tried to produce
+  (`minerWorker` was only called from `addBlock`) and, when it did, the "slow
+  performance" guard gave up the slot because the head was old. Now: 1) `main.js`
+  kicks `minerWorker` at boot; 2) `minerWorker` still produces if the head is old
+  (chain stopped); 3) the FF proposal is re-broadcast by the halt breaker on every
+  attempt, and only *recent* `respondents` are counted (dead nodes' votes expire) —
+  previously `ffProposals` was zeroed and 0 votes were always seen.
 
-**Verificato:** G10 ora ferma la chain con tutti giù e **riprende** quando i
-leader tornano. Per ripartire serve **almeno un produttore autorizzato** (lo
-scheduled di `head+1` o un backup recente) tra i riavviati: riavviare l'intero
-set è la scelta sicura.
+**Verified:** G10 now stops the chain with everyone down and **resumes** when the
+leaders return. To resume there must be **at least one authorised producer** (the
+`head+1` scheduled leader or a recent backup) among the restarted nodes: restarting
+the whole set is the safe choice.
 
-G12 (breaker OFF) è riformulato su **3 leader giù**: con 2 giù il quorum
-adattivo recupera da solo (`E=3, q=3`), quindi non c'è halt da osservare.
+G12 (breaker OFF) is framed around **3 leaders down**: with 2 down the adaptive
+quorum recovers by itself (`E=3, q=3`), so there is no halt to observe.
 
-`verify_statehash_match` ora allinea le altezze prima di confrontare: su una
-chain viva una lettura ingenua sembra una divergenza (un nodo a `h`, l'altro a
-`h+1`) — solo un mismatch **a parità di altezza** è reale.
+`verify_statehash_match` now aligns heights before comparing: on a live chain a naive
+read looks like a divergence (one node at `h`, another at `h+1`) — only a mismatch
+**at the same height** is real.
 
-**G5 (partizione) — risolto.** Il resync dopo la riunione falliva per tre cause,
-ora corrette:
+**G5 (partition) — resolved.** Resync after the heal failed for three reasons, now
+fixed:
 
-1. `keepAlive` considerava connesso qualsiasi socket con IP/porta corrispondenti
-   anche se **morto** (half-open lasciato da `docker network disconnect`), e
-   andava in errore su un `_socket` nullo → non riconnetteva mai. Ora richiede
-   `readyState === OPEN` e chiude i socket che non rispondono ai probe di stato
-   entro 20 s.
-2. lo `node_status` dei peer era uno snapshot dell'handshake **mai aggiornato** e
-   veniva sovrascritto dal handler di `QUERY_NODE_STATUS` → `refresh()`/`recover()`
-   confrontavano teste stantie e non vedevano il gap. Ora c'è un refresh
-   periodico (5 s) e il `node_status` è preservato.
-3. `refresh()` recuperava solo con un gap **> 10** blocchi; ora recupera anche con
-   un gap piccolo se l'head è fermo (**stalled**).
+1. `keepAlive` considered any socket with matching IP/port connected even if **dead**
+   (half-open left by `docker network disconnect`), and threw on a null `_socket` → it
+   never reconnected. It now requires `readyState === OPEN` and closes sockets that
+   don't answer status probes within 20 s.
+2. The peers' `node_status` was a handshake snapshot **never refreshed** and was
+   overwritten by the `QUERY_NODE_STATUS` handler → `refresh()`/`recover()` compared
+   stale heads and never saw the gap. There is now a periodic refresh (5 s) and
+   `node_status` is preserved.
+3. `refresh()` only recovered with a gap **> 10** blocks; it now recovers even with a
+   small gap if the head is stuck (**stalled**).
 
-Inoltre `/debug/statehash` non include più `possBlocks` (gossip transitorio che
-faceva sembrare divergenti nodi sani), e `tryNextStep` non moltiplica più i timer
-(era un hot-loop che bloccava l'event loop durante uno stallo).
+Also, `/debug/statehash` no longer includes `possBlocks` (transient gossip that made
+healthy nodes look divergent), and `tryNextStep` no longer multiplies timers (it was a
+hot loop that blocked the event loop during a stall).
 
-**Stato dei drill su questa build: G1, G5, G7, G8, G10, G11 tutti PASS.**
-G2/G3/G4 (jail/standby, 10–15 min), G6 (clock skew) e G12 (richiede l'overlay
-breaker-off) non eseguiti in questa sessione.
+**Status of the drills on the current build (v2.1.0): all of G1–G12 PASS** (G1–G11 in
+one `run-all-drills.sh --long` run, G12 with the breaker-off overlay). See
+[`../README-drills.md`](../README-drills.md) for the full results and the fixes that
+came out of them.

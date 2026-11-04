@@ -37,6 +37,7 @@ node test/audit-fixes.js
 ## [Become a leader and produce blocks](./doc/leader-101.md)
 ## [Debian 10 quick install procedure](./doc/debian-10.md)
 ## [Public testnet guide (multi-operator)](./doc/public-testnet.md)
+## [Monitoring & alerts (Discord webhook)](./doc/monitoring.md)
 
 ## Get helped
 We have a Discord channel dedicated to node owners (aka leaders), where you can get support to get set up. Join [discord.gg/QsBnrwqsSV](https://discord.gg/QsBnrwqsSV) and go to `DTube Chain -> #leader-candidates`

@@ -21,6 +21,9 @@
 //   ALERT_COOLDOWN_MS    min gap between repeats of an alert (default 300000)
 //   NODE_NAME            label used in the messages          (default the hostname)
 //   DRY_RUN              1 = log to stdout instead of posting (default 0)
+//   WATCH_EVENTS         also forward structured events from /events (default on; 0 disables)
+//   EVENT_LEVELS         event levels to forward, comma-separated     (default warn,error)
+//   EVENT_TYPES          optional allow-list of event types           (default: all at those levels)
 //
 // Exit: keeps running until killed. Logs to stdout.
 
@@ -57,7 +60,17 @@ const cfg = {
     possMax: num(process.env.POSSBLOCKS_MAX, DEFAULTS.POSSBLOCKS_MAX),
     cooldown: num(process.env.ALERT_COOLDOWN_MS, DEFAULTS.ALERT_COOLDOWN_MS),
     name: process.env.NODE_NAME || DEFAULTS.NODE_NAME,
-    dryRun: process.env.DRY_RUN === '1'
+    dryRun: process.env.DRY_RUN === '1',
+    // structured events (GET /events). Forward rare, meaningful state changes
+    // (halt breaker, force finalize, jail, recovery) instead of waiting for a
+    // head-staleness threshold — this catches self-healed halts.
+    notifyEvents: process.env.WATCH_EVENTS !== '0',
+    eventLevels: new Set((process.env.EVENT_LEVELS || 'warn,error')
+        .split(',').map(s => s.trim()).filter(Boolean)),
+    eventTypes: process.env.EVENT_TYPES
+        ? new Set(process.env.EVENT_TYPES.split(',').map(s => s.trim()).filter(Boolean))
+        : null,
+    eventSince: null
 }
 
 const log = (...a) => console.log(new Date().toISOString(), '[watch]', ...a)
@@ -194,6 +207,39 @@ async function poll() {
             `🔴 ${hdr()} DIVERGENCE — watched nodes disagree: ` +
             known.map(n => `${short(n.url)}=${n.head}`).join(' '),
             `🟢 ${hdr()} watched nodes agree again`)
+    }
+
+    await pollEvents()
+}
+
+const EVENT_ICON = { error: '🔴', warn: '🟠', info: '🔵' }
+function formatEvent(e) {
+    const d = e.data || {}
+    const h = d.height !== undefined ? ' #' + d.height : ''
+    const extra = Object.keys(d)
+        .filter(k => k !== 'height')
+        .map(k => k + '=' + (typeof d[k] === 'object' ? JSON.stringify(d[k]) : d[k]))
+        .join(' ')
+    return (EVENT_ICON[e.level] || '🔵') + ' **' + cfg.name + '** ' + e.type + h +
+        (extra ? ' — ' + extra.slice(0, 900) : '')
+}
+
+// Forward structured events from GET /events. Poll with `since` so each event is
+// posted once; on the first poll learn the head and do NOT replay history.
+async function pollEvents() {
+    if (!cfg.notifyEvents) return
+    const path = '/events?limit=100' + (cfg.eventSince === null ? '' : '&since=' + cfg.eventSince)
+    const res = await getJSON(cfg.base, path).catch(() => null)
+    if (!res || !Number.isInteger(res.head)) return
+    // first poll, or the node restarted and its ring buffer reset (head < since):
+    // learn the new head and do not replay history.
+    if (cfg.eventSince === null || res.head < cfg.eventSince) { cfg.eventSince = res.head; return }
+    for (const e of (res.events || [])) {
+        if (!Number.isInteger(e.seq) || e.seq <= cfg.eventSince) continue
+        cfg.eventSince = Math.max(cfg.eventSince, e.seq)
+        if (!cfg.eventLevels.has(e.level)) continue
+        if (cfg.eventTypes && !cfg.eventTypes.has(e.type)) continue
+        await discord(formatEvent(e))
     }
 }
 

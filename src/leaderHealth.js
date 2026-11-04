@@ -11,6 +11,8 @@
 //   - tracks jail state, streaks, probation, backoff
 //   - handles heartbeat (ENABLE_NODE type 18) wake-up
 
+const events = require('./events')
+
 const leaderHealth = {
     leaders: {},
 
@@ -84,6 +86,9 @@ const leaderHealth = {
             lastJailBlock: h,
             probation: false
         }
+        events.emit('leader-jailed', 'warn', {
+            leader: name, height: h, untilBlock: l.jail.untilBlock, level: level, streak: l.streak
+        })
     },
 
     reJail: (name, h) => {
@@ -98,6 +103,9 @@ const leaderHealth = {
             lastJailBlock: h,
             probation: false
         }
+        events.emit('leader-rejailed', 'warn', {
+            leader: name, height: h, untilBlock: l.jail.untilBlock, level: level
+        })
     },
 
     // Heartbeat: a type-18 tx from the account clears jail immediately.
@@ -118,6 +126,7 @@ const leaderHealth = {
             lastJailBlock: l.jail.lastJailBlock,
             probation: true
         }
+        events.emit('leader-unjailed', 'info', { leader: name, via: 'heartbeat' })
     },
 
     isJailed: (name, h) => {

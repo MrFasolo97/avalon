@@ -33,6 +33,7 @@ const bs58 = require('base-x')(config.b58Alphabet)
 const blocks = require('./blocks')
 const dao = require('./dao')
 const daoMaster = require('./daoMaster')
+const events = require('./events')
 
 const ff_amplify_seen = {}
 
@@ -557,7 +558,10 @@ let p2p = {
     recover: () => {
         if (!p2p.sockets || p2p.sockets.length === 0) return
         if (Object.keys(p2p.recoveredBlocks).length + p2p.recoveringBlocks.length > max_blocks_buffer) return
-        if (!p2p.recovering) p2p.recovering = chain.getLatestBlock()._id
+        if (!p2p.recovering) {
+            p2p.recovering = chain.getLatestBlock()._id
+            events.emit('recover-start', 'info', { head: p2p.recovering })
+        }
         
         let peersAhead = []
         for (let i = 0; i < p2p.sockets.length; i++)
@@ -567,6 +571,7 @@ let p2p = {
                 peersAhead.push(p2p.sockets[i])
 
         if (peersAhead.length === 0) {
+            if (p2p.recovering) events.emit('recover-done', 'info', { head: chain.getLatestBlock()._id })
             p2p.recovering = false
             return
         }
@@ -712,6 +717,7 @@ let p2p = {
                 p2p.recoverAttempt++
                 if (p2p.recoverAttempt > max_recover_attempts) {
                     logr.error('Error Replay', newBlock._id)
+                    events.emit('recover-giveup', 'error', { block: newBlock._id, attempts: p2p.recoverAttempt })
                     p2p.recovering = false
                     p2p.recoverAttempt = 0
                 }

@@ -19,6 +19,7 @@ const tests = [
     'monotone-ff.js',
     'leader-health.js',
     'skip-attestation.js',
+    'events.js',
     'audit-fixes.js',
     'force-finalize.js',
     'supply-anchor.js',

@@ -261,9 +261,18 @@ function checkHeightAndRun() {
 
         if(createNet) {
             if (prevbHeight == curbHeight) {
+                // Kickstart mining through the API directly. The admin token must
+                // NEVER touch a shell command line: an `exec` error reports the
+                // whole command (token included) into the logs, the token shows up
+                // in `ps`, and a quote in the env value would break the quoting
+                // (shell injection). axios sends it as a header, and a failure only
+                // reports the HTTP status / message — never the token.
                 var adminToken = process.env.ADMIN_TOKEN || process.env.MINE_TOKEN || ''
-                var mineStartCmd = "curl -fsS -H 'Authorization: Bearer " + adminToken + "' http://localhost:3001/mineBlock"
-                runCmd(mineStartCmd)
+                var headers = adminToken ? { Authorization: 'Bearer ' + adminToken } : {}
+                axios.get('http://localhost:3001/mineBlock', { headers }).catch((e) => {
+                    var status = e.response ? e.response.status : null
+                    logr.info('mineBlock kickstart failed: ' + (status ? ('HTTP ' + status) : e.message))
+                })
             }
         } else if (prevbHeight == curbHeight) {
             //runCmd(runAvalonScriptCmd)

@@ -127,41 +127,59 @@ let p2p = {
         }
     },
     keepAlive: async () => {
-        // ensure all peers explicitly listed in PEERS are connected when online
-        let peers = process.env.PEERS ? process.env.PEERS.split(',') : []
-        let toConnect = []
-        for (let p = 0; p < peers.length; p++) {
-            let connected = false
-            let colonSplit = peers[p].replace(/^wss?:\/\//,'').split(':')
-            let port = parseInt(colonSplit.pop())
-            let address = colonSplit.join(':').replace('[','').replace(']','')
-            if (!net.isIP(address))
-                try {
-                    address = (await dns.lookup(address)).address
-                } catch (e) {
-                    logr.debug('dns lookup failed for '+address)
-                    continue
-                }
-            for (let s = 0; s < p2p.sockets.length; s++) {
-                const sock = p2p.sockets[s]
-                // Only an OPEN, live socket counts as connected. A socket left
-                // behind by a network partition (half-open / already closing) has
-                // no `_socket` and used to match here anyway — which both threw
-                // and made keepAlive think the peer was still connected, so it
-                // never reconnected after `docker network disconnect`.
-                if (sock.readyState !== WebSocket.OPEN || !sock._socket) continue
-                if (sock._socket.remoteAddress
-                && sock._socket.remoteAddress.replace('::ffff:','') === address
-                && sock._socket.remotePort === port) {
-                    connected = true
-                    break
-                }
+        // Ensure every peer explicitly listed in PEERS stays connected.
+        //
+        // This is a self-rescheduling async chain: it re-arms itself at the END
+        // (see finally). Anything that threw in the middle used to break the
+        // chain, and the node never reconnected to its PEERS again — which is
+        // exactly what left miners with 0 peers after a full-cluster restart
+        // (bootstrap included) and stalled the chain. Wrap the body so the chain
+        // always survives, and reconnect on the next tick.
+        try {
+            let peers = process.env.PEERS ? process.env.PEERS.split(',') : []
+            let toConnect = []
+            for (let p = 0; p < peers.length; p++) {
+                let connected = false
+                let colonSplit = peers[p].replace(/^wss?:\/\//,'').split(':')
+                let port = parseInt(colonSplit.pop())
+                let address = colonSplit.join(':').replace('[','').replace(']','')
+                let resolved = null
+                if (!net.isIP(address))
+                    try {
+                        resolved = (await dns.lookup(address)).address
+                    } catch (e) {
+                        // Do NOT skip the peer on a transient DNS failure: without
+                        // a resolved IP we cannot dedup, so attempt the connect
+                        // anyway (the ws client re-resolves; if DNS is really down
+                        // the attempt just fails harmlessly).
+                        logr.debug('dns lookup failed for '+address)
+                    }
+                if (resolved)
+                    for (let s = 0; s < p2p.sockets.length; s++) {
+                        const sock = p2p.sockets[s]
+                        // Only an OPEN, live socket counts as connected. A socket
+                        // left behind by a network partition (half-open / already
+                        // closing) has no `_socket` and used to match here anyway —
+                        // which both threw and made keepAlive think the peer was
+                        // still connected, so it never reconnected after
+                        // `docker network disconnect`.
+                        if (sock.readyState !== WebSocket.OPEN || !sock._socket) continue
+                        if (sock._socket.remoteAddress
+                        && sock._socket.remoteAddress.replace('::ffff:','') === resolved
+                        && sock._socket.remotePort === port) {
+                            connected = true
+                            break
+                        }
+                    }
+                if (!connected)
+                    toConnect.push(peers[p])
             }
-            if (!connected)
-                toConnect.push(peers[p])
+            p2p.connect(toConnect)
+        } catch (e) {
+            logr.warn('keepAlive error (ignored, retrying next tick): ' + e.message)
+        } finally {
+            setTimeout(p2p.keepAlive, keep_alive_interval)
         }
-        p2p.connect(toConnect)
-        setTimeout(p2p.keepAlive,keep_alive_interval)
     },
     connect: (newPeers,isInit = false) => {
         newPeers.forEach((peer) => {

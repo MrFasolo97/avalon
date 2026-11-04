@@ -5,7 +5,7 @@ EXPOSE 3001
 
 WORKDIR /avalon
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl vim libvips-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends curl vim libvips-dev faketime && rm -rf /var/lib/apt/lists/*
 ENV SHARP_IGNORE_GLOBAL_LIBVIPS=0
 
 COPY package*.json ./

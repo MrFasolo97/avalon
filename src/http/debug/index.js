@@ -41,7 +41,14 @@ module.exports = {
         app.get('/debug/statehash', stateHashLimiter, (req, res) => {
             const latest = chain.getLatestBlock()
             const nextHeight = latest._id + 1
-            const active = consensus.activeLeaders ? consensus.activeLeaders() : []
+            // Both sets must be CHAIN-derived for this to be a determinism probe.
+            // consensus.activeLeaders() walks the local recentBlocks window and
+            // can differ by a block between nodes on the same (fork-free) chain,
+            // which produced false divergence alarms right after a restart. Use
+            // the epoch rotation (activeLeaderSet()) as the base instead.
+            const active = (typeof chain.activeLeaderSet === 'function')
+                ? chain.activeLeaderSet().map(l => l.name || l)
+                : (consensus.activeLeaders ? consensus.activeLeaders() : [])
             const eligible = consensus.eligibleLeaders ? consensus.eligibleLeaders(nextHeight) : active
 
             // leaderHealth has two kinds of fields: the consensus-relevant state

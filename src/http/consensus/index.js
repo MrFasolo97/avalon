@@ -55,7 +55,10 @@ module.exports = {
                     forceFinalize: !!config.forceFinalize,
                     skipRecording: !!config.skipRecording,
                     skipStrict: !!config.skipStrict,
-                    haltBreaker: !!config.haltBreaker,
+                    // effective value: the breaker can also be disabled per node
+                    // with HALT_BREAKER=0 (consensus.runHaltBreaker honours it), so
+                    // report what is actually in force, not just the config entry.
+                    haltBreaker: !!config.haltBreaker && process.env.HALT_BREAKER !== '0',
                     standbyEnabled: !!config.standbyEnabled,
                     canonicalLeaderOrder: !!config.canonicalLeaderOrder
                 }

@@ -6,6 +6,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+source "$SCRIPT_DIR/lib.sh"
 
 LONG=false
 if [ "${1:-}" = "--long" ]; then
@@ -15,6 +16,7 @@ fi
 FAST_DRILLS=(
     G1-one-leader-down-60-blocks.sh
     G5-network-partition.sh
+    G6-clock-skew.sh
     G7-equivocation.sh
     G8-force-finalize-asymmetric.sh
     G10-all-leaders-down.sh
@@ -37,6 +39,9 @@ run_one() {
     echo "============================================================"
     echo "Running $script"
     echo "============================================================"
+    # Idempotency: a drill may leave a node stopped or the chain stalled; bring
+    # the net back to a healthy, advancing state before the next one runs.
+    settle_testnet 180 || echo "[SUITE] settle_testnet timed out before $script"
     if bash "$script"; then
         PASSED+=("$script")
     else

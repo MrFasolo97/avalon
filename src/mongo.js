@@ -12,7 +12,21 @@ let mongo = {
             useNewUrlParser: true,
             useUnifiedTopology: true
         }, async function(err, client) {
-            if (err) { logr.fatal('MongoDB connection failed: ' + err.message); process.exit(1) }
+            if (err) {
+                // A node restarted together with MongoDB (a coordinated resume /
+                // flag day) can reach this before mongo has finished booting, and
+                // a transient connection error used to kill the process — half the
+                // network crashed on every restart (drills G10/G11). Retry with a
+                // small backoff before giving up: nothing has been set up yet, so
+                // re-running init() is safe.
+                if ((mongo._connectAttempts = (mongo._connectAttempts || 0) + 1) < 30) {
+                    logr.warn('MongoDB not ready (' + err.message + '), retry '
+                        + mongo._connectAttempts + '/30 in 2s')
+                    return setTimeout(() => mongo.init(cb), 2000)
+                }
+                logr.fatal('MongoDB connection failed: ' + err.message); process.exit(1)
+            }
+            mongo._connectAttempts = 0
             this.db = client.db(db_name)
             try {
                 await this.db.executeDbAdminCommand({

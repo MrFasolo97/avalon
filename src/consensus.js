@@ -80,17 +80,25 @@ let consensus = {
     eligibleLeaders: (h) => {
         const active = consensus.activeLeaders()
         if (config.quorumEligibility !== 'lastTurn') return active
-        // F2 fix: base the quorum set on the chain-derived epoch rotation
-        // (activeLeaderSet(), identical on every node) instead of activeLeaders(),
-        // which walks each node's LOCAL recentBlocks and can differ by a block.
-        // A node-local denominator made the quorum threshold differ across nodes
-        // (q=3 on one node, q=4 on another for the same height), so one group
-        // finalised a block the other still needed a vote for — the permanent
-        // split seen in drills G10/G11 (doc/consensus-single-quorum-and-locks
-        // §1.4, plan F2). Fall back to activeLeaders() when the set is empty
-        // (genesis, or a node that has not built its leader cache yet).
+        // F2: base the quorum set on the chain-derived epoch rotation
+        // (chain.activeLeaderSet(), identical on every node) instead of the local
+        // activeLeaders() view, so the denominator cannot differ by a block
+        // between nodes. That node-local denominator made the quorum threshold
+        // differ across nodes (q=3 vs q=4) and split the network after a total
+        // halt (F2, drills G10/G11).
+        //
+        // Exception — the genesis transition: the master (`config.masterName`) is
+        // the scheduled leader until `leaders` real candidates exist, and it must
+        // stay eligible or the fresh chain deadlocks at the first epoch after the
+        // miners are voted in (the stale master schedule cannot be regenerated
+        // because the block that would regenerate it is the one being blocked).
+        // While the master is still in the epoch shuffle, keep the historical
+        // activeLeaders() behaviour; switch to the deterministic rotation once it
+        // has left.
+        const masterStillScheduled = !chain.schedule || !chain.schedule.shuffle
+            || chain.schedule.shuffle.some(s => s && s.name === config.masterName)
         let base = active
-        if (typeof chain.activeLeaderSet === 'function') {
+        if (!masterStillScheduled && typeof chain.activeLeaderSet === 'function') {
             const set = chain.activeLeaderSet().map(l => l.name || l)
             if (set.length) base = set
         }
@@ -544,6 +552,15 @@ let consensus = {
 
         if (round === 0) {
             // precommit stage
+
+            // A malformed NEW_BLOCK can arrive with no hash; everything below
+            // assumes one (block.hash.substr, possBlocks/validating keys). Refuse
+            // it instead of throwing: an unhandled throw here crashed the node
+            // and, through the P2P relay, took down half the network mid-drill.
+            if (!block.hash || typeof block.hash !== 'string') {
+                if (cb) cb(0)
+                return
+            }
 
             // skip whatever we already validated
             for (let i = 0; i < consensus.possBlocks.length; i++)

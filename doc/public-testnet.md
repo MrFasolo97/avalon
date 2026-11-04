@@ -1,9 +1,9 @@
 # Avalon Public Testnet — Multi-Operator Guide
 
-**Status:** pre-launch (draft for coordinator review)
-**Target release:** certified **`v2.0.3`** (branch `feat/auto-force-finalize`) — the *no-economy* line; hard fork `#13330000` is **not** included
+**Status:** ready for coordinator launch — the consensus core is validated by the full **G1–G12** drill matrix (see [`docker/testnet/README-drills.md`](../docker/testnet/README-drills.md))
+**Target release:** **`v2.1.0`** — Layer S/H consensus hardening (`skips[]` attestation, deterministic quorum, soft jail, standby promotion, halt breaker) plus the P2P / restart / crash hardening found by the drills
 **Audience:** independent operators (entities that run their own node on their own infrastructure, with their own keys)
-**Companions:** [`mainnet-deployment-and-rollback.md`](./mainnet-deployment-and-rollback.md), [`migration-runbook-no-econs.md`](./migration-runbook-no-econs.md), local dev net in [`docker/testnet/README.md`](../docker/testnet/README.md)
+**Companions:** [`mainnet-deployment-and-rollback.md`](./mainnet-deployment-and-rollback.md), [`migration-runbook-no-econs.md`](./migration-runbook-no-econs.md), drill matrix in [`docker/testnet/README-drills.md`](../docker/testnet/README-drills.md), local dev net in [`docker/testnet/README.md`](../docker/testnet/README.md)
 
 ---
 
@@ -11,7 +11,7 @@
 
 A public testnet is a **separate chain** that runs the same certified code as the upcoming mainnet migration, but on a fresh genesis and with **different, testnet-only** values for the fields that define a chain. Every independent entity runs a real node on its own machine, over the public internet, and they must agree on **two things**:
 
-1. the **same commit** (the certified `v2.0.3` tag), and
+1. the **same commit** (the certified `v2.1.0` tag), and
 2. the **same testnet config patch** (chain id, master key, fork heights).
 
 Miss either one and the entities end up on **different chains** that silently ignore each other. Everything else (ports, peers, own keys) is per-operator.
@@ -24,13 +24,36 @@ The testnet exists to rehearse, with real independent operators, exactly what th
 
 | | |
 |---|---|
-| **Runs** | certified `v2.0.3`, Node.js ≥ 24, no economy fork (`#13330000` absent) |
+| **Runs** | certified `v2.1.0`, Node.js ≥ 24 |
 | **Chain** | fresh, isolated chain; block `#0` is a fixed genesis; the master account (default `dtube`) holds the testnet supply |
-| **Exercises** | multi-operator P2P, leader election/rotation, **force-finalization** (activated early), halt recovery, `CORS_ORIGIN`/`TRUST_PROXY`/rate limiting/auth, `/version` census |
+| **Exercises** | multi-operator P2P (discovery), leader election/rotation, force-finalization, halt recovery, jail + standby promotion, `CORS_ORIGIN`/`TRUST_PROXY`/rate limiting/auth, `/version` census |
 | **Does NOT contain** | any mainnet balances, contents or history; any real value |
 | **Must never reach** | mainnet peers, or any other chain (enforced by a **distinct `originHash`**, §4) |
 
 Owners and keys on the testnet are **throwaway**. Never reuse a mainnet key, and never point a testnet node at a mainnet MongoDB.
+
+---
+
+## 1.5 What is already validated (drill matrix)
+
+Before launch, the consensus core is exercised by the **G1–G12** drill matrix on
+`docker/testnet` (5 leaders + 2 standbys) — all green on `v2.1.0`:
+
+| | | | |
+|---|---|---|---|
+| G1 (1 leader down) | G2 (1 jailed) | G3 (2 jailed) | G4 (standby promoted) |
+| G5 (partition 3/2) | G6 (clock skew ±5s) | G7 (equivocation) | G8 (FF asymmetric) |
+| G9 (old `v2.0.x` node) | G10 (all leaders down) | G11 (halt breaker) | G12 (breaker off) |
+
+Run them with `bash docker/testnet/drills/run-all-drills.sh --long`; the details
+and the fixes they drove are in
+[`docker/testnet/README-drills.md`](../docker/testnet/README-drills.md).
+
+**Not covered by the drills — validate here:** real P2P **discovery** over the
+internet. The drills run with `NO_DISCOVERY=1` (a star topology around the
+bootstrap), so the `discoveryWorker` path with public IPs / NAT is only
+exercised by independent operators. This is the main reason the public testnet
+exists.
 
 ---
 
@@ -86,17 +109,31 @@ masterName: 'dtube',                            // testnet master account name
 masterPub: '<TESTNET_MASTER_PUB>',              // fresh key, mainnet key NOT allowed
 masterPubLeader: '<TESTNET_MASTER_PUB>',
 masterDaoTxs: [0,1,2,3,4,5,6,7,8,10,11,12,13,14,15,17,18,19,20,21,23,24,25,26,27,28,29,30,32],
-// ...and in history, above 241600:
-100: { forceFinalize: true },
+leaderMaxVotes: 8,                              // master self-approval + 7 drill accounts
+masterLeaderUntil: 0,                           // master steps out once 5 real leaders exist
+// ...and in history, above 241600, enable the Layer S/H fork from the start so
+// the testnet exercises the full consensus path (the drills do exactly this via
+// docker/testnet/scripts/patch-config-testnet.js):
+100: {
+    forceFinalize: true,
+    skipRecording: true,
+    skipStrict: true,
+    quorumMin: 3,
+    quorumEligibility: 'lastTurn',
+    jailMissThreshold: 30, jailBlocks: 200, jailBackoffMax: 4,
+    haltBreaker: true, haltBreakerMs: 21000,
+    leaderStandbys: 2, standbyEnabled: true, canonicalLeaderOrder: true,
+    skipGraceMs: 500
+},
 ```
 
-Also confirm **no** `13330000` entry exists (this line ships without the economy):
-
-```bash
-grep -n "13330000\|rewardPoolYearlyRate\|initialSupplyBlock" src/config.js   # must print nothing
-```
-
-> The coordinator publishes the patch text **and** the resulting `git diff src/config.js`, so an operator can verify byte-for-byte that their config matches. Two nodes with the same `originHash` but a different fork height will diverge at that height.
+> **Economy fork `#13330000`.** The `v2.1.0` tree still contains the `13330000` entry in
+> `config.history`. On a **fresh** testnet it is far beyond any height a rehearsal
+> reaches, so it never activates — but **do not** carry it into a mainnet release:
+> the mainnet migration release excludes it (see `migration-runbook-no-econs.md`).
+> The coordinator publishes the exact patch and its `git diff src/config.js` so every
+> operator can verify byte-for-byte. Two nodes with the same `originHash` but a
+> different fork height diverge at that height.
 
 ---
 
@@ -106,7 +143,7 @@ Goal: produce block `#0` and the first blocks, then hand every operator an accou
 
 ```bash
 # 1. Fresh code at the certified tag, on the coordinator machine
-git fetch --all --tags && git checkout v2.0.3
+git fetch --all --tags && git checkout v2.1.0
 npm ci
 
 # 2. Apply the shared testnet patch to src/config.js (§4), then confirm
@@ -145,7 +182,7 @@ Once the chain runs, publish on the shared channel: the tag, the exact config pa
 
 ```bash
 git clone https://github.com/dtube/avalon.git && cd avalon
-git fetch --all --tags && git checkout v2.0.3
+git fetch --all --tags && git checkout v2.1.0
 npm ci
 
 # Apply the coordinator's testnet config patch (§4). Verify it matches theirs:
@@ -212,7 +249,7 @@ If fewer than `leaders` accounts are eligible, `minerSchedule()` pads the shuffl
 ## 9. Verification checklist (must pass on every node)
 
 ```bash
-curl -s localhost:3001/version          # {"version":"2.0.3"} — IDENTICAL on every node
+curl -s localhost:3001/version          # {"version":"2.1.0"} — IDENTICAL on every node
 curl -s localhost:3001/count            # head advances monotonically
 curl -s localhost:3001/peers            # peers from independent entities
 curl -s localhost:3001/schedule         # leader shuffle is present and consistent
@@ -285,7 +322,7 @@ Assert that all nodes agree on `count` and block hashes after each drill. A dril
 ```bash
 # chain id / isolation
 grep -n "originHash\|block0ts\|masterPub\|masterName" src/config.js
-grep -n "13330000" src/config.js                       # must be empty
+grep -n "13330000" src/config.js                       # present in v2.1.0 but far from a fresh testnet's height
 
 # what a node is doing
 curl -s localhost:3001/version

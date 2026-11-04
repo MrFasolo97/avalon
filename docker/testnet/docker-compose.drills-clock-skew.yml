@@ -1,0 +1,28 @@
+# Overlay for drill G6 (clock skew) — skews two nodes' WALL CLOCK with
+# libfaketime, WITHOUT touching the host clock.
+#
+# Why not `cap_add: [SYS_TIME]` + `date -s`: a container shares the host kernel
+# clock (Docker does not give each container its own time namespace), so `date -s`
+# inside the container would move the HOST clock. libfaketime instead intercepts
+# the process's time syscalls via LD_PRELOAD, so only the node sees the shift.
+#
+#   docker compose -p avalon-drills \
+#     -f docker-compose.yml -f docker-compose.drills.yml \
+#     -f docker-compose.drills-clock-skew.yml up -d miner4 miner5
+#
+# Used by drills/G6-clock-skew.sh, which recreates miner4/miner5 with this file
+# and then recreates them again without it.
+
+services:
+  miner4:
+    environment:
+      LD_PRELOAD: /usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1
+      # do not fake the monotonic clock: node's timers / event loop rely on it
+      FAKETIME_DONT_FAKE_MONOTONIC: "1"
+      FAKETIME: "-5s"
+
+  miner5:
+    environment:
+      LD_PRELOAD: /usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1
+      FAKETIME_DONT_FAKE_MONOTONIC: "1"
+      FAKETIME: "+5s"

@@ -1,5 +1,5 @@
 #!/bin/bash
-# G12: 2 leaders killed with HALT_BREAKER=0.
+# G12: 3 leaders killed with HALT_BREAKER=0.
 # Expected: deterministic halt, then restart one node resumes the chain.
 #
 # This script assumes the testnet was launched with:
@@ -8,6 +8,17 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
+
+# The recreate with the breaker-off overlay restarts every node; right after
+# that the rotation is briefly just the master (catch-up), which would trip
+# require_running. Wait for the miner set to come back first.
+log "waiting for the rotation to settle after the recreate..."
+deadline=$((SECONDS + 120))
+while [ $SECONDS -lt $deadline ]; do
+    active=$(json_extract "$(get_consensus)" ".activeLeaders.map(l => l.name || l).join(',')" 2>/dev/null || echo "")
+    if [ -n "$active" ] && ! echo "$active" | grep -q "dtube"; then break; fi
+    sleep 3
+done
 
 require_running
 

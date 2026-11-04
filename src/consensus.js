@@ -5,6 +5,7 @@ const cloneDeep = require('clone-deep')
 const consensusQuorum = require('./consensusQuorum')
 const voteState = require('./voteState')
 const leaderHealth = require('./leaderHealth')
+const events = require('./events')
 
 // all p2p.sockets referenced here are verified nodes with a node_status
 
@@ -15,8 +16,18 @@ const FF_BACKOFF_MS = [600, 1200, 2400, 4800]
 const QC_SHADOW = process.env.QC_SHADOW === '1'
 const VOTE_STATE_PATH = process.env.VOTE_STATE_PATH || './state/vote_state.json'
 
+// S1' single-vote (INV-1, doc/consensus-single-quorum-and-locks §2.3): a node
+// casts at most ONE hash per (height, phase), for the deterministic best-ranked
+// candidate it knows. A conflicting vote is refused — halt rather than fork.
+// Opt-in while it is validated on the drills (CONSENSUS_SINGLE_VOTE=1).
+const SINGLE_VOTE = process.env.CONSENSUS_SINGLE_VOTE === '1'
+
 let consensus = {
     observer: false,
+    singleVoteEnabled: SINGLE_VOTE,
+    // Production ledger for our OWN votes. singleVote:true so the rule is
+    // enforced by recordVote(); only consulted when SINGLE_VOTE is on.
+    voteLedger: consensusQuorum.createLedger({ singleVote: true }),
     validating: [],
     processed: [],
     queue: [],
@@ -496,6 +507,11 @@ let consensus = {
                             collisions.push([collisionBlocks[j].block.miner, collisionBlocks[j].block.timestamp])
                         logr.info('Block collision detected at height '+possBlock.block._id+', the leaders are:',collisions)
                         logr.cons('Poss blocks',possBlocksById[possBlock.block._id])
+                        events.emit('block-collision', 'warn', {
+                            height: possBlock.block._id,
+                            collisions: collisions,
+                            winner: { miner: possBlock.block.miner, hash: possBlock.block.hash }
+                        })
                         logr.info('Applying block '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,4)+' by '+possBlock.block.miner+' with timestamp '+possBlock.block.timestamp)
                     } else
                         logr.cons('block '+possBlock.block._id+'#'+possBlock.block.hash.substr(0,4)+' got finalized')
@@ -650,7 +666,76 @@ let consensus = {
                     break
                 }
     },
+    // Deterministic best (lowest chain rank) known candidate at a height.
+    // chain.compareBlockRank over chain.deriveBlockRank is a total order derived
+    // from chain data, so every node picks the same winner for the same set.
+    isBestCandidate: (block) => {
+        let best = null
+        for (let i = 0; i < consensus.possBlocks.length; i++) {
+            const b = consensus.possBlocks[i].block
+            if (!b || b._id !== block._id) continue
+            if (!best || chain.compareBlockRank(chain.deriveBlockRank(b), chain.deriveBlockRank(best)) < 0)
+                best = b
+        }
+        return !best || best.hash === block.hash
+    },
+    // Best candidate at `height` that has reached the precommit quorum among the
+    // candidates we know. Two honest nodes that have seen the same set pick the
+    // same one, so their COMMIT votes align.
+    bestCommittableCandidate: (height, threshold) => {
+        let best = null
+        for (let i = 0; i < consensus.possBlocks.length; i++) {
+            const pb = consensus.possBlocks[i]
+            if (!pb || !pb.block || pb.block._id !== height) continue
+            if (!pb[consensusQuorum.PRECOMMIT] || pb[consensusQuorum.PRECOMMIT].length < threshold) continue
+            if (!best || chain.compareBlockRank(chain.deriveBlockRank(pb.block), chain.deriveBlockRank(best.block)) < 0)
+                best = pb
+        }
+        return best ? best.block : null
+    },
+    // S1' "one candidate per round" gate: should this node cast its vote for
+    // (round, block)?
+    //   - PRECOMMIT: only the deterministic best-known candidate (monotone — a
+    //     strictly better candidate arriving later is allowed too, since
+    //     precommits are not the safety-critical phase).
+    //   - COMMIT: at most ONE hash per height (INV-1, the safety phase) and only
+    //     for the best candidate that reached the precommit quorum, so every
+    //     honest node commits the same hash and two blocks cannot both finalise.
+    castVote: (round, block) => {
+        const h = Number.isInteger(block._id) ? block._id : -1
+        if (round === consensusQuorum.PRECOMMIT) {
+            if (!consensus.isBestCandidate(block)) {
+                logr.debug('one-candidate: not the best at ' + h + ', skip precommit')
+                return false
+            }
+            return true
+        }
+        const threshold = consensusQuorum.blockQuorum(
+            consensus.eligibleLeaders(h).length, config.quorumMin)
+        const best = consensus.bestCommittableCandidate(h, threshold)
+        if (!best || best.hash !== block.hash) {
+            logr.debug('one-candidate: not the best committable at ' + h + ', skip commit')
+            return false
+        }
+        const rec = consensusQuorum.recordVote(consensus.voteLedger, {
+            h: h, r: round, hash: block.hash, signer: process.env.NODE_OWNER
+        })
+        try {
+            consensusQuorum.pruneLedger(consensus.voteLedger, chain.getLatestBlock()._id - config.leaders * 3)
+        } catch (e) { /* head not ready */ }
+        if (!rec.accepted) {
+            logr.debug('one-candidate: refusing second commit at ' + h + ' (' + rec.reason + ')')
+            return false
+        }
+        return true
+    },
     endRound: (round, block) => {
+        // S1' "one candidate per round": only an active (voting) node is gated;
+        // observers just follow. See castVote().
+        if (SINGLE_VOTE && consensus.isActive() && !consensus.castVote(round, block)) {
+            consensus.tryNextStep()
+            return
+        }
         // A vote is only real if it is broadcast (or, for ourselves, at least
         // added to the tally as if it had been received). The old code added the
         // node's own name in several places without always broadcasting it,
@@ -978,6 +1063,10 @@ let consensus = {
             + ' with unanimity ' + respondentNames.length + '/' + respondentNames.length
             + ' of the remaining leaders (eligible ' + eligible.length + '='
             + respondentNames.join(',') + (missing.length ? ' missing ' + missing.join(',') : '') + ')')
+        events.emit('halt-breaker-fired', 'warn', {
+            height: height, hash: winner.block.hash, miner: winner.block.miner,
+            respondents: respondentNames, eligible: eligible.length, missing: missing
+        })
         consensus._applyForceFinalize(height, winner, 0)
     },
     scheduleForceFinalize: () => {
@@ -1071,11 +1160,13 @@ let consensus = {
                 (c.block.hash || '??').substr(0, 8)
             ])
             logr.info('Block collision timeout at height ' + height + ', forced selection:', details)
+            events.emit('collision-timeout', 'warn', { height: height, candidates: details })
         }
 
         if (candidates.length > 1) {
             const winnerHash = (winner.block.hash || '??').substr(0, 8)
             logr.warn('Force finalizing block ' + height + '#' + winnerHash + ' by ' + winner.block.miner + ' — selected locally without consensus, fork risk if peers diverge')
+            events.emit('force-finalize', 'warn', { height: height, hash: winner.block.hash, miner: winner.block.miner })
         }
 
         // Lock finalizing before ffProposals/broadcast so tryNextStep can't race

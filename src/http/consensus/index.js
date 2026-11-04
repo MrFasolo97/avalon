@@ -60,7 +60,9 @@ module.exports = {
                     // report what is actually in force, not just the config entry.
                     haltBreaker: !!config.haltBreaker && process.env.HALT_BREAKER !== '0',
                     standbyEnabled: !!config.standbyEnabled,
-                    canonicalLeaderOrder: !!config.canonicalLeaderOrder
+                    canonicalLeaderOrder: !!config.canonicalLeaderOrder,
+                    // S1' single-vote enforcement (opt-in via CONSENSUS_SINGLE_VOTE=1)
+                    singleVote: !!consensus.singleVoteEnabled
                 }
             })
         })

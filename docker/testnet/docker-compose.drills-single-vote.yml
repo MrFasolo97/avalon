@@ -1,0 +1,38 @@
+# Overlay for validating S1' single-vote (CONSENSUS_SINGLE_VOTE=1).
+#
+#   docker compose -p avalon-drills \
+#     -f docker-compose.yml -f docker-compose.drills.yml \
+#     -f docker-compose.drills-single-vote.yml up -d
+#
+# A node casts at most one hash per (height, phase), for the deterministic best
+# candidate, so two colliding blocks cannot each gather a quorum. Used by the
+# drill runs to check it does not freeze normal operation or the halt recovery.
+
+services:
+  bootstrap:
+    environment:
+      CONSENSUS_SINGLE_VOTE: "1"
+  setup:
+    environment:
+      CONSENSUS_SINGLE_VOTE: "1"
+  miner1:
+    environment:
+      CONSENSUS_SINGLE_VOTE: "1"
+  miner2:
+    environment:
+      CONSENSUS_SINGLE_VOTE: "1"
+  miner3:
+    environment:
+      CONSENSUS_SINGLE_VOTE: "1"
+  miner4:
+    environment:
+      CONSENSUS_SINGLE_VOTE: "1"
+  miner5:
+    environment:
+      CONSENSUS_SINGLE_VOTE: "1"
+  standby1:
+    environment:
+      CONSENSUS_SINGLE_VOTE: "1"
+  standby2:
+    environment:
+      CONSENSUS_SINGLE_VOTE: "1"

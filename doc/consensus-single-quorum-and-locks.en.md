@@ -475,3 +475,44 @@ accepted, while a stale envelope is not).
 The honest summary: this draft makes Avalon's consensus **provable**, and reduces the
 force-finalize machinery from "second protocol" to "fallback path with the same rules".
 It does not make 5 validators fault-tolerant to 2 failures, because no protocol can.
+
+---
+
+## 7. S1′ single-vote / one-candidate-per-round — implementation status (2026-11-04)
+
+Two variants were implemented in `src/consensus.js`, both behind
+**`CONSENSUS_SINGLE_VOTE=1`** (default **off**) and reported as `singleVote` in
+`/consensus` and `avalon_flag{name="single_vote"}` in `/metrics`:
+
+1. **Strict single-vote (both phases).** `castVote` refused any vote that was not
+   the best candidate and any second hash at a `(height, phase)` (INV-1 via
+   `consensusQuorum.recordVote`, `singleVote: true`).
+2. **One candidate per round (current).** PRECOMMIT only the deterministic
+   best-known candidate (monotone — precommits are not safety-critical);
+   COMMIT at most one hash per height, and only for the **best candidate that
+   reached the precommit quorum** (`bestCommittableCandidate`), so every honest
+   node commits the same hash. The ledger is pruned below `head - 3·leaders`.
+
+**Drill result:** both variants leave the chain **unable to recover**
+(G1/G8/G10/G11 stall). Variant 2 is revealing: the log shows the producer itself
+refusing its own precommit —
+`one-candidate: not the best at 427, skip precommit` — because a competing
+candidate (a backup, or a node whose schedule/rank differs) ranked better, so the
+height never reached a precommit quorum. This is the freeze of §4.2 again, and it
+shows that "vote the best" is not enough.
+
+**Conclusion:** neither gate is shippable until the protocol guarantees a
+**singleton candidate set per height**, which needs two things first:
+
+- **deterministic schedule agreement** across nodes (F6/F7) — otherwise two nodes
+  disagree on who the round leader is and produce different blocks; and
+- a real **one-proposer-per-round** rule: only the round leader proposes a block;
+  backups do **not** propose at the same height (they only take over once the
+  leader's slot is proven empty).
+
+With those, the candidate set at a height is a singleton and INV-1 holds with no
+vote gymnastics. Until then the gate stays **opt-in and default off**
+(`docker/testnet/docker-compose.drills-single-vote.yml` exists only to reproduce
+the experiment). The **practical** fork observed in G10/G11 was already fixed by
+the deterministic `eligibleLeaders()` (F2); the formal INV-1 guarantee remains
+future work on top of the two items above.

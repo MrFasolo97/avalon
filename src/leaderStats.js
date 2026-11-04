@@ -1,4 +1,11 @@
 // leader indexer from extended api
+//
+// Layer S/H: this index also mirrors the derived jail/absence state from
+// leaderHealth (streak, absent, jailed, jailUntil, jailLevel) so the dashboard
+// and /allminers can show it. Those fields are derived and rebuildable; they
+// are only extra keys on the same `leaders` document (no schema migration).
+const leaderHealth = require('./leaderHealth')
+
 let indexer = {
     leaders: {
         dtube: {
@@ -85,6 +92,21 @@ let indexer = {
                 if (!indexer.updates.leaders.includes(block.txs[i].sender))
                     indexer.updates.leaders.push(block.txs[i].sender)
             }
+
+        // Layer S/H: mirror the derived jail/absence state (leaderHealth has
+        // already processed this block — see chain.js addBlock/rebuildState).
+        const touched = [block.miner]
+        if (block.missedBy) touched.push(block.missedBy)
+        for (let i = 0; i < touched.length; i++) {
+            const lh = leaderHealth.leaders[touched[i]]
+            const stat = indexer.leaders[touched[i]]
+            if (!stat || !lh) continue
+            stat.streak = lh.streak
+            stat.absent = lh.absent
+            stat.jailed = lh.jail ? !!lh.jail.active : false
+            stat.jailUntil = lh.jail ? lh.jail.untilBlock : -1
+            stat.jailLevel = lh.jail ? lh.jail.level : 0
+        }
     },
     getWriteOps: () => {
         if (process.env.LEADER_STATS !== '1') return []

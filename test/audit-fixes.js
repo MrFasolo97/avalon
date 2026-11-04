@@ -2,7 +2,6 @@
 // Tests all fixes from the security/consensus audit
 
 const assert = require('assert')
-const crypto = require('crypto')
 const path = require('path')
 const fs = require('fs')
 
@@ -164,10 +163,9 @@ test('requireAuth: passes through when no admin token is set', () => {
     auth.requireAuth()(reqToken, res, () => { nextCalled = true })
     assert.strictEqual(nextCalled, true, 'valid token should be accepted')
 
-    for (const v of vars) {
+    for (const v of vars)
         if (saved[v] === undefined) delete process.env[v]
         else process.env[v] = saved[v]
-    }
     auth.sessions.clear()
 })
 
@@ -246,6 +244,7 @@ test('truncPos = (BigInt(high) << 8n) + BigInt(low)', () => {
 // 10. Miner log sanitization
 console.log('\n--- chain.js: miner log sanitization ---')
 test('block.miner sanitized in output', () => {
+    // eslint-disable-next-line no-control-regex
     function sanitize(m) { return (m || '').replace(/[\x00-\x1f]/g, '') }
     assert.strictEqual(sanitize('alice'), 'alice')
     assert.strictEqual(sanitize('bob\x00'), 'bob')
@@ -259,9 +258,9 @@ test('block.miner sanitized in output', () => {
 console.log('\n--- transact/index.js: rate limiter ---')
 test('POST /transact has rate limiter', () => {
     const content = fs.readFileSync(path.join(__dirname, '../src/http/transact/index.js'), 'utf8')
-    assert.ok(content.includes("require('express-rate-limit')"))
+    assert.ok(content.includes('require(\'express-rate-limit\')'))
     assert.ok(content.includes('txLimiter'))
-    assert.ok(content.includes("app.post('/transact', txLimiter,"))
+    assert.ok(content.includes('app.post(\'/transact\', txLimiter,'))
 })
 
 // 12. auto_resolve_halt.sh MongoDB eval uses env vars
@@ -287,9 +286,9 @@ test('consensus.js has tryNextStepBusy', () => {
     assert.ok(c.includes('tryNextStepBusy: false'))
 })
 
-test('consensus.js uses config.leaders for quorum', () => {
+test('consensus.js uses unified blockQuorum from consensusQuorum', () => {
     const c = fs.readFileSync(path.join(__dirname, '../src/consensus.js'), 'utf8')
-    assert.ok(c.includes('config.leaders * 2 / 3'))
+    assert.ok(c.includes('consensusQuorum.blockQuorum'))
 })
 
 test('consensus.js has empty shuffle guard', () => {

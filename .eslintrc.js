@@ -24,6 +24,7 @@ module.exports = {
         'newRankings': 'writable',
         'consensus': 'writable',
         'leaderStats': 'writable',
+        'leaderHealth': 'writable',
         'dao': 'writable',
         'daoMaster': 'writable'
     },

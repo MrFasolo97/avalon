@@ -4,12 +4,15 @@ const secp256k1 = require('secp256k1')
 const bs58 = require('base-x')(config.b58Alphabet)
 const series = require('run-series')
 const cloneDeep = require('clone-deep')
+const fs = require('fs')
+const path = require('path')
 const dao = require('./dao')
 const daoMaster = require('./daoMaster')
 const transaction = require('./transaction.js')
 const notifications = require('./notifications.js')
 const txHistory = require('./txHistory')
 const blocks = require('./blocks')
+const leaderHealth = require('./leaderHealth')
 const GrowInt = require('growint')
 const default_replay_output = 100
 const replay_output = process.env.REPLAY_OUTPUT || default_replay_output
@@ -19,13 +22,14 @@ const skip_check_early_blocks = (process.env.SKIP_EARLY_CHECK_BLOCKS || '3889058
 const max_batch_blocks = 10000
 
 class Block {
-    constructor(index, phash, timestamp, txs, miner, missedBy, dist, burn, signature, hash) {
+    constructor(index, phash, timestamp, txs, miner, missedBy, dist, burn, signature, hash, skips) {
         this._id = index
         this.phash = phash.toString()
         this.timestamp = timestamp
         this.txs = txs
         this.miner = miner
         if (missedBy) this.missedBy = missedBy
+        if (skips && skips.length) this.skips = skips
         if (dist) this.dist = dist
         if (burn) this.burn = burn
         this.hash = hash
@@ -101,13 +105,32 @@ let chain = {
         }
         txs = txs.sort(function(a,b){return a.ts-b.ts})
         transaction.removeFromPool(txs)
-        return new Block(nextIndex, previousBlock.hash, nextTimestamp, txs, process.env.NODE_OWNER)
+        // Layer S/H: attach our skip attestation here, before canMineBlock()
+        // pre-validates the block. The ladder only depends on (height, schedule,
+        // recentBlocks) which are unchanged between prepareBlock() and mineBlock(),
+        // so the strict "backup miner must attest skips" rule was rejecting every
+        // single block a node tried to mine as a backup (permanent stall whenever
+        // the scheduled leader was late/down).
+        const ladder = chain.leaderLadder(nextIndex)
+        const myPos = ladder.indexOf(process.env.NODE_OWNER)
+        const skips = myPos > 0 ? ladder.slice(0, myPos) : null
+        // NOTE: do NOT create the block first and append missedBy/skips afterwards.
+        // blockHashSerialization 2 hashes JSON.stringify(block), so the insertion
+        // order of the optional fields is part of the signed payload. Passing them
+        // through the constructor (fixed order: missedBy, skips, dist, burn) keeps
+        // the producer's serialization identical to the one every validator
+        // rebuilds from the wire/DB.
+        return new Block(nextIndex, previousBlock.hash, nextTimestamp, txs,
+            process.env.NODE_OWNER, skips ? skips[0] : null, null, null, null, null, skips)
     },
     hashAndSignBlock: (block) => {
-        let nextHash = chain.calculateHashForBlock(block)
+        // Hash the canonical form (hash/signature removed): that is exactly what
+        // isValidHashAndSignature() recomputes on every validator, so signing any
+        // other serialization makes the block unverifiable by everyone else.
+        let nextHash = chain.calculateHashForBlock(block, true)
         let signature = secp256k1.ecdsaSign(Buffer.from(nextHash, 'hex'), bs58.decode(process.env.NODE_OWNER_PRIV))
         signature = bs58.encode(signature.signature)
-        return new Block(block._id, block.phash, block.timestamp, block.txs, block.miner, block.missedBy, block.dist, block.burn, signature, nextHash)
+        return new Block(block._id, block.phash, block.timestamp, block.txs, block.miner, block.missedBy, block.dist, block.burn, signature, nextHash, block.skips)
     },
     canMineBlock: (cb) => {
         if (chain.shuttingDown) {
@@ -138,15 +161,27 @@ let chain = {
                 cache.rollback()
                 dao.resetID()
                 daoMaster.resetID()
-                // and only add the valid txs to the new block
-                newBlock.txs = validTxs
-
                 // always record the failure of others
-                if (chain.schedule.shuffle[(newBlock._id-1)%config.leaders].name !== process.env.NODE_OWNER)
-                    newBlock.missedBy = chain.schedule.shuffle[(newBlock._id-1)%config.leaders].name
+                const finalHeight = newBlock._id
+                const ladder = chain.leaderLadder(finalHeight)
+                const myPos = ladder.indexOf(process.env.NODE_OWNER)
+                let skips = null
+                let missedBy = null
+                if (myPos > 0) {
+                    skips = ladder.slice(0, myPos)
+                    missedBy = skips[0]
+                } else {
+                    const scheduled = chain.schedule.shuffle[(finalHeight-1)%config.leaders]
+                    // fallback for the legacy field only
+                    if (scheduled && scheduled.name !== process.env.NODE_OWNER)
+                        missedBy = scheduled.name
+                }
 
-                if (distributed) newBlock.dist = distributed
-                if (burned) newBlock.burn = burned
+                // Rebuild the block instead of mutating it: the field order is part
+                // of the v2 hash (JSON.stringify), so dist/burn/missedBy/skips must
+                // be inserted in constructor order on the producer as well.
+                newBlock = new Block(finalHeight, newBlock.phash, newBlock.timestamp, validTxs,
+                    newBlock.miner, missedBy, distributed, burned, null, null, skips)
 
                 // hash and sign the block with our private key
                 newBlock = chain.hashAndSignBlock(newBlock)
@@ -161,7 +196,7 @@ let chain = {
 
                 logr.debug('Mined a new block, proposing to consensus')
 
-                possBlock[0].push(process.env.NODE_OWNER)
+                // own vote is recorded and broadcast by endRound()
                 consensus.possBlocks.push(possBlock)
                 if (config.forceFinalize)
                     consensus.scheduleForceFinalize()
@@ -225,6 +260,57 @@ let chain = {
         for (let t = 0; t < txs.length; t++)
             chain.recentTxs[txs[t].hash] = txs[t]
     },
+    pendingBlocks: [],
+    pendingBlockTimer: null,
+    addPendingBlock: (block) => {
+        if (!block || !block.hash) return
+        for (let i = 0; i < chain.pendingBlocks.length; i++)
+            if (chain.pendingBlocks[i].block.hash === block.hash)
+                return
+        if (chain.pendingBlocks.length >= 100) {
+            logr.warn('Pending block queue at capacity, dropping oldest')
+            chain.pendingBlocks.shift()
+        }
+        chain.pendingBlocks.push({ block: block, added: new Date().getTime() })
+        chain.schedulePendingBlocks()
+    },
+    schedulePendingBlocks: () => {
+        if (chain.pendingBlockTimer) return
+        if (chain.pendingBlocks.length === 0) return
+        const next = chain.pendingBlocks[0].block.timestamp - new Date().getTime()
+        const delay = Math.max(50, Math.min(next, 5000))
+        chain.pendingBlockTimer = setTimeout(() => {
+            chain.pendingBlockTimer = null
+            chain.processPendingBlocks()
+        }, delay)
+    },
+    processPendingBlocks: () => {
+        if (chain.pendingBlocks.length === 0) return
+        const now = new Date().getTime()
+        const kept = []
+        for (const item of chain.pendingBlocks) {
+            // Drop stale entries: if it was ever going to validate it would have
+            // done so quickly after its timestamp (pendingBlockMaxMs, plan §5.4).
+            if (item.added + (config.pendingBlockMaxMs || 30000) < now) {
+                logr.debug('Dropping stale pending block ' + item.block._id + '#' + item.block.hash.substr(0, 8))
+                continue
+            }
+            // If still too far in the future, keep it.
+            if (item.block.timestamp > now + config.maxDrift) {
+                kept.push(item)
+                continue
+            }
+            // Try to validate it now. If it is the next block, add it.
+            chain.isValidNewBlock(item.block, true, true, function(isValid) {
+                if (isValid && item.block._id === chain.getLatestBlock()._id + 1 && p2p && p2p.addRecursive)
+                    p2p.addRecursive(item.block)
+                else if (!isValid)
+                    logr.debug('Pending block ' + item.block._id + '#' + item.block.hash.substr(0, 8) + ' still invalid')
+            })
+        }
+        chain.pendingBlocks = kept
+        chain.schedulePendingBlocks()
+    },
     minerWorker: (block) => {
         if (p2p.recovering) return
         clearTimeout(chain.worker)
@@ -234,36 +320,59 @@ let chain = {
             process.exit(1)
         }
 
-        let mineInMs = null
-        // if we are the next scheduled witness, try to mine in time
-        if (chain.schedule.shuffle[(block._id)%config.leaders].name === process.env.NODE_OWNER)
-            mineInMs = config.blockTime
-        // else if the scheduled leaders miss blocks
-        // backups witnesses are available after each block time intervals
-        else for (let i = 1; i < 2*config.leaders; i++)
-            if (chain.recentBlocks[chain.recentBlocks.length - i]
-            && chain.recentBlocks[chain.recentBlocks.length - i].miner === process.env.NODE_OWNER) {
-                mineInMs = (i+1)*config.blockTime
-                break
-            }
+        const height = block._id + 1
+        const ladder = chain.leaderLadder(height)
+        const pos = ladder.indexOf(process.env.NODE_OWNER)
+        if (pos === -1) return
 
-        if (mineInMs) {
-            mineInMs -= (new Date().getTime()-block.timestamp)
-            mineInMs += 20
-            logr.debug('Trying to mine in '+mineInMs+'ms')
-            consensus.observer = false
-            if (mineInMs < config.blockTime/2) {
+        let mineInMs = (pos + 1) * config.blockTime
+        if (pos > 0) mineInMs += config.skipGraceMs || 0
+
+        mineInMs -= (new Date().getTime()-block.timestamp)
+        mineInMs += 20
+        logr.debug('Trying to mine in '+mineInMs+'ms (ladder pos '+pos+')')
+        consensus.observer = false
+        if (mineInMs < config.blockTime/2) {
+            // Giving up the slot is only safe if somebody else can take it.
+            // With no other miner in the recent history (genesis, a 1-node
+            // testnet, or a network where the others are down) this return
+            // stops the chain permanently: the next scheduled slot belongs
+            // to the same node, and it will be late again.
+            const recent = chain.recentBlocks.slice(-2*config.leaders)
+            const othersProducing = recent.some(b => b.miner && b.miner !== process.env.NODE_OWNER)
+            // If the head itself is stale the chain is HALTED: nobody else is
+            // going to produce instead of us, so giving up the slot here (the D3
+            // fix for a healthy chain) would freeze it forever. Mine anyway.
+            const chainHalted = (new Date().getTime() - block.timestamp) > config.blockTime * config.leaders
+            // When the chain is halted the ladder timing is meaningless (every
+            // position is already "due"), so if every backup mined we would
+            // scatter the vote across many candidates at the same height and
+            // freeze on a split. Only the SCHEDULED leader (ladder position 0)
+            // may produce into a halted chain; backups give up the slot. If the
+            // scheduled leader is down the chain stays halted (safe: halt rather
+            // than fork) until it — or the operator — brings it back.
+            if (pos > 0 && chainHalted) {
+                logr.debug('Chain halted and we are a backup (pos ' + pos + '): giving up the slot to avoid a candidate split')
+                return
+            }
+            if (othersProducing && !chainHalted) {
                 logr.warn('Slow performance detected, will not try to mine next block')
                 return
             }
-            chain.worker = setTimeout(function(){
-                chain.mineBlock(function(error, finalBlock) {
-                    if (error)
-                        logr.warn('miner worker trying to mine but couldnt', finalBlock)
-                })
-            }, mineInMs)
+            logr.warn(chainHalted
+                ? 'Chain appears halted (head is old): scheduled leader mining anyway'
+                : 'Slow performance detected and no other leader is producing: mining anyway')
+            // keep the computed delay: it lands the block exactly on
+            // prev.timestamp + blockTime. Clamping to "now" would produce a
+            // block that is too early and be rejected by validation.
+            mineInMs = Math.max(mineInMs, 20)
         }
-            
+        chain.worker = setTimeout(function(){
+            chain.mineBlock(function(error, finalBlock) {
+                if (error)
+                    logr.warn('miner worker trying to mine but couldnt', finalBlock)
+            })
+        }, mineInMs)
     },
     addBlock: async (block, cb) => {
         // add the block in our own db
@@ -286,12 +395,15 @@ let chain = {
         eco.nextBlock()
         dao.nextBlock()
         daoMaster.nextBlock()
+        leaderHealth.processBlock(block, chain.schedule)
         leaderStats.processBlock(block)
         txHistory.processBlock(block)
 
         // if block id is mult of n leaders, reschedule next n blocks
-        if (block._id % config.leaders === 0)
+        if (block._id % config.leaders === 0) {
             chain.schedule = chain.minerSchedule(block)
+            chain.saveSchedule()
+        }
         chain.recentBlocks.push(block)
         chain.minerWorker(block)
         chain.output(block)
@@ -548,9 +660,31 @@ let chain = {
             logr.error('invalid block signature')
             cb(false); return
         }
-        if (newBlock.missedBy && typeof newBlock.missedBy !== 'string') 
+        // Layer S/H: validate the optional skip attestation. Bounds are checked on
+        // every node; the canonical-prefix check is warn-mode in Layer S and a hard
+        // reject in Layer H (§4.1 / §5.3). A scheduled leader may omit `skips`
+        // entirely (an empty array is not serialised by the Block constructor); a
+        // backup that omits it is only a hard error in Layer H.
+        const ladder = chain.leaderLadder(newBlock._id)
+        const myPos = ladder.indexOf(newBlock.miner)
+        const expectedSkips = myPos > 0 ? ladder.slice(0, myPos) : []
+        const skipsCheck = chain.checkSkipAttestation(newBlock.skips, expectedSkips, newBlock.miner)
+        if (!skipsCheck.ok) {
+            const fatal = config.skipStrict && skipsCheck.reason !== 'absent'
+            const missingBackupAttestation = config.skipStrict && myPos > 0 && skipsCheck.reason === 'absent'
+            if (fatal || missingBackupAttestation) {
+                logr.error('invalid block skips at '+newBlock._id+' ('+skipsCheck.reason+')')
+                cb(false)
+                return
+            }
+            if (skipsCheck.reason !== 'absent')
+                logr.warn('invalid block skips at '+newBlock._id+' ('+skipsCheck.reason+'): '
+                    +JSON.stringify(newBlock.skips)+' expected '+JSON.stringify(expectedSkips))
+        }
+
+
+        if (newBlock.missedBy && typeof newBlock.missedBy !== 'string')
             logr.error('invalid block missedBy')
-           
 
         // verify that its indeed the next block
         let previousBlock = chain.getLatestBlock()
@@ -567,32 +701,21 @@ let chain = {
         // check if miner isnt trying to fast forward time
         // this might need to be tuned in the future to allow for network delay / clocks desync / etc
         if (newBlock.timestamp > new Date().getTime() + config.maxDrift) {
-            logr.error('timestamp from the future', newBlock.timestamp, new Date().getTime())
+            // Layer S/H: queue future-dated blocks instead of hard-rejecting them.
+            // A block that is only slightly ahead of our clock will validate once
+            // its timestamp is in the allowed drift window. Hard-rejecting was a
+            // major source of stalls on Docker testnets with clock skew.
+            if (config.skipRecording || config.haltBreaker) {
+                logr.warn('timestamp from the future, queuing for later', newBlock._id, newBlock.timestamp, new Date().getTime())
+                chain.addPendingBlock(newBlock)
+            } else
+                logr.error('timestamp from the future', newBlock.timestamp, new Date().getTime())
             cb(false); return
         }
 
-        // check if miner is normal scheduled one
-        let minerPriority = 0
-        if (chain.schedule.shuffle[(newBlock._id-1)%config.leaders] != null && chain.schedule.shuffle[(newBlock._id-1)%config.leaders].name === newBlock.miner)
-            minerPriority = 1
-        else if (chain.schedule.shuffle[(newBlock._id-1)%config.leaders] == null)
-            minerPriority = 1
-        // allow miners of n blocks away
-        // to mine after (n+1)*blockTime as 'backups'
-        // so that the network can keep going even if 1,2,3...n node(s) have issues
-        else
-            for (let i = 1; i <= config.leaders; i++) 
-                if (chain.recentBlocks.length - i >= 0) {
-                    if (!chain.recentBlocks[chain.recentBlocks.length - i])
-                        break
-                    if (chain.recentBlocks[chain.recentBlocks.length - i].miner === newBlock.miner) {
-                        minerPriority = i+1
-                        break
-                    }
-                }
-            
-                
-
+        // check if miner is normal scheduled one or a backup
+        // (ladder already computed above for skip validation)
+        const minerPriority = ladder.indexOf(newBlock.miner) + 1
         if (minerPriority === 0) {
             logr.error('unauthorized miner')
             cb(false); return
@@ -705,17 +828,205 @@ let chain = {
             })
         })
     },
+    // Canonical turn ladder for height h (Layer S/H).
+    // Deterministic: every node with the same schedule and recentBlocks computes
+    // the same array. Position 0 is the scheduled leader S(h); positions 1..L are
+    // recent producers used as backups; position p implies gap >= (p+1)*blockTime.
+    leaderLadder: (height) => {
+        const L = config.leaders
+        const out = []
+        if (chain.schedule && chain.schedule.shuffle) {
+            const s = chain.schedule.shuffle[(height - 1) % L]
+            if (s && s.name && out.indexOf(s.name) === -1) out.push(s.name)
+        }
+        for (let i = 1; i <= L; i++) {
+            const b = chain.recentBlocks[chain.recentBlocks.length - i]
+            if (!b || !b.miner) break
+            if (out.indexOf(b.miner) === -1) out.push(b.miner)
+        }
+        return out
+    },
+
+    // Pure skip-attestation check (Layer S/H, plan §4.1/§5.3). `expectedSkips`
+    // is the canonical ladder prefix before the producer. Returns { ok, reason }:
+    //   'absent'   -> skips undefined (fine for the scheduled leader; a miss for a backup)
+    //   'not-array'/'too-many'/'bad-name'/'duplicate'/'miner-in-skips' -> structurally invalid
+    //   'mismatch' -> well-formed but not the canonical prefix
+    // The caller decides warn (Layer S) vs reject (Layer H); this is pure so it
+    // is unit-testable without the block-validation machinery.
+    checkSkipAttestation: (skips, expectedSkips, miner) => {
+        if (skips === undefined) return { ok: false, reason: 'absent' }
+        if (!Array.isArray(skips)) return { ok: false, reason: 'not-array' }
+        const max = config.leaders + (config.leaderStandbys || 0)
+        if (skips.length > max) return { ok: false, reason: 'too-many' }
+        for (let i = 0; i < skips.length; i++) {
+            const name = skips[i]
+            if (typeof name !== 'string'
+            || name.length < (config.accountMinLength || 1)
+            || name.length > (config.accountMaxLength || 50))
+                return { ok: false, reason: 'bad-name' }
+        }
+        if (new Set(skips).size !== skips.length) return { ok: false, reason: 'duplicate' }
+        if (skips.indexOf(miner) !== -1) return { ok: false, reason: 'miner-in-skips' }
+        const expected = Array.isArray(expectedSkips) ? expectedSkips : []
+        const same = skips.length === expected.length && skips.every((n, i) => n === expected[i])
+        if (!same) return { ok: false, reason: 'mismatch' }
+        return { ok: true }
+    },
+
+    // Deterministic, chain-derived rank for a candidate block. Used by
+    // force-finalize and halt-breaker to make sure every node picks the same
+    // winner when timestamps collide. Lower rank = preferred.
+    deriveBlockRank: (block) => {
+        const ladder = chain.leaderLadder(block._id)
+        const pos = ladder.indexOf(block.miner)
+        return {
+            timestamp: block.timestamp,
+            ladderPos: pos >= 0 ? pos : 999,
+            hash: block.hash || ''
+        }
+    },
+
+    compareBlockRank: (a, b) => {
+        if (a.timestamp !== b.timestamp)
+            return a.timestamp - b.timestamp
+        if (a.ladderPos !== b.ladderPos)
+            return a.ladderPos - b.ladderPos
+        return String(a.hash).localeCompare(String(b.hash))
+    },
+
+    // Persist the current epoch schedule to disk. This fixes F7 restart
+    // divergence: after a restart every node reloads the exact schedule it was
+    // using, instead of recomputing it from a block that may not be in memory.
+    schedulePersistPath: process.env.SCHEDULE_PERSIST_PATH || './state/schedule.json',
+    saveSchedule: () => {
+        if (!chain.schedule) return
+        const file = chain.schedulePersistPath
+        try {
+            const dir = path.dirname(file)
+            if (!fs.existsSync(dir))
+                fs.mkdirSync(dir, { recursive: true })
+            const data = JSON.stringify({
+                height: chain.getLatestBlock()._id,
+                schedule: chain.schedule
+            })
+            fs.writeFileSync(file + '.tmp', data)
+            fs.renameSync(file + '.tmp', file)
+        } catch (e) {
+            logr.error('Failed to persist schedule', e)
+        }
+    },
+    loadSchedule: () => {
+        const file = chain.schedulePersistPath
+        try {
+            if (!fs.existsSync(file)) return null
+            const raw = fs.readFileSync(file, 'utf8')
+            const parsed = JSON.parse(raw)
+            if (!parsed || !parsed.schedule || !parsed.schedule.shuffle
+            || !Array.isArray(parsed.schedule.shuffle)) return null
+            return parsed
+        } catch (e) {
+            logr.error('Failed to load persisted schedule', e)
+            return null
+        }
+    },
+
+    // Leader rotation set for the current epoch.
+    // Layer S: uses generateLeaders() (approval order, top N).
+    // Layer H: canonical order (node_appr desc, name asc), jail filter, and
+    // standby promotion. The standby pool is the slice immediately below the
+    // active set; jailed actives are replaced by standbys at epoch boundaries.
+    //
+    // `config.masterLeaderUntil` (testnet/drill knob, default null = never):
+    // the master account is a leader from genesis by construction (its own
+    // balance seeds node_appr), which is required to bootstrap a fresh chain
+    // before any miner node exists. Once enough real leaders have been voted in
+    // it leaves the rotation, otherwise it would permanently occupy one of the L
+    // slots (and, on the drills, hide the standbys behind it).
+    // The "enough real leaders" guard makes it impossible to deadlock: the
+    // master only steps out when the rotation can be filled without it.
+    masterIsLeaderNow: (height, others) => {
+        if (typeof config.masterLeaderUntil !== 'number') return true
+        if (height <= config.masterLeaderUntil) return true
+        return others < config.leaders
+    },
+    filterMaster: (list, height) => {
+        const others = list.filter(l => l.name !== config.masterName)
+        if (chain.masterIsLeaderNow(height, others.length)) return list
+        return others
+    },
+    activeLeaderSet: () => {
+        const headHeight = chain.getLatestBlock()._id
+        if (!config.canonicalLeaderOrder)
+            return chain.filterMaster(chain.generateLeaders(true, false, config.leaders, 0), headHeight)
+
+        const need = config.leaders
+        const standbyCount = config.leaderStandbys || 0
+        const all = chain.generateLeaders(true, false, need + standbyCount + 20, 0)
+
+        // Canonical ordering: approval descending, then name ascending for
+        // deterministic tie-breaking.
+        all.sort((a, b) => {
+            if (b.node_appr !== a.node_appr)
+                return b.node_appr - a.node_appr
+            if (a.name < b.name) return -1
+            if (a.name > b.name) return 1
+            return 0
+        })
+
+        // Filter jailed leaders. Layer H jail state is derived from skips[].
+        const notJailed = chain.filterMaster(all, headHeight).filter(l => !leaderHealth.isJailed(l.name, headHeight))
+
+        let actives = notJailed.slice(0, need)
+        // If jailing shrunk the active set, promote standbys from the ordered
+        // pool below the active cut.
+        if (actives.length < need)
+            actives = notJailed.slice(0, need)
+
+        return actives
+    },
+
+    // Standby pool for Layer H: leaders immediately below the active cut that
+    // are not jailed. Exposed via /consensus and used at epoch boundaries.
+    standbyLeaderSet: () => {
+        if (!config.canonicalLeaderOrder) return []
+        const headHeight = chain.getLatestBlock()._id
+        const need = config.leaders
+        const standbyCount = config.leaderStandbys || 0
+        const all = chain.generateLeaders(true, false, need + standbyCount + 20, 0)
+        all.sort((a, b) => {
+            if (b.node_appr !== a.node_appr)
+                return b.node_appr - a.node_appr
+            if (a.name < b.name) return -1
+            if (a.name > b.name) return 1
+            return 0
+        })
+        const notJailed = chain.filterMaster(all, headHeight).filter(l => !leaderHealth.isJailed(l.name, headHeight))
+        return notJailed.slice(need, need + standbyCount)
+    },
+
     minerSchedule: (block) => {
         let hash = block.hash
         let rand = parseInt('0x'+hash.substr(hash.length-config.leaderShufflePrecision))
         if (!p2p.recovering)
             logr.debug('Generating schedule... NRNG: ' + rand)
-        let miners = chain.generateLeaders(true, false, config.leaders, 0)
+        let miners = chain.activeLeaderSet()
         miners = miners.sort(function(a,b) {
             if(a.name < b.name) return -1
             if(a.name > b.name) return 1
             return 0
         })
+        logr.debug('Schedule leaders (' + miners.length + '): ' + miners.map(l => l.name).join(','))
+        if (miners.length === 0) {
+            // No eligible leader: a schedule cannot be built. Return an empty
+            // shuffle — consensus.activeLeaders() and minerWorker() both handle it
+            // (clean halt) — instead of padding with `undefined`, which crashed
+            // every node with "Cannot read properties of undefined (reading 'name')".
+            logr.error('minerSchedule: active leader set is empty at height ' + block._id
+                + ' — no leader can produce')
+            consensus.observer = false
+            return { block: block, shuffle: [] }
+        }
         let shuffledMiners = []
         while (miners.length > 0) {
             let i = rand%miners.length
@@ -725,7 +1036,7 @@ let chain = {
         
         let y = 0
         while (shuffledMiners.length < config.leaders) {
-            shuffledMiners.push(shuffledMiners[y])
+            shuffledMiners.push(shuffledMiners[y % shuffledMiners.length])
             y++
         }
 
@@ -933,6 +1244,46 @@ let chain = {
             cb(null, sumBlocks(bs || []))
         })
     },
+    // Rebuild leaderHealth from the last N finalised blocks (startup path).
+    //
+    // Jail/streak/absence are DERIVED state: a node that restarts with an empty
+    // leaderHealth would compute a different activeLeaderSet (jailed leaders
+    // back in rotation) than its peers, i.e. a different schedule and a
+    // different shuffle — a fork. A full blockchain rebuild gets this for free
+    // (processBlock runs on every block); this bounded scan covers the resume
+    // path. Window: the longest possible jail (jailBlocks * 2^(backoffMax-1))
+    // plus enough blocks to accumulate jailMissThreshold skips.
+    leaderHealthRebuildBlocks: (function () {
+        const jailBlocks = config.jailBlocks || 200
+        const backoff = config.jailBackoffMax || 4
+        const threshold = config.jailMissThreshold || 30
+        return Math.max(2200, jailBlocks * Math.pow(2, backoff - 1) + threshold * (config.leaders || 5) + 200)
+    })(),
+    rebuildLeaderHealth: (cb) => {
+        const head = chain.getLatestBlock()._id
+        const count = chain.leaderHealthRebuildBlocks
+        const from = Math.max(1, head - count + 1)
+        leaderHealth.leaders = {}
+        if (head < 1) return cb(null, 0)
+        const fold = (bs) => {
+            for (let i = 0; i < bs.length; i++)
+                leaderHealth.processBlock(bs[i], null)
+            cb(null, bs.length)
+        }
+        if (blocks.isOpen) {
+            let range
+            try {
+                range = blocks.readRange(from, head) || []
+            } catch (e) {
+                return cb(e)
+            }
+            return fold(range)
+        }
+        db.collection('blocks').find({_id: { $gte: from, $lte: head }}).sort({_id: 1}).toArray((e, bs) => {
+            if (e) return cb(e)
+            fold(bs || [])
+        })
+    },
     batchLoadBlocks: (blockNum,cb) => {
         if (chain.blocksToRebuild.length === 0)
             if (blocks.isOpen) {
@@ -956,6 +1307,7 @@ let chain = {
             eco.history = [{_id: 0, votes: 0, cDist: 0, cBurn: 0}]
             chain.recentBlocks = [chain.getGenesisBlock()]
             chain.schedule = chain.minerSchedule(chain.getGenesisBlock())
+            chain.saveSchedule()
             chain.rebuildState(blockNum+1,cb)
             return
         }
@@ -997,6 +1349,7 @@ let chain = {
                 eco.nextBlock()
                 eco.appendHistory(blockToRebuild)
                 chain.cleanMemory()
+                leaderHealth.processBlock(blockToRebuild, chain.schedule)
                 leaderStats.processBlock(blockToRebuild)
                 txHistory.processBlock(blockToRebuild)
 
@@ -1005,8 +1358,10 @@ let chain = {
                     writeInterval = 10000
 
                 cache.processRebuildOps(() => {
-                    if (blockToRebuild._id % config.leaders === 0)
+                    if (blockToRebuild._id % config.leaders === 0) {
                         chain.schedule = chain.minerSchedule(blockToRebuild)
+                        chain.saveSchedule()
+                    }
                     chain.recentBlocks.push(blockToRebuild)
                     chain.output(blockToRebuild, true)
                     

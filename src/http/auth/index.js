@@ -83,7 +83,7 @@ function requireAuth(...tokenEnvVars) {
             return next()
 
         const token = getToken(req)
-        if (token) {
+        if (token)
             for (const expected of candidates)
                 if (safeEqual(token, expected)) {
                     const newSid = crypto.randomBytes(16).toString('hex')
@@ -91,7 +91,6 @@ function requireAuth(...tokenEnvVars) {
                     setSessionCookie(res, newSid)
                     return next()
                 }
-        }
 
         const accept = req.headers['accept'] || ''
         if (accept.includes('text/html') || accept.includes('*/*'))

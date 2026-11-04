@@ -15,6 +15,7 @@ module.exports = {
          * @apiSuccess {Array} txs Transactions included in block
          * @apiSuccess {String} miner Producer of the block
          * @apiSuccess {String} [missedBy] Scheduled producer of the missed block
+         * @apiSuccess {Array} [skips] Scheduled leaders this backup block attests as skipped (Layer S/H)
          * @apiSuccess {Double} [dist] Tokens created in block in terms of 0.01 DTUBE
          * @apiSuccess {Double} [burn] Tokens burned in block in terms of 0.01 DTUBE
          * @apiSuccess {String} hash Block hash

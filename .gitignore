@@ -12,3 +12,6 @@ apidoc
 .DS_Store
 .commandcode
 opencode.bash
+state/
+# log4js writes ./logs/output.log relative to the process CWD
+src/logs/

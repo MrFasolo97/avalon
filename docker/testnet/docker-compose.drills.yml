@@ -1,0 +1,235 @@
+# Layer S/H drill testnet overlay (doc/consensus-offline-leaders-plan.en.md §8.3)
+#
+# Self-contained overlay: overrides the stock testnet names/ports so it can run
+# alongside the base testnet without collisions. Activates Layer S/H at block 100.
+#
+#   cd docker/testnet
+#   docker compose -p avalon-drills \
+#     -f docker-compose.yml \
+#     -f docker-compose.drills.yml up -d --build
+#
+# NOTE: Docker Compose v2 does not support the !reset YAML tag for merging port
+# lists, so we append extra host ports (420x/720x) instead of replacing the base
+# ones.  The drill scripts talk to the nodes via docker exec on the internal
+# HTTP port 3001, so the exact host ports do not matter.
+
+services:
+  mongodb:
+    container_name: avalon-drills-mongodb
+    init: true
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ping:1})"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  bootstrap:
+    container_name: avalon-drills-bootstrap
+    init: true
+    ports:
+      - "4201:3001"
+      - "7201:6001"
+    environment:
+      - CONFIG_OVERLAY=/avalon/config/testnet-keys/drills-overlay.json
+      - P2P_MSG_RATE_MAX=1000
+
+  setup:
+    container_name: avalon-drills-setup
+    init: true
+    environment:
+      - TESTNET_MINERS=7
+      # Names must match the leader accounts the drills expect (5 leaders +
+      # 2 standbys). The base testnet numbers them miner1..minerN instead.
+      - TESTNET_MINER_NAMES=miner1,miner2,miner3,miner4,miner5,standby1,standby2
+      - CONFIG_OVERLAY=/avalon/config/testnet-keys/drills-overlay.json
+
+  miner1:
+    container_name: avalon-drills-miner1
+    init: true
+    ports:
+      - "4202:3001"
+      - "7202:6001"
+    environment:
+      - CONFIG_OVERLAY=/avalon/config/testnet-keys/drills-overlay.json
+      - P2P_MSG_RATE_MAX=1000
+
+  miner2:
+    container_name: avalon-drills-miner2
+    init: true
+    ports:
+      - "4203:3001"
+      - "7203:6001"
+    environment:
+      - CONFIG_OVERLAY=/avalon/config/testnet-keys/drills-overlay.json
+      - P2P_MSG_RATE_MAX=1000
+
+  miner3:
+    container_name: avalon-drills-miner3
+    init: true
+    ports:
+      - "4204:3001"
+      - "7204:6001"
+    environment:
+      - CONFIG_OVERLAY=/avalon/config/testnet-keys/drills-overlay.json
+      - P2P_MSG_RATE_MAX=1000
+
+  miner4:
+    build:
+      context: ../..
+      dockerfile: docker/testnet/Dockerfile
+    hostname: miner4
+    container_name: avalon-drills-miner4
+    init: true
+    ports:
+      - "4205:3001"
+      - "7205:6001"
+    volumes:
+      - ../../src:/avalon/src
+      - ./scripts:/avalon/scripts:ro
+      - ../../scripts:/avalon/project-scripts:ro
+      - testnet_config:/avalon/config/testnet-keys
+    environment:
+      - CONFIG_OVERLAY=/avalon/config/testnet-keys/drills-overlay.json
+      - P2P_MSG_RATE_MAX=1000
+      - HTTP_PORT=3001
+      - HTTP_HOST=0.0.0.0
+      - P2P_PORT=6001
+      - DB_NAME=avalon_miner4
+      - DB_URL=mongodb://mongodb:27017
+      - NODE_OWNER=miner4
+      - NODE_OWNER_PUB=
+      - NODE_OWNER_PRIV=
+      - PEERS=ws://bootstrap:6001
+      - LOG_LEVEL=cons
+      - NO_DISCOVERY=1
+      - MAX_PEERS=20
+      - WARMUP_ACCOUNTS=1000
+      - WARMUP_CONTENTS=0
+      - ADMIN_ALLOW_ANONYMOUS=1
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      setup:
+        condition: service_started
+    command: ["bash", "/avalon/scripts/testnet-miner.sh"]
+
+  miner5:
+    build:
+      context: ../..
+      dockerfile: docker/testnet/Dockerfile
+    hostname: miner5
+    container_name: avalon-drills-miner5
+    init: true
+    ports:
+      - "4206:3001"
+      - "7206:6001"
+    volumes:
+      - ../../src:/avalon/src
+      - ./scripts:/avalon/scripts:ro
+      - ../../scripts:/avalon/project-scripts:ro
+      - testnet_config:/avalon/config/testnet-keys
+    environment:
+      - CONFIG_OVERLAY=/avalon/config/testnet-keys/drills-overlay.json
+      - P2P_MSG_RATE_MAX=1000
+      - HTTP_PORT=3001
+      - HTTP_HOST=0.0.0.0
+      - P2P_PORT=6001
+      - DB_NAME=avalon_miner5
+      - DB_URL=mongodb://mongodb:27017
+      - NODE_OWNER=miner5
+      - NODE_OWNER_PUB=
+      - NODE_OWNER_PRIV=
+      - PEERS=ws://bootstrap:6001
+      - LOG_LEVEL=cons
+      - NO_DISCOVERY=1
+      - MAX_PEERS=20
+      - WARMUP_ACCOUNTS=1000
+      - WARMUP_CONTENTS=0
+      - ADMIN_ALLOW_ANONYMOUS=1
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      setup:
+        condition: service_started
+    command: ["bash", "/avalon/scripts/testnet-miner.sh"]
+
+  standby1:
+    build:
+      context: ../..
+      dockerfile: docker/testnet/Dockerfile
+    hostname: standby1
+    container_name: avalon-drills-standby1
+    init: true
+    ports:
+      - "4207:3001"
+      - "7207:6001"
+    volumes:
+      - ../../src:/avalon/src
+      - ./scripts:/avalon/scripts:ro
+      - ../../scripts:/avalon/project-scripts:ro
+      - testnet_config:/avalon/config/testnet-keys
+    environment:
+      - CONFIG_OVERLAY=/avalon/config/testnet-keys/drills-overlay.json
+      - P2P_MSG_RATE_MAX=1000
+      - HTTP_PORT=3001
+      - HTTP_HOST=0.0.0.0
+      - P2P_PORT=6001
+      - DB_NAME=avalon_standby1
+      - DB_URL=mongodb://mongodb:27017
+      - NODE_OWNER=standby1
+      - NODE_OWNER_PUB=
+      - NODE_OWNER_PRIV=
+      - PEERS=ws://bootstrap:6001
+      - LOG_LEVEL=cons
+      - NO_DISCOVERY=1
+      - MAX_PEERS=20
+      - WARMUP_ACCOUNTS=1000
+      - WARMUP_CONTENTS=0
+      - ADMIN_ALLOW_ANONYMOUS=1
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      setup:
+        condition: service_started
+    command: ["bash", "/avalon/scripts/testnet-miner.sh"]
+
+  standby2:
+    build:
+      context: ../..
+      dockerfile: docker/testnet/Dockerfile
+    hostname: standby2
+    container_name: avalon-drills-standby2
+    init: true
+    ports:
+      - "4208:3001"
+      - "7208:6001"
+    volumes:
+      - ../../src:/avalon/src
+      - ./scripts:/avalon/scripts:ro
+      - ../../scripts:/avalon/project-scripts:ro
+      - testnet_config:/avalon/config/testnet-keys
+    environment:
+      - CONFIG_OVERLAY=/avalon/config/testnet-keys/drills-overlay.json
+      - P2P_MSG_RATE_MAX=1000
+      - HTTP_PORT=3001
+      - HTTP_HOST=0.0.0.0
+      - P2P_PORT=6001
+      - DB_NAME=avalon_standby2
+      - DB_URL=mongodb://mongodb:27017
+      - NODE_OWNER=standby2
+      - NODE_OWNER_PUB=
+      - NODE_OWNER_PRIV=
+      - PEERS=ws://bootstrap:6001
+      - LOG_LEVEL=cons
+      - NO_DISCOVERY=1
+      - MAX_PEERS=20
+      - WARMUP_ACCOUNTS=1000
+      - WARMUP_CONTENTS=0
+      - ADMIN_ALLOW_ANONYMOUS=1
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      setup:
+        condition: service_started
+    command: ["bash", "/avalon/scripts/testnet-miner.sh"]

@@ -94,11 +94,13 @@ mongo.init(async function(state) {
             mongo.fillInMemoryBlocks(() => 
                 db.collection('blocks').findOne({_id:rebuildResumeBlock-1 - (rebuildResumeBlock-1)%config.leaders},(e,b) => {
                     chain.schedule = chain.minerSchedule(b)
+                    chain.saveSchedule()
                     startRebuild(rebuildResumeBlock)
                 }),rebuildResumeBlock)
         else {
             blocks.fillInMemoryBlocks(rebuildResumeBlock)
             chain.schedule = chain.minerSchedule(blocks.read(blkScheduleStart))
+            chain.saveSchedule()
             startRebuild(rebuildResumeBlock)
         }
         return
@@ -164,15 +166,38 @@ function rebuildFrom(startBlock, rebuildStartTime) {
 }
 
 function startDaemon() {
+    // Layer S/H: leaderHealth (streaks, jail, absence) is derived state. It must
+    // exist before the schedule/active set is computed or this node would rotate
+    // jailed leaders back in and diverge from its peers.
+    chain.rebuildLeaderHealth((e, n) => {
+        if (e) logr.error('leaderHealth rebuild failed, starting with empty state', e)
+        else logr.info('leaderHealth rebuilt from ' + n + ' recent blocks')
+        startDaemonAfterLeaderHealth()
+    })
+}
+
+function startDaemonAfterLeaderHealth() {
     // start miner schedule
-    let blkScheduleStart = chain.getLatestBlock()._id - (chain.getLatestBlock()._id % config.leaders)
-    if (blocks.isOpen)
-        chain.schedule = chain.minerSchedule(blocks.read(blkScheduleStart))
-    else
-        db.collection('blocks').findOne({_id: blkScheduleStart}, function(err, block) {
-            if (err) throw err
-            chain.schedule = chain.minerSchedule(block)
-        })
+    // Layer S/H: prefer the persisted schedule to avoid restart divergence (F7).
+    // It is written atomically on every block and reloaded when the head height
+    // matches the persisted height.
+    const persisted = chain.loadSchedule && chain.loadSchedule()
+    const head = chain.getLatestBlock()
+    if (persisted && persisted.height === head._id && persisted.schedule) {
+        chain.schedule = persisted.schedule
+        logr.info('Restored persisted miner schedule for height ' + head._id)
+    } else {
+        let blkScheduleStart = head._id - (head._id % config.leaders)
+        if (blocks.isOpen)
+            chain.schedule = chain.minerSchedule(blocks.read(blkScheduleStart))
+        else
+            db.collection('blocks').findOne({_id: blkScheduleStart}, function(err, block) {
+                if (err) throw err
+                chain.schedule = chain.minerSchedule(block)
+                chain.saveSchedule()
+            })
+        if (blocks.isOpen) chain.saveSchedule()
+    }
 
     // init hot/trending
     rankings.init()
@@ -184,6 +209,20 @@ function startDaemon() {
     p2p.connect(process.env.PEERS ? process.env.PEERS.split(',') : [], true)
     // keep peer connection alive
     setTimeout(p2p.keepAlive,3000)
+
+    // Always-on halt watchdog. Normally minerWorker() is driven by addBlock(),
+    // so if every leader gives up its slot (e.g. the master→miner transition, or
+    // a restart at a halted head) or the chain stalls, nothing ever retries and
+    // it freezes for good. When the head goes stale, nudge the scheduler; the
+    // scheduled leader (ladder position 0) is the only one allowed to produce
+    // into a halted chain, so a single candidate is produced and it resumes.
+    // No-op while the head is fresh, so a healthy chain is untouched.
+    setInterval(function() {
+        const head = chain.getLatestBlock()
+        const stale = (new Date().getTime() - head.timestamp) > config.blockTime * config.leaders
+        if (stale && !p2p.recovering)
+            chain.minerWorker(head)
+    }, config.blockTime)
 
     // regularly clean up old txs from mempool
     setInterval(function() {

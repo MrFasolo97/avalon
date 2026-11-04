@@ -85,6 +85,13 @@ let config = {
             masterPub: 'dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz',
             // the master account public leader key  (irrelevant if using genesis)
             masterPubLeader: 'dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz',
+            // Testnet/drill knob: the master account owns the largest node_appr at
+            // genesis (it seeds its own balance), so it always sorts first in the
+            // canonical leader order. null (default) = master participates forever,
+            // exactly as before. A number = after that height the master leaves the
+            // rotation as soon as `leaders` non-master candidates exist (the guard
+            // makes it impossible for this to deadlock the chain).
+            masterLeaderUntil: null,
             masterNoPreloadAcc: true,
             // the maximum time drift in ms before a block is invalid
             maxDrift: 200,
@@ -177,6 +184,23 @@ let config = {
             preloadBwGrowth: 2, // x2 more time of bwGrowth
             multisig: true,
             // force finalize disabled in base config — enabled at hard fork height below
+            // Layer S/H defaults (overridden at fork heights)
+            skipRecording: false,
+            skipStrict: false,
+            skipGraceMs: 0,
+            quorumMin: 3,
+            quorumEligibility: 'activeLeaders',
+            jailMissThreshold: 30,
+            jailBlocks: 200,
+            jailBackoffMax: 4,
+            haltBreaker: false,
+            haltBreakerMs: 21000,
+            leaderStandbys: 0,
+            standbyEnabled: false,
+            canonicalLeaderOrder: false,
+            // max hold time for a future-dated block in the pending queue (plan §5.4)
+            pendingBlockMaxMs: 30000,
+
             forceFinalize: false,
             // force finalize fallback: if backoff is exhausted without quorum among
             // active leaders, fallback to force finalizing anyway.
@@ -212,9 +236,28 @@ let config = {
         // the resume; moved down from 13,925,000 while the chain is halted):
         // - forceFinalize: enables anti-fork safety net if consensus stalls
         // - consensusSigVersion: 2 (sorted keys) prevents key-ordering mismatches
+        // - Layer S: skips[] recording + warn-mode validation + deterministic ladder
         13325000: {
             forceFinalize: true,
-            consensusSigVersion: 2
+            consensusSigVersion: 2,
+            skipRecording: true,
+            skipStrict: false,
+            skipGraceMs: 500,
+            quorumMin: 3,
+            quorumEligibility: 'lastTurn',
+            jailMissThreshold: 30,
+            jailBlocks: 200,
+            jailBackoffMax: 4,
+            haltBreaker: true,
+            haltBreakerMs: 21000,
+            leaderStandbys: 5
+        },
+        // Layer H flag day: strict skips validation + standby promotion.
+        // Effective rotation change applies at the first epoch boundary >= H_standby.
+        13400000: {
+            skipStrict: true,
+            standbyEnabled: true,
+            canonicalLeaderOrder: true
         }
     },
     read: (blockNum) => {
@@ -256,5 +299,37 @@ let config = {
         return finalConfig
     }
 } 
+
+// Optional runtime config overlay.
+//
+// The docker testnet / drill suite needs a slightly different fork schedule
+// (Layer S/H active from block 10, extra master-DAO txs, more leader votes)
+// than mainnet. It used to get it by rewriting this file at container start —
+// which is destructive when src/ is bind-mounted (it edited the developer's
+// working copy and could leak testnet-only fork heights into mainnet runs).
+//
+// Instead the testnet writes a JSON overlay and points CONFIG_OVERLAY at it.
+// Unset (production) => nothing is read, behaviour is bit-identical.
+const applyConfigOverlay = () => {
+    if (!process.env.CONFIG_OVERLAY) return
+    const fs = require('fs')
+    try {
+        // Fail loudly: a node missing the overlay would run a different fork
+        // schedule from its peers (silent consensus divergence).
+        if (!fs.existsSync(process.env.CONFIG_OVERLAY))
+            throw new Error('CONFIG_OVERLAY is set but missing: ' + process.env.CONFIG_OVERLAY)
+        const overlay = JSON.parse(fs.readFileSync(process.env.CONFIG_OVERLAY, 'utf8'))
+        if (overlay && overlay.history && typeof overlay.history === 'object')
+            for (const height of Object.keys(overlay.history)) {
+                const base = config.history[height] || {}
+                config.history[height] = Object.assign({}, base, overlay.history[height])
+            }
+    } catch (e) {
+        console.error('Failed to load CONFIG_OVERLAY ' + process.env.CONFIG_OVERLAY + ': ' + e.message)
+        process.exit(1)
+    }
+}
+
+applyConfigOverlay()
 
 module.exports = config

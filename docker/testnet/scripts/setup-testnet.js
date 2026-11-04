@@ -5,7 +5,11 @@ const bs58 = require('base-x')('123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnop
 const fs = require('fs')
 const { execSync } = require('child_process')
 
-const MINERS = 3
+const MINERS = parseInt(process.env.TESTNET_MINERS || '3', 10)
+// Optional explicit account list (drills use 5 leaders + 2 standbys; the
+// container names are not necessarily miner<N>).
+const NAMES = (process.env.TESTNET_MINER_NAMES || '')
+    .split(',').map(s => s.trim()).filter(Boolean)
 const API = 'http://' + (process.env.BOOTSTRAP_HOST || 'localhost') + ':' + (process.env.HTTP_PORT || 3001)
 const MASTER = process.env.NODE_OWNER || 'dtube'
 const PRIV = process.env.NODE_OWNER_PRIV
@@ -67,8 +71,8 @@ async function main() {
 
     const miners = []
 
-    for (let i = 1; i <= MINERS; i++) {
-        const name = `miner${i}`
+    for (let i = 0; i < (NAMES.length || MINERS); i++) {
+        const name = NAMES.length ? NAMES[i] : `miner${i + 1}`
         const ws = `ws://${name}:6001`
         const kp = genKeypair()
         miners.push({ name, ...kp, ws })

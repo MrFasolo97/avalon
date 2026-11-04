@@ -837,8 +837,40 @@ Estimated effort: **S0+S1 ≈ 10–14 engineering days** (incl. tests), **H1+H2 
 **testnet soak ≈ 5 days**. Critical path: `leaderHealth` + `chain.js` ladder, then the
 quorum unification, then the standby set.
 
-`eslint` baseline is `1 pre-existing error` (`src/http/auth/index.js:86`), 244 warnings — keep
-it unchanged.
+`eslint` baseline is now **0 errors** (the `src/http/auth/index.js` `no-lonely-if` was fixed);
+`npm test` runs 20 assert-only suites, all green.
+
+### 9.1 Implementation status (this branch)
+
+Implemented and unit-tested (`src/`, `test/`):
+
+* Layer S/H data: `Block.skips`, `leaderLadder`, `checkSkipAttestation`, canonical
+  `activeLeaderSet`/`standbyLeaderSet`, epoch-schedule persistence (F7), `leaderHealth`
+  (streaks, jail state machine, heartbeat, absence), deterministic block rank, `FF_FETCH`/
+  `FF_BLOCK`, monotone force-finalize votes (§5.5.3), pending-block queue, plan-labelled
+  `pendingBlockMaxMs`.
+* Quorum: one helper `consensusQuorum.blockQuorum(n, config.quorumMin)` used by block
+  consensus, force-finalize and the halt breaker; `config.quorumMin` is no longer dead.
+* Vote freshness widened to `±(consensusRounds+2)·blockTime` (§5.4).
+* S0′ shadow: vote ledger, crash-safe vote state, QC-on-the-wire (`h` + `justify`),
+  observer/backup finalize gate.
+* Observability: `/consensus`, `/debug/statehash`, additive `/schedule`, `/leader`,
+  `/allminers`, `/block` apidoc; `leaderStats` mirrors jail state; `scripts/heartbeat.js`.
+
+Still open before **testnet**: run the G1–G12 drills end-to-end (G11 must pass before the
+halt breaker is trusted), fix whatever the run surfaces.
+
+Still open before **mainnet**:
+
+* **S1′ enforcement is not shippable yet.** Two §4.2 preconditions remain: a
+  deterministic, chain-derived `eligible(h)` (**F2** — today `eligibleLeaders()` still
+  walks each node's local `recentBlocks`, so the denominator can differ by a block
+  between nodes) and "one candidate per `(height, phase)` per signer" (the protocol
+  still votes on every candidate at a height). Both are Layer S/H proper.
+* **Layer H flag day** (`H_strict = H_standby = 13 400 000`): version census, 1 000-block
+  schedule-agreement + warn-mode-clean gate, G1–G12 green, pre-H DB/`blocks.bson`
+  snapshot, operators coordinated. Freeze the heights before publishing.
+* Operator docs: `mainnet-deployment-and-rollback` (§9.15) is still missing.
 
 ---
 

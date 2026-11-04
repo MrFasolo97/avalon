@@ -1,0 +1,39 @@
+# Overlay for drill G12: run the drills testnet with halt breaker disabled.
+#
+#   docker compose -p avalon-drills \
+#     -f docker-compose.yml \
+#     -f docker-compose.drills.yml \
+#     -f docker-compose.drills-halt-breaker-off.yml up -d --build
+
+services:
+  bootstrap:
+    environment:
+      - HALT_BREAKER=0
+
+  miner1:
+    environment:
+      - HALT_BREAKER=0
+
+  miner2:
+    environment:
+      - HALT_BREAKER=0
+
+  miner3:
+    environment:
+      - HALT_BREAKER=0
+
+  miner4:
+    environment:
+      - HALT_BREAKER=0
+
+  miner5:
+    environment:
+      - HALT_BREAKER=0
+
+  standby1:
+    environment:
+      - HALT_BREAKER=0
+
+  standby2:
+    environment:
+      - HALT_BREAKER=0

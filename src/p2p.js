@@ -9,7 +9,7 @@ const max_recover_attempts = 25
 // per-socket throttle for the message types that trigger expensive local work
 // (block revalidation, disk reads, consensus rounds)
 const msg_rate_window = 1000
-const msg_rate_max = 40
+const msg_rate_max = parseInt(process.env.P2P_MSG_RATE_MAX || '40', 10)
 const history_interval = 10000
 const keep_history_for = 20000
 const p2p_port = process.env.P2P_PORT || default_port
@@ -51,7 +51,9 @@ const MessageType = {
     NEW_BLOCK: 4,
     NEW_TX: 5,
     BLOCK_CONF_ROUND: 6,
-    FORCE_FINALIZE: 7
+    FORCE_FINALIZE: 7,
+    FF_FETCH: 8,
+    FF_BLOCK: 9
 }
 
 let p2p = {
@@ -73,6 +75,12 @@ let p2p = {
         setTimeout(() => {
             p2p.recover()
             setInterval(() => p2p.refresh(), replay_interval)
+            // Keep the peers' head_block fresh: node_status is otherwise only
+            // updated at handshake, so `refresh()`/recovery would compare against
+            // a stale head and never notice a small (1-block) gap after a
+            // partition heal. We reuse the socket's challenge hash as the random
+            // so the reply verifies against the stored challenge.
+            setInterval(() => p2p.refreshStatuses(), 5000)
         }, replay_interval)
         if (!process.env.NO_DISCOVERY || process.env.NO_DISCOVERY === '0' || process.env.NO_DISCOVERY === 0) {
             setInterval(function(){p2p.discoveryWorker()}, discovery_interval)
@@ -134,11 +142,21 @@ let p2p = {
                     logr.debug('dns lookup failed for '+address)
                     continue
                 }
-            for (let s = 0; s < p2p.sockets.length; s++)
-                if (p2p.sockets[s]._socket.remoteAddress.replace('::ffff:','') === address && p2p.sockets[s]._socket.remotePort === port) {
+            for (let s = 0; s < p2p.sockets.length; s++) {
+                const sock = p2p.sockets[s]
+                // Only an OPEN, live socket counts as connected. A socket left
+                // behind by a network partition (half-open / already closing) has
+                // no `_socket` and used to match here anyway — which both threw
+                // and made keepAlive think the peer was still connected, so it
+                // never reconnected after `docker network disconnect`.
+                if (sock.readyState !== WebSocket.OPEN || !sock._socket) continue
+                if (sock._socket.remoteAddress
+                && sock._socket.remoteAddress.replace('::ffff:','') === address
+                && sock._socket.remotePort === port) {
                     connected = true
                     break
                 }
+            }
             if (!connected)
                 toConnect.push(peers[p])
         }
@@ -181,6 +199,7 @@ let p2p = {
         logr.debug('Handshaking new peer', ws.url || ws._socket.remoteAddress+':'+ws._socket.remotePort)
         let random = randomBytes(config.randomBytesLength).toString('hex')
         ws.challengeHash = random
+        ws.lastStatusAt = Date.now()
         ws.pendingDisconnect = setTimeout(function() {
             for (let i = 0; i < p2p.sockets.length; i++)
                 if (p2p.sockets[i].challengeHash === random) {
@@ -247,9 +266,13 @@ let p2p = {
                     return
                 }
 
-                p2p.sockets[p2p.sockets.indexOf(ws)].node_status = {
-                    nodeId: message.d.nodeId
-                }
+                // Preserve the rest of the recorded status: replacing it outright
+                // dropped head_block/origin_block, so a periodic status probe left
+                // the peer invisible to refresh()/recover() (no origin_block).
+                let knownStatus = p2p.sockets[p2p.sockets.indexOf(ws)].node_status
+                if (!knownStatus) knownStatus = {}
+                knownStatus.nodeId = message.d.nodeId
+                p2p.sockets[p2p.sockets.indexOf(ws)].node_status = knownStatus
 
                 let sign = secp256k1.ecdsaSign(Buffer.from(message.d.random, 'hex'), bs58.decode(p2p.nodeId.priv))
                 sign = bs58.encode(sign.signature)
@@ -301,6 +324,7 @@ let p2p = {
                     clearTimeout(p2p.sockets[p2p.sockets.indexOf(ws)].pendingDisconnect)
                     delete message.d.sign
                     p2p.sockets[p2p.sockets.indexOf(ws)].node_status = message.d
+                    p2p.sockets[p2p.sockets.indexOf(ws)].lastStatusAt = Date.now()
                 } catch (error) {
                     logr.error('Error during NODE_STATUS verification', error)
                 }
@@ -394,10 +418,16 @@ let p2p = {
                 // it should come from one of the elected leaders, so let's verify signature
                 if (p2p.recovering) return
                 if (!message.s || !message.s.s || !message.s.n) return
+                // Vote freshness: ±(consensusRounds+2)·blockTime instead of the old
+                // ±2·blockTime (plan §5.4). Consensus votes are not block content, so a
+                // wider window removes clock-skew-induced vote dropping without weakening
+                // anti-replay, which is provided by the `processed` signature dedupe below
+                // and by the per-(height, phase) distinct-signer counting.
+                const voteWindow = (config.consensusRounds + 2) * config.blockTime
                 if (!message.d || !Number.isFinite(message.d.ts) ||
                     !Number.isInteger(message.d.ts) || message.d.ts <= 0 ||
-                    message.d.ts + 2*config.blockTime < new Date().getTime() ||
-                    message.d.ts - 2*config.blockTime > new Date().getTime()) return
+                    message.d.ts + voteWindow < new Date().getTime() ||
+                    message.d.ts - voteWindow > new Date().getTime()) return
 
                 logr.cons(message.s.n+' U-R'+message.d.r)
 
@@ -463,6 +493,46 @@ let p2p = {
                     consensus.handleForceFinalizeProposal(message)
                 })
                 break
+
+            case MessageType.FF_FETCH:
+                // A peer needs a specific candidate block during force-finalize.
+                // We only serve blocks we have locally; no signature required
+                // (the block itself is signed and will be validated on arrival).
+                if (typeof message.d !== 'object' || !Number.isInteger(message.d.height)) break
+                const ffHashes = Array.isArray(message.d.hashes) ? message.d.hashes : [message.d.hash]
+                for (const ffHash of ffHashes) {
+                    if (typeof ffHash !== 'string') continue
+                    const found = consensus.findPossBlockByHash && consensus.findPossBlockByHash(ffHash)
+                    if (found) {
+                        p2p.sendJSON(ws, { t: MessageType.FF_BLOCK, d: found.block })
+                        continue
+                    }
+                    // Fall back to disk if we have it and it matches the height
+                    if (!blocks.isOpen) continue
+                    try {
+                        const fromDisk = blocks.read(message.d.height)
+                        if (fromDisk && fromDisk.hash === ffHash)
+                            p2p.sendJSON(ws, { t: MessageType.FF_BLOCK, d: fromDisk })
+                    } catch (e) {
+                        // block not stored locally
+                    }
+                }
+                break
+
+            case MessageType.FF_BLOCK:
+                // Received a candidate block requested via FF_FETCH. Treat it like
+                // a NEW_BLOCK for the purpose of precommit / validation.
+                if (!message.d || !message.d.hash) break
+                if (p2p.recovering) {
+                    // If we are recovering, queue it as a recovered block if the
+                    // height is useful; otherwise let normal recovery handle it.
+                    if (message.d._id > chain.getLatestBlock()._id)
+                        p2p.recoveredBlocks[message.d._id] = message.d
+                    break
+                }
+                if (message.d._id === chain.getLatestBlock()._id + 1)
+                    consensus.round(0, message.d)
+                break
             }
         })
     },
@@ -497,15 +567,53 @@ let p2p = {
     },
     refresh: (force = false) => {
         if (p2p.recovering && !force) return
+        const head = chain.getLatestBlock()._id
+        if (p2p.lastRefreshHead !== head) {
+            p2p.lastRefreshHead = head
+            p2p.headChangedAt = Date.now()
+        }
+        // A node whose head has not moved for a few block times is STALLED:
+        // normal gossip would have advanced it. Only then is a small gap worth a
+        // recovery. Previously recovery required a peer >10 blocks ahead, so a
+        // node stuck 1 block behind (e.g. after a partition heal) never
+        // recovered and the whole chain stayed frozen behind it.
+        const stalled = (Date.now() - (p2p.headChangedAt || Date.now())) > 4 * config.blockTime
         for (let i = 0; i < p2p.sockets.length; i++)
-            if (p2p.sockets[i].node_status 
-            && p2p.sockets[i].node_status.head_block > chain.getLatestBlock()._id + 10
+            if (p2p.sockets[i].node_status
             && p2p.sockets[i].node_status.origin_block === config.originHash) {
-                logr.info('Catching up with network, head block: ' + p2p.sockets[i].node_status.head_block)
-                p2p.recovering = chain.getLatestBlock()._id
-                p2p.recover()
-                break
+                const ahead = p2p.sockets[i].node_status.head_block
+                if (ahead > head + 10 || (ahead > head && stalled)) {
+                    logr.info('Catching up with network, head block: ' + ahead
+                        + (ahead > head + 10 ? '' : ' (local head stalled at ' + head + ')'))
+                    p2p.recovering = head
+                    p2p.recover()
+                    break
+                }
             }
+    },
+    // Ask every peer for a fresh NODE_STATUS so `node_status.head_block` is not a
+    // stale handshake snapshot. The random is the socket's challenge hash, which
+    // is exactly what the peer will sign, so the reply verifies.
+    refreshStatuses: () => {
+        const now = Date.now()
+        for (let i = 0; i < p2p.sockets.length; i++) {
+            const ws = p2p.sockets[i]
+            if (!ws.challengeHash) continue
+            // A socket whose peer has not answered a status probe for a while is
+            // dead — typically a half-open TCP connection left behind by a
+            // network partition. Its readyState stays OPEN, so keepAlive still
+            // considers the peer connected and never reconnects. Close it so
+            // closeConnection() removes it and keepAlive reconnects.
+            if (ws.lastStatusAt && now - ws.lastStatusAt > 20000) {
+                logr.warn('Peer did not answer status probes: closing a dead socket')
+                ws.close()
+                continue
+            }
+            p2p.sendJSON(ws, {
+                t: MessageType.QUERY_NODE_STATUS,
+                d: { nodeId: p2p.nodeId.pub, random: ws.challengeHash }
+            })
+        }
     },
     errorHandler: (ws) => {
         ws.on('close', () => p2p.closeConnection(ws))

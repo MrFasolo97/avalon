@@ -1,0 +1,54 @@
+# S0' shadow-mode run (doc/consensus-single-quorum-and-locks.en.md §4)
+#
+# Adds QC_SHADOW=1 to every node and nothing else: no rule changes, no block
+# changes. Meant to be layered on the stock testnet:
+#
+#   docker compose -p avalon-qc \
+#     -f docker/testnet/docker-compose.yml \
+#     -f docker/testnet/docker-compose.qc-shadow.yml up -d --build
+#
+# Host ports are dropped (`!reset`) so this can run next to another testnet.
+# `init: true` gives every container a real PID 1: without it mongod leaves the
+# reaped children as zombies and `docker stop` then fails ("PID is zombie and
+# can not be killed"), which makes `down -v` unusable for a clean restart.
+# Read the counters with:
+#   docker logs avalon-qc-bootstrap 2>&1 | grep QC-
+
+x-qc-shadow: &qc-shadow
+  - QC_SHADOW=1
+  - VOTE_STATE_PATH=/avalon/state/vote_state.json
+
+services:
+  mongodb:
+    container_name: avalon-qc-mongodb
+    ports: !reset []
+    init: true
+
+  bootstrap:
+    container_name: avalon-qc-bootstrap
+    ports: !reset []
+    init: true
+    environment: *qc-shadow
+
+  setup:
+    container_name: avalon-qc-setup
+    init: true
+    environment: *qc-shadow
+
+  miner1:
+    container_name: avalon-qc-miner1
+    ports: !reset []
+    init: true
+    environment: *qc-shadow
+
+  miner2:
+    container_name: avalon-qc-miner2
+    ports: !reset []
+    init: true
+    environment: *qc-shadow
+
+  miner3:
+    container_name: avalon-qc-miner3
+    ports: !reset []
+    init: true
+    environment: *qc-shadow

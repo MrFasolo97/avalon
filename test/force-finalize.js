@@ -115,7 +115,6 @@ function simulateRetry(candidates, failingHashes) {
 
 // Test 8: Candidates at different heights are not mixed
 {
-    const h99 = [makeBlock(99, 1000, 'a')]
     const h100 = [makeBlock(100, 2000, 'b'), makeBlock(100, 1000, 'c')]
     const sorted100 = deterministicSort(h100)
     assert.strictEqual(sorted100[0].block._id, 100, 'only height 100 candidates')
@@ -125,7 +124,7 @@ function simulateRetry(candidates, failingHashes) {
 
 // Test 9: BSON truncation boundary logic
 {
-    function simulateTruncation(oldHeight, removeCount) {
+    const simulateTruncation = (oldHeight, removeCount) => {
         const newHeight = oldHeight - removeCount
         if (newHeight < 0) return { error: 'negative height' }
         return { newHeight, removed: removeCount, kept: newHeight + 1 }
@@ -138,7 +137,7 @@ function simulateRetry(candidates, failingHashes) {
 
     // Safety: cumulative cap prevents runaway truncation
     const MAX_TOTAL_REMOVE = 30
-    function checkCumulativeCap(totalRemoved, toRemove) {
+    const checkCumulativeCap = (totalRemoved, toRemove) => {
         return (totalRemoved + toRemove) <= MAX_TOTAL_REMOVE
     }
     assert.strictEqual(checkCumulativeCap(25, 5), true, 'within cap')
@@ -169,9 +168,7 @@ function simulateRetry(candidates, failingHashes) {
 
 // Test 11: Quorum threshold calculation
 {
-    function getQuorumThreshold(leaderCount) {
-        return Math.ceil(leaderCount * 2 / 3)
-    }
+    const getQuorumThreshold = (leaderCount) => Math.ceil(leaderCount * 2 / 3)
     assert.strictEqual(getQuorumThreshold(1), 1, '1 leader: quorum 1')
     assert.strictEqual(getQuorumThreshold(3), 2, '3 leaders: quorum 2')
     assert.strictEqual(getQuorumThreshold(4), 3, '4 leaders: quorum 3')
@@ -240,17 +237,16 @@ function simulateRetry(candidates, failingHashes) {
 // Test 16: Respondents from non-leaders are ignored
 {
     const activeLeaders = ['leader1', 'leader2', 'leader3']
-    function isActiveLeader(name) { return activeLeaders.includes(name) }
+    const isActiveLeader = (name) => activeLeaders.includes(name)
 
     const respondents = {}
     const rawResponses = [
         ['leader1', 'X'], ['leader2', 'X'], ['leader3', 'Y'],
         ['attacker', 'X'], ['random', 'Z']
     ]
-    for (const [name, hash] of rawResponses) {
+    for (const [name, hash] of rawResponses)
         if (isActiveLeader(name))
             respondents[name] = hash
-    }
 
     assert.strictEqual(Object.keys(respondents).length, 3, 'only active leaders counted')
     assert.strictEqual(respondents['attacker'], undefined, 'non-leader ignored')

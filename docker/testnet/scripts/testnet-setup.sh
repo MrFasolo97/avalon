@@ -36,6 +36,14 @@ fi
 
 # Run the setup script using the bootstrap's CLI (need node + src)
 cd /avalon
+
+# The CLI (node src/cli.js) loads src/config.js at block 0, so it needs the same
+# testnet overlay the nodes use — otherwise masterDaoTxs/leaderMaxVotes differ
+# and the vote-leader txs the setup sends are rejected. Writing it here is
+# idempotent (atomic write, same content as the bootstrap writes).
+export CONFIG_OVERLAY="${CONFIG_OVERLAY:-/avalon/config/testnet-keys/testnet-overlay.json}"
+node /avalon/scripts/patch-config-testnet.js
+
 node /avalon/scripts/setup-testnet.js
 
 echo "=== Setup Complete ==="

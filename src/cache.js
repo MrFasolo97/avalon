@@ -244,7 +244,18 @@ let cache = {
             executions.push(function(callback) {
                 let insert = insertArr[i]
                 db.collection(insert.collection).insertOne(insert.document, function(err) {
-                    if (err) throw err
+                    if (err) {
+                        // A block can legitimately be written twice (recovery racing
+                        // local mining, or a re-applied block after a rollback): the
+                        // document is already stored, which is fine. `throw` here
+                        // crashed the whole node on a duplicate key (E11000) during
+                        // restart-heavy runs.
+                        if (err.code === 11000) {
+                            logr.warn('Duplicate insert ignored for ' + insert.collection + ' ' + (insert.document && insert.document._id))
+                            return callback()
+                        }
+                        throw err
+                    }
                     callback()
                 })
             })

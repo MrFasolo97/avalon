@@ -1,3 +1,5 @@
+const leaderHealth = require('../../leaderHealth')
+
 module.exports = {
     init: (app) => {
         /**
@@ -19,6 +21,10 @@ module.exports = {
          * @apiSuccess {Integer} missed Number of blocks missed
          * @apiSuccess {Integer} voters Number of voters for the leader
          * @apiSuccess {Integer} last Block number of last block produced
+         * @apiSuccess {Integer} streak Consecutive proven missed scheduled turns
+         * @apiSuccess {Boolean} jailed Whether the leader is soft-jailed
+         * @apiSuccess {Integer} jailUntil Block height the jail expires at
+         * @apiSuccess {Integer} jailLevel Jail backoff level
          * 
          * @apiError {String} error The error message
          */
@@ -30,6 +36,7 @@ module.exports = {
                 if (!acc) return res.status(404).send({error: 'account does not exist'})
                 if (!leaderStats.leaders[acc.name] || (!acc.pub_leader && !leaderStats.leaders[acc.name].last))
                     return res.status(404).send({error: 'account does not have any leader-related activities'})
+                const lh = leaderHealth.leaders[acc.name]
                 res.send({
                     name: acc.name,
                     balance: acc.balance,
@@ -42,7 +49,11 @@ module.exports = {
                     produced: leaderStats.leaders[acc.name].produced,
                     missed: leaderStats.leaders[acc.name].missed,
                     voters: leaderStats.leaders[acc.name].voters,
-                    last: leaderStats.leaders[acc.name].last
+                    last: leaderStats.leaders[acc.name].last,
+                    streak: lh ? lh.streak : 0,
+                    jailed: leaderHealth.isJailed(acc.name, chain.getLatestBlock()._id + 1),
+                    jailUntil: lh && lh.jail ? lh.jail.untilBlock : -1,
+                    jailLevel: lh && lh.jail ? lh.jail.level : 0
                 })
             })
         })

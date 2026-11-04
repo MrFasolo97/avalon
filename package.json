@@ -5,7 +5,10 @@
   "scripts": {
     "start": "node src/main.js",
     "cli": "node src/cli.js",
-    "lint": "eslint ./src/*",
+    "test": "node test/run.js",
+    "test:unit": "node test/run.js",
+    "lint": "eslint ./src ./test",
+    "lint:src": "eslint ./src",
     "apidoc": "apidoc -i src/http -o apidoc"
   },
   "dependencies": {

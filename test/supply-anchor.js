@@ -268,7 +268,7 @@ test('main.js restores then re-scans the accumulator (self-healing)', () => {
 
 test('config.js anchor keys are filtered out of allowedKeys', () => {
     const c = src('config.js')
-    assert.ok(c.includes("k !== 'initialSupply' && k !== 'initialSupplyBlock'"))
+    assert.ok(c.includes('k !== \'initialSupply\' && k !== \'initialSupplyBlock\''))
 })
 
 test('out-of-scope consensus code is untouched (fork #2 territory)', () => {

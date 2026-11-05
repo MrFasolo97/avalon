@@ -389,6 +389,11 @@ let cache = {
                 {pub_leader: {$exists:true}},
                 {pub_leader: {$ne: ''}}
             ]
+        }, {
+            // deterministic order (F6 defense-in-depth): generateLeaders() sorts
+            // canonically anyway, but a stable cache.leaders order means every
+            // rebuild yields the same iteration order too.
+            sort: { node_appr: -1, name: 1 }
         }).toArray((e,accs) => {
             if (e) throw e
             for (let i = 0; i < accs.length; i++) {

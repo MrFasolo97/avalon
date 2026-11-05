@@ -21,6 +21,7 @@ const tests = [
     'skip-attestation.js',
     'events.js',
     'schedule-determinism.js',
+    'consensus-invariants.js',
     'audit-fixes.js',
     'force-finalize.js',
     'pending-blocks.js',

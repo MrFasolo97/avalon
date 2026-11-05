@@ -190,7 +190,11 @@ function startDaemonAfterLeaderHealth() {
     setInterval(function() {
         const head = chain.getLatestBlock()
         const stale = (new Date().getTime() - head.timestamp) > config.blockTime * config.leaders
-        if (stale && !p2p.recovering)
+        // Do NOT nudge while a worker timer is already scheduled: the watchdog
+        // runs every blockTime, and a staggered backup waits pos*blockTime, so
+        // re-nudging would clear its timer before it fires and the backup would
+        // never mine (the scheduled leader alone kept the chain alive).
+        if (stale && !p2p.recovering && !chain.workerPending)
             chain.minerWorker(head)
     }, config.blockTime)
 

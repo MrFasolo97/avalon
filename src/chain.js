@@ -42,6 +42,8 @@ let chain = {
     restoredBlocks: 0,
     schedule: null,
     recentBlocks: [],
+    worker: null,
+    workerPending: false,
     recentTxs: {},
     getNewKeyPair: () => {
         let privKey, pubKey
@@ -314,6 +316,7 @@ let chain = {
     minerWorker: (block) => {
         if (p2p.recovering) return
         clearTimeout(chain.worker)
+        chain.workerPending = false
 
         if (chain.schedule.shuffle.length === 0) {
             logr.fatal('All leaders gave up their stake? Chain is over')
@@ -367,7 +370,9 @@ let chain = {
                 mineInMs = Math.max(mineInMs, 20)
             }
         }
+        chain.workerPending = true
         chain.worker = setTimeout(function(){
+            chain.workerPending = false
             // One proposer per round: a BACKUP proposes only if no candidate block
             // for this height has been seen yet — i.e. the leader's (and earlier
             // backups') slots are proven empty. The scheduled leader (ladder

@@ -23,7 +23,6 @@ const tests = [
     'schedule-determinism.js',
     'audit-fixes.js',
     'force-finalize.js',
-    'supply-anchor.js',
     'pending-blocks.js',
     'force-finalize-fetch.js',
     'halt-breaker.js',

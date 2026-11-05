@@ -253,7 +253,7 @@ verify_statehash_match() {
 # block hash there — the actual fork evidence.
 verify_chain_agreement() {
     local containers=("$@")
-    local attempts="${AGREEMENT_ATTEMPTS:-30}"
+    local attempts="${AGREEMENT_ATTEMPTS:-90}"
     local a c h minh
     for a in $(seq 1 "$attempts"); do
         minh=""

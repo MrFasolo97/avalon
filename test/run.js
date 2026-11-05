@@ -20,6 +20,7 @@ const tests = [
     'leader-health.js',
     'skip-attestation.js',
     'events.js',
+    'schedule-determinism.js',
     'audit-fixes.js',
     'force-finalize.js',
     'supply-anchor.js',

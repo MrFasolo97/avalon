@@ -493,26 +493,46 @@ Two variants were implemented in `src/consensus.js`, both behind
    reached the precommit quorum** (`bestCommittableCandidate`), so every honest
    node commits the same hash. The ledger is pruned below `head - 3·leaders`.
 
-**Drill result:** both variants leave the chain **unable to recover**
-(G1/G8/G10/G11 stall). Variant 2 is revealing: the log shows the producer itself
-refusing its own precommit —
-`one-candidate: not the best at 427, skip precommit` — because a competing
-candidate (a backup, or a node whose schedule/rank differs) ranked better, so the
-height never reached a precommit quorum. This is the freeze of §4.2 again, and it
-shows that "vote the best" is not enough.
+**First drill result (before the F6 / one-proposer fixes):** both variants left the
+chain unable to recover (G1/G8/G10/G11 stalled). The log showed the producer itself
+refusing its own precommit — `one-candidate: not the best at 427, skip precommit` —
+because a competing candidate ranked better, so the height never reached a precommit
+quorum.
 
-**Conclusion:** neither gate is shippable until the protocol guarantees a
-**singleton candidate set per height**, which needs two things first:
+**The two prerequisites are now implemented:**
 
-- **deterministic schedule agreement** across nodes (F6/F7) — otherwise two nodes
-  disagree on who the round leader is and produce different blocks; and
-- a real **one-proposer-per-round** rule: only the round leader proposes a block;
-  backups do **not** propose at the same height (they only take over once the
-  leader's slot is proven empty).
+- **Deterministic schedule (F6).** `chain.generateLeaders()` orders by
+  `(node_appr desc, name asc)`; the missing name tie-break left equal-approval
+  entries in cache/Mongo insertion order, so `minerSchedule()` built a different
+  shuffle on each node. Covered by `test/schedule-determinism.js` (insertion-order
+  independent).
+- **One proposer per round.** In `chain.minerWorker()` a **backup** proposes only if
+  no candidate block for that height has been seen yet (the leader's and earlier
+  backups' slots are proven empty); the **scheduled leader always proposes**.
 
-With those, the candidate set at a height is a singleton and INV-1 holds with no
-vote gymnastics. Until then the gate stays **opt-in and default off**
-(`docker/testnet/docker-compose.drills-single-vote.yml` exists only to reproduce
-the experiment). The **practical** fork observed in G10/G11 was already fixed by
-the deterministic `eligibleLeaders()` (F2); the formal INV-1 guarantee remains
-future work on top of the two items above.
+**Halt recovery, gate OFF (the shipping config).** A third fix — **halt stagger** —
+makes G10/G11 reliable: instead of the backups *giving up* when the head is stale
+(which froze the chain forever whenever the scheduled leader was down), they try in a
+staggered window (`pos·blockTime`) and the one-proposer check makes later ones yield
+once an earlier one produced. **G10 and G11 both PASS with the gate OFF.**
+
+**Drill result with the gate ON.** **G1, G7, G8 PASS** (normal operation, collisions,
+asymmetric force-finalize). **G10/G11 still FAIL**, and the reason is fundamental,
+not a leftover bug: halt recovery *requires* the backup fallback (a leader can be
+down, so a backup must be able to propose at that height), while single-vote *forbids*
+a signer from moving to a different candidate once it precommitted. Under latency two
+backups can both propose, nodes precommit different "best" candidates, and
+single-vote can no longer converge. A single-vote protocol needs a **view-change /
+round-election** mechanism (Tendermint-style) to keep exactly one proposer per round —
+a redesign, not a tweak.
+
+**The halt breaker already follows the rule.** `runHaltBreaker()` sorts candidates by
+`chain.compareBlockRank`, every node votes `candidates[0]` and it requires unanimity —
+already "one candidate, one proposer".
+
+**Conclusion.** The gate stays **opt-in and default off**
+(`docker/testnet/docker-compose.drills-single-vote.yml` reproduces the experiment).
+The **F6, one-proposer and halt-stagger fixes are safe and always-on** — they make the
+schedule deterministic, reduce duplicate proposals and make halt recovery reliable.
+The practical fork in G10/G11 is already fixed by `eligibleLeaders()` (F2) with the
+gate OFF.

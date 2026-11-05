@@ -344,30 +344,43 @@ let chain = {
             // going to produce instead of us, so giving up the slot here (the D3
             // fix for a healthy chain) would freeze it forever. Mine anyway.
             const chainHalted = (new Date().getTime() - block.timestamp) > config.blockTime * config.leaders
-            // When the chain is halted the ladder timing is meaningless (every
-            // position is already "due"), so if every backup mined we would
-            // scatter the vote across many candidates at the same height and
-            // freeze on a split. Only the SCHEDULED leader (ladder position 0)
-            // may produce into a halted chain; backups give up the slot. If the
-            // scheduled leader is down the chain stays halted (safe: halt rather
-            // than fork) until it — or the operator — brings it back.
-            if (pos > 0 && chainHalted) {
-                logr.debug('Chain halted and we are a backup (pos ' + pos + '): giving up the slot to avoid a candidate split')
-                return
-            }
-            if (othersProducing && !chainHalted) {
+            if (chainHalted) {
+                // Head is old: the ladder timing is meaningless (every slot is
+                // already "due"). Instead of making the backups give up — which
+                // froze the chain forever whenever the scheduled leader was down
+                // — stagger them by position (pos*blockTime from now) and let the
+                // one-proposer check in the timer callback make later backups
+                // yield once an earlier one produced. That keeps ONE candidate per
+                // round (no scatter) while letting a backup take over when the
+                // scheduled leader is absent.
+                mineInMs = 20 + pos * config.blockTime
+                logr.warn('Chain halted (head is old): '
+                    + (pos === 0 ? 'scheduled leader' : 'backup pos ' + pos) + ' will try to mine')
+            } else if (othersProducing) {
                 logr.warn('Slow performance detected, will not try to mine next block')
                 return
+            } else {
+                logr.warn('Slow performance detected and no other leader is producing: mining anyway')
+                // keep the computed delay: it lands the block exactly on
+                // prev.timestamp + blockTime. Clamping to "now" would produce a
+                // block that is too early and be rejected by validation.
+                mineInMs = Math.max(mineInMs, 20)
             }
-            logr.warn(chainHalted
-                ? 'Chain appears halted (head is old): scheduled leader mining anyway'
-                : 'Slow performance detected and no other leader is producing: mining anyway')
-            // keep the computed delay: it lands the block exactly on
-            // prev.timestamp + blockTime. Clamping to "now" would produce a
-            // block that is too early and be rejected by validation.
-            mineInMs = Math.max(mineInMs, 20)
         }
         chain.worker = setTimeout(function(){
+            // One proposer per round: a BACKUP proposes only if no candidate block
+            // for this height has been seen yet — i.e. the leader's (and earlier
+            // backups') slots are proven empty. The scheduled leader (ladder
+            // position 0) always proposes. This stops a backup from adding a
+            // second candidate for a height the leader already filled, which is
+            // what makes strict single-vote freeze.
+            const candidateSeen = pos > 0 && consensus.possBlocks.some(function(pb) {
+                return pb && pb.block && pb.block._id === height
+            })
+            if (candidateSeen) {
+                logr.debug('one-proposer: candidate for ' + height + ' already seen; backup pos ' + pos + ' yields')
+                return
+            }
             chain.mineBlock(function(error, finalBlock) {
                 if (error)
                     logr.warn('miner worker trying to mine but couldnt', finalBlock)
@@ -1070,8 +1083,17 @@ let chain = {
                 leaderDetails.ws = leader.json.node.ws
             leaders.push(leaderDetails)
         })
+        // Canonical, deterministic ordering: approval descending, then name
+        // ascending. The name tie-break is essential (F6): equal node_appr
+        // entries previously kept the input order (cache / Mongo insertion
+        // order), which differs between nodes and makes minerSchedule() build a
+        // different shuffle on each one — nodes then disagree on who the round
+        // leader is and produce different blocks.
         leaders = leaders.sort(function(a,b) {
-            return b.node_appr - a.node_appr
+            if (b.node_appr !== a.node_appr) return b.node_appr - a.node_appr
+            if (a.name < b.name) return -1
+            if (a.name > b.name) return 1
+            return 0
         })
         return leaders.slice(start, limit)
     },

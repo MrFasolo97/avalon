@@ -870,6 +870,15 @@ let chain = {
         return { ok: true }
     },
 
+    // View-change: the round (view) of a candidate is the ladder position of its
+    // proposer. Round 0 = scheduled leader, 1.. = backups, in the deterministic
+    // order leaderLadder() already defines. Every node derives the same round for
+    // the same proposer (the ladder is chain-derived).
+    roundFor: (height, name) => {
+        const pos = chain.leaderLadder(height).indexOf(name)
+        return pos >= 0 ? pos : 999
+    },
+
     // Deterministic, chain-derived rank for a candidate block. Used by
     // force-finalize and halt-breaker to make sure every node picks the same
     // winner when timestamps collide. Lower rank = preferred.

@@ -115,5 +115,26 @@ test('derived state replays deterministically (F7)', () => {
     assert.strictEqual(a, b)
 })
 
+test('view-change: higher round may move to a new hash, same/lower round may not', () => {
+    const ledger = q.createLedger({ singleVote: true })
+    assert.strictEqual(q.recordVote(ledger, { h: 5, r: q.PRECOMMIT, hash: 'A', signer: 'alice', round: 0 }).accepted, true)
+    // same round, different hash -> refused
+    assert.strictEqual(q.recordVote(ledger, { h: 5, r: q.PRECOMMIT, hash: 'B', signer: 'alice', round: 0 }).accepted, false)
+    // higher round -> new hash allowed (round change)
+    assert.strictEqual(q.recordVote(ledger, { h: 5, r: q.PRECOMMIT, hash: 'B', signer: 'alice', round: 1 }).accepted, true)
+    // lower round -> refused
+    assert.strictEqual(q.recordVote(ledger, { h: 5, r: q.PRECOMMIT, hash: 'C', signer: 'alice', round: 0 }).accepted, false)
+})
+
+test('view-change: precommits in different rounds are independent tallies', () => {
+    const eligible = ['a', 'b', 'c', 'd']
+    const ledger = q.createLedger({ singleVote: true })
+    // round 0: one precommit for A (below quorum); round 1: quorum for B
+    q.recordVote(ledger, { h: 9, r: q.PRECOMMIT, hash: 'A', signer: 'a', round: 0 })
+    for (const s of ['b', 'c', 'd']) q.recordVote(ledger, { h: 9, r: q.PRECOMMIT, hash: 'B', signer: s, round: 1 })
+    assert.strictEqual(q.hasQC(ledger, 9, q.PRECOMMIT, 'A', eligible, 0).qc, false)
+    assert.strictEqual(q.hasQC(ledger, 9, q.PRECOMMIT, 'B', eligible, 1).qc, true)
+})
+
 console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED') + ' (' + passed + ' passed, ' + failed + ' failed)')
 process.exit(failed === 0 ? 0 : 1)

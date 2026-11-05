@@ -704,12 +704,24 @@ let consensus = {
     castVote: (round, block) => {
         const h = Number.isInteger(block._id) ? block._id : -1
         if (round === consensusQuorum.PRECOMMIT) {
-            if (!consensus.isBestCandidate(block)) {
-                logr.debug('one-candidate: not the best at ' + h + ', skip precommit')
+            // View-change: precommit the candidate for ITS round (the proposer's
+            // ladder position). A node may precommit a higher round's block even
+            // when a lower-round one exists — that is the round change, and it is
+            // what un-freezes a silent/slow leader. INV-1 is per
+            // (height, round, phase), enforced by the ledger.
+            const vr = chain.roundFor(h, block.miner)
+            const rec = consensusQuorum.recordVote(consensus.voteLedger, {
+                h: h, r: consensusQuorum.PRECOMMIT, hash: block.hash,
+                signer: process.env.NODE_OWNER, round: vr
+            })
+            if (!rec.accepted) {
+                logr.debug('view-change: precommit refused at ' + h + '#' + vr + ' (' + rec.reason + ')')
                 return false
             }
             return true
         }
+        // COMMIT stays single per HEIGHT (the safety phase): at most one hash, for
+        // the best candidate that reached the precommit quorum.
         const threshold = consensusQuorum.blockQuorum(
             consensus.eligibleLeaders(h).length, config.quorumMin)
         const best = consensus.bestCommittableCandidate(h, threshold)
@@ -718,7 +730,7 @@ let consensus = {
             return false
         }
         const rec = consensusQuorum.recordVote(consensus.voteLedger, {
-            h: h, r: round, hash: block.hash, signer: process.env.NODE_OWNER
+            h: h, r: consensusQuorum.COMMIT, hash: block.hash, signer: process.env.NODE_OWNER, round: 0
         })
         try {
             consensusQuorum.pruneLedger(consensus.voteLedger, chain.getLatestBlock()._id - config.leaders * 3)

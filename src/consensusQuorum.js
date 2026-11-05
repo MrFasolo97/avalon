@@ -56,8 +56,8 @@ function isPhase(r) {
     return r === PRECOMMIT || r === COMMIT
 }
 
-function voteKey(h, r) {
-    return h + ':' + r
+function voteKey(h, r, round) {
+    return h + ':' + (Number.isInteger(round) ? round : 0) + ':' + r
 }
 
 function createLedger(options) {
@@ -72,23 +72,23 @@ function createLedger(options) {
     }
 }
 
-function hashVotes(ledger, h, r) {
-    let byHash = ledger.votes.get(voteKey(h, r))
+function hashVotes(ledger, h, r, round) {
+    let byHash = ledger.votes.get(voteKey(h, r, round))
     if (!byHash) {
         byHash = new Map()
-        ledger.votes.set(voteKey(h, r), byHash)
+        ledger.votes.set(voteKey(h, r, round), byHash)
     }
     return byHash
 }
 
-function signersForHash(ledger, h, r, hash) {
-    const byHash = ledger.votes.get(voteKey(h, r))
+function signersForHash(ledger, h, r, hash, round) {
+    const byHash = ledger.votes.get(voteKey(h, r, round))
     const set = byHash && byHash.get(hash)
     return set ? set : new Set()
 }
 
-function signerVotedFor(ledger, h, r, signer) {
-    const byHash = ledger.votes.get(voteKey(h, r))
+function signerVotedFor(ledger, h, r, signer, round) {
+    const byHash = ledger.votes.get(voteKey(h, r, round))
     if (!byHash) return null
     for (const [hash, set] of byHash)
         if (set.has(signer)) return hash
@@ -106,6 +106,7 @@ function signerVotedFor(ledger, h, r, signer) {
 // INV-1 there would measure a rule the chain deliberately does not follow.
 function recordVote(ledger, vote) {
     const { h, r, hash, signer } = vote || {}
+    const round = (vote && Number.isInteger(vote.round) && vote.round >= 0) ? vote.round : 0
 
     if (!Number.isInteger(h) || h < 0) return { accepted: false, reason: 'invalid-height' }
     if (!isPhase(r)) return { accepted: false, reason: 'invalid-phase' }
@@ -115,22 +116,26 @@ function recordVote(ledger, vote) {
     const enforce = ledger.singleVote
     let conflict = null
 
-    // Lock: after precommitting h#A, this node must not precommit h#A'.
-    // Liveness is preserved because COMMIT votes are still allowed (see doc
-    // §2.4): the lock forbids changing our own precommit, not observing one.
-    if (r === PRECOMMIT && ledger.locks.has(h) && ledger.locks.get(h) !== hash) {
-        conflict = { reason: 'lock-conflict', locked: ledger.locks.get(h) }
-        if (enforce) return { accepted: false, reason: 'lock-conflict', locked: ledger.locks.get(h) }
+    // Lock (view-aware): a precommit locks its hash AT A ROUND. A HIGHER round may
+    // move to a different hash (the round changed — the previous proposer was
+    // silent); the same or a lower round may not (INV-1 within a round + no
+    // oscillation between rounds). The lock entry is { hash, round }.
+    if (r === PRECOMMIT) {
+        const lock = ledger.locks.get(h)
+        if (lock && lock.hash !== hash && round <= (lock.round || 0)) {
+            conflict = { reason: 'lock-conflict', locked: lock.hash }
+            if (enforce) return { accepted: false, reason: 'lock-conflict', locked: lock.hash }
+        }
     }
 
-    const previous = signerVotedFor(ledger, h, r, signer)
+    const previous = signerVotedFor(ledger, h, r, signer, round)
     if (previous !== null && previous !== hash) {
-        ledger.equivocations.push({ h, r, signer, hash, previousHash: previous })
+        ledger.equivocations.push({ h, round, r, signer, hash, previousHash: previous })
         if (enforce) return { accepted: false, reason: 'equivocation', previous }
         conflict = conflict || { reason: 'equivocation', previous }
     }
 
-    const byHash = hashVotes(ledger, h, r)
+    const byHash = hashVotes(ledger, h, r, round)
     let set = byHash.get(hash)
     if (!set) {
         set = new Set()
@@ -140,13 +145,17 @@ function recordVote(ledger, vote) {
     if (set.has(signer)) return { accepted: true, reason: 'duplicate', count: set.size }
 
     set.add(signer)
-    if (r === PRECOMMIT && !ledger.locks.has(h)) ledger.locks.set(h, hash)
+    if (r === PRECOMMIT) {
+        const lock = ledger.locks.get(h)
+        if (!lock || round > (lock.round || 0)) ledger.locks.set(h, { hash: hash, round: round })
+    }
 
     return { accepted: true, reason, count: set.size, previous: conflict ? conflict.previous : undefined }
 }
 
 function lockedOn(ledger, h) {
-    return ledger.locks.has(h) ? ledger.locks.get(h) : null
+    const lock = ledger.locks.get(h)
+    return lock ? lock.hash : null
 }
 
 function canPrecommit(ledger, h, hash) {
@@ -156,28 +165,28 @@ function canPrecommit(ledger, h, hash) {
 
 // QC = a quorum of DISTINCT eligible signers for the same (height, phase, hash).
 // Signers outside the eligible set are ignored, never counted.
-function hasQC(ledger, h, r, hash, eligible) {
+function hasQC(ledger, h, r, hash, eligible, round) {
     const q = quorumSize(eligible.length)
     if (!Number.isFinite(q)) return { qc: false, count: 0, quorum: q }
 
     const eligibleSet = new Set(eligible)
     let count = 0
-    for (const signer of signersForHash(ledger, h, r, hash))
+    for (const signer of signersForHash(ledger, h, r, hash, round))
         if (eligibleSet.has(signer)) count++
 
     return { qc: count >= q, count, quorum: q }
 }
 
-// Hash with a QC at (h, r), or null. If two hashes somehow reach a QC here the
-// ledger's single-vote invariant has been violated upstream: report it loudly
+// Hash with a QC at (h, round, r), or null. If two hashes somehow reach a QC here
+// the ledger's single-vote invariant has been violated upstream: report it loudly
 // instead of silently picking one.
-function qcHash(ledger, h, r, eligible) {
-    const byHash = ledger.votes.get(voteKey(h, r))
+function qcHash(ledger, h, r, eligible, round) {
+    const byHash = ledger.votes.get(voteKey(h, r, round))
     if (!byHash) return { hash: null, conflict: false }
     let found = null
     let conflict = false
     for (const hash of byHash.keys()) {
-        const res = hasQC(ledger, h, r, hash, eligible)
+        const res = hasQC(ledger, h, r, hash, eligible, round)
         if (!res.qc) continue
         if (found !== null && found !== hash) conflict = true
         if (found === null) found = hash

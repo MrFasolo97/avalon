@@ -66,6 +66,7 @@ let p2p = {
     recoveredBlocks: [],
     recovering: false,
     recoverAttempt: 0,
+    lastDivergenceHeight: null,
     nodeId: null,
     init: () => {
         p2p.generateNodeId()
@@ -708,6 +709,27 @@ let p2p = {
     addRecursive: (block) => {
         chain.validateAndAddBlock(block, true, function(err, newBlock) {
             if (err) {
+                // Divergence detection (F8): the fetched block does not extend our
+                // chain — it is at/below our head, or it is head+1 but its parent
+                // hash is not our head (a different chain). A forward-only recover
+                // cannot heal this; surface it as a loud event/log so an operator
+                // sees it instead of an endless "invalid phash" loop. Detection
+                // only: recover still tries other peers.
+                const head = chain.getLatestBlock()
+                const bid = block && block._id
+                if (Number.isInteger(bid)) {
+                    const phashMismatch = bid === head._id + 1 && block.phash && block.phash !== head.hash
+                    const alreadyHave = bid <= head._id
+                    if ((phashMismatch || alreadyHave) && p2p.lastDivergenceHeight !== bid) {
+                        p2p.lastDivergenceHeight = bid
+                        events.emit('chain-divergence', 'error', {
+                            head: head._id, ourHash: head.hash, blockHeight: bid,
+                            blockHash: block.hash, blockPhash: block.phash
+                        })
+                        logr.error('CHAIN DIVERGENCE suspected at #' + bid + ' (our head #'
+                            + head._id + '): fetched block does not extend our chain')
+                    }
+                }
                 // try another peer if bad block
                 cache.rollback()
                 dao.resetID()

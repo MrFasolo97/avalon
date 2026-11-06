@@ -94,6 +94,11 @@ scrape_configs:
       - targets: ['leader1:3001', 'leader2:3001', 'leader3:3001']
 ```
 
+Ready-made files for the testnet live in `docker/testnet/monitoring/`:
+`prometheus.yml` (targets pre-wired to the compose service names) and
+`alerts.yml` (halt, isolation, quorum degraded, jailed leader, candidate
+backlog, halt-breaker fired, divergence, recovery giveup).
+
 Suggested alert rules (Prometheus): `avalon_height` unchanged for 2 min (halt),
 `avalon_peers < 1` (isolated), `avalon_poss_blocks` high, `avalon_eligible_leaders
 < avalon_active_leaders` (quorum degraded), `avalon_leader_jailed == 1`.

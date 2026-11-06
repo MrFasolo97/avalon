@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main, master, develop, new_econs, 'release/**', 'feat/**']
   pull_request:
     branches: [main, master, develop]
 
@@ -30,3 +30,28 @@ jobs:
 
       - name: Unit tests
         run: npm test
+
+  determinism:
+    # Focused gate: the invariants that every node must derive identically
+    # (schedule ordering, per-round vote tallies, block rank, replay, leader
+    # health, skip attestation). A regression here is a consensus fork risk, so
+    # it is surfaced as its own required check.
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [24.x]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Determinism gate
+        run: node test/run.js schedule-determinism consensus-invariants block-rank schedule-persist leader-health skip-attestation

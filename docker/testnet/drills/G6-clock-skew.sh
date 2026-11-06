@@ -67,12 +67,18 @@ else
     fail "Chain stalled after the clock skew"
 fi
 
+# Agreement must be checked on a clock-synchronised network: while the skew is
+# still applied a skewed node can legitimately trail or hold future blocks in its
+# pending queue, so comparing hashes under the skew races. Restore normal time
+# first (the EXIT trap would also do it, but the check must run after it).
+restore
+for v in "$SKEW_PLUS" "$SKEW_MINUS"; do wait_node_synced "$v" 150 || true; done
+
 # No peer ban / no divergence: the skewed nodes must catch up and agree.
 # Use the alignment-free block-hash check: with a skewed clock a node can hold
 # blocks in the pending queue, so its head height legitimately trails and the
 # height-sensitive statehash probe races. The block hash at a common height is
 # alignment-independent and is the actual fork evidence.
-for v in "$SKEW_PLUS" "$SKEW_MINUS"; do wait_node_synced "$v" 150 || true; done
 verify_chain_agreement "$BOOTSTRAP" avalon-drills-miner1 avalon-drills-miner2 avalon-drills-miner3 "$SKEW_MINUS" "$SKEW_PLUS"
 print_leader_health
 pass "G6 complete: chain survived a ±5s clock skew with no divergence"

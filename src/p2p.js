@@ -95,37 +95,59 @@ let p2p = {
         logr.info('P2P ID: '+p2p.nodeId.pub)
     },
     discoveryWorker: (isInit = false) => {
-        let leaders = chain.generateLeaders(false, true, config.leaders*3, 0)
-        for (let i = 0; i < leaders.length; i++) {
-            if (p2p.sockets.length >= max_peers) {
-                logr.debug('We already have maximum peers: '+p2p.sockets.length+'/'+max_peers)
-                break
-            }
-                
-            if (leaders[i].ws) {
-                let excluded = (process.env.DISCOVERY_EXCLUDE ? process.env.DISCOVERY_EXCLUDE.split(',') : [])
-                if (excluded.indexOf(leaders[i].name) > -1)
+        // Best-effort: discovery runs on an interval, so it must NEVER throw out
+        // of it. A half-open socket (no _socket) or a malformed ws URL used to
+        // throw here and kill discovery for good.
+        try {
+            let leaders = chain.generateLeaders(false, true, config.leaders*3, 0)
+            const excluded = (process.env.DISCOVERY_EXCLUDE ? process.env.DISCOVERY_EXCLUDE.split(',') : [])
+            for (let i = 0; i < leaders.length; i++) {
+                if (p2p.sockets.length >= max_peers) {
+                    logr.debug('We already have maximum peers: '+p2p.sockets.length+'/'+max_peers)
+                    break
+                }
+                const leader = leaders[i]
+                if (!leader.ws) continue
+                if (excluded.indexOf(leader.name) > -1) continue
+
+                // Validate the advertised endpoint before touching it.
+                let leaderIp
+                try {
+                    const parsed = new URL(leader.ws)
+                    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:')
+                        continue
+                    leaderIp = parsed.hostname
+                } catch (error) {
+                    logr.debug('Discovery: wrong ws for leader '+leader.name+' '+leader.ws)
                     continue
+                }
+                if (p2p.isBanned && p2p.isBanned(leaderIp)) {
+                    logr.trace('Discovery: skipping banned '+leader.name+' ('+leaderIp+')')
+                    continue
+                }
+
                 let isConnected = false
                 for (let w = 0; w < p2p.sockets.length; w++) {
-                    let ip = p2p.sockets[w]._socket.remoteAddress
+                    const sock = p2p.sockets[w]
+                    // A half-open socket (network partition) has no _socket; this
+                    // access used to throw and stop discovery.
+                    if (!sock || !sock._socket || !sock._socket.remoteAddress) continue
+                    let ip = sock._socket.remoteAddress
                     if (ip.indexOf('::ffff:') > -1)
                         ip = ip.replace('::ffff:', '')
-                    try {
-                        let leaderIp = leaders[i].ws.split('://')[1].split(':')[0]
-                        if (leaderIp === ip) {
-                            logr.trace('Already peered with '+leaders[i].name)
-                            isConnected = true
-                        }
-                    } catch (error) {
-                        logr.debug('Wrong ws for leader '+leaders[i].name+' '+leaders[i].ws, error)
+                    if (leaderIp === ip) {
+                        logr.trace('Already peered with '+leader.name)
+                        isConnected = true
+                        break
                     }
                 }
                 if (!isConnected) {
-                    logr[isInit ? 'info' : 'debug']('Trying to connect to '+leaders[i].name+' '+leaders[i].ws)
-                    p2p.connect([leaders[i].ws],isInit)
+                    logr[isInit ? 'info' : 'debug']('Trying to connect to '+leader.name+' '+leader.ws)
+                    p2p.connect([leader.ws], isInit)
                 }
             }
+        } catch (error) {
+            logr.warn('discoveryWorker error (ignored): ' + error.message)
         }
     },
     keepAlive: async () => {
@@ -742,6 +764,17 @@ let p2p = {
                     events.emit('recover-giveup', 'error', { block: newBlock._id, attempts: p2p.recoverAttempt })
                     p2p.recovering = false
                     p2p.recoverAttempt = 0
+                    // A giveup must not be permanent: a halted node that later
+                    // regains a healthy peer set (leaders restarted, quorum
+                    // restored) has to keep trying. Re-arm a bounded retry so the
+                    // operator still sees the giveup but the node is not stranded
+                    // forever after "Error Replay".
+                    if (p2p.recoverRetryTimeout) clearTimeout(p2p.recoverRetryTimeout)
+                    p2p.recoverRetryTimeout = setTimeout(function() {
+                        p2p.recoverRetryTimeout = null
+                        p2p.recovering = chain.getLatestBlock()._id
+                        p2p.recover()
+                    }, 30000)
                 }
                 else {
                     logr.warn('Recover attempt #'+p2p.recoverAttempt+' for block '+newBlock._id)

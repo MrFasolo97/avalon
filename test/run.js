@@ -37,7 +37,15 @@ const tests = [
 let failed = 0
 let passed = 0
 
-for (const t of tests) {
+// Optional argv filter: `node test/run.js consensus-invariants schedule` runs
+// only the suites whose name contains one of the given substrings. No arguments
+// (what `npm test` does) runs every suite.
+const filters = process.argv.slice(2)
+const selected = filters.length
+    ? tests.filter(t => filters.some(f => t.indexOf(f) !== -1))
+    : tests
+
+for (const t of selected) {
     console.log('\n==> running ' + t)
     const res = spawnSync(process.execPath, [path.join(__dirname, t)], {
         stdio: 'inherit',

@@ -62,7 +62,10 @@ module.exports = {
                     standbyEnabled: !!config.standbyEnabled,
                     canonicalLeaderOrder: !!config.canonicalLeaderOrder,
                     // S1' single-vote enforcement (opt-in via CONSENSUS_SINGLE_VOTE=1)
-                    singleVote: !!consensus.singleVoteEnabled
+                    singleVote: !!consensus.singleVoteEnabled,
+                    // S0' shadow / S1' enforcement (opt-in via QC_SHADOW=1 / QC_ENFORCE=1)
+                    qcShadow: !!(consensus.qc && consensus.qc.enabled),
+                    qcEnforce: !!(consensus.qc && consensus.qc.enforce)
                 }
             })
         })

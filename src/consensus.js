@@ -14,6 +14,11 @@ const FF_BACKOFF_MS = [600, 1200, 2400, 4800]
 // S0' shadow mode: observe every vote in the ledger and compare the ledger's
 // verdict with the production one. Never refuses anything. Off by default.
 const QC_SHADOW = process.env.QC_SHADOW === '1'
+// S1' enforcement: when enabled, the S0' shadow checks become real gates —
+// an invalid `justify` drops the vote and a vote-state violation refuses to
+// broadcast our own vote. Default OFF so mainnet keeps the shadow behaviour
+// until the flag day. Enabling requires QC_SHADOW (the checks must run).
+const QC_ENFORCE = process.env.QC_ENFORCE === '1'
 const VOTE_STATE_PATH = process.env.VOTE_STATE_PATH || './state/vote_state.json'
 
 // S1' single-vote (INV-1, doc/consensus-single-quorum-and-locks §2.3): a node
@@ -122,6 +127,7 @@ let consensus = {
     // on them, then ship S1'.
     qc: {
         enabled: QC_SHADOW,
+        enforce: QC_ENFORCE,
         // singleVote: false — see qcObserve(): the ledger must mirror the
         // protocol it is measuring, not an invariant the protocol lacks.
         ledger: consensusQuorum.createLedger({ singleVote: false }),
@@ -288,29 +294,36 @@ let consensus = {
             consensus.qcObserve(h, phase, hash, entry.n)
         }
         const q = consensusQuorum.quorumSize(set.size)
-        if (accepted > 0 && Number.isFinite(q) && accepted >= q) {
+        const valid = accepted > 0 && Number.isFinite(q) && accepted >= q
+        if (valid) {
             consensus.qc.justifyQCs++
             logr.info('QC-JUSTIFY height '+h+'#'+hash.substr(0, 8)+' phase '+phase
                 +': verified '+accepted+'/'+q+' signatures carried by the peer vote')
         }
+        // true = the carried QC is valid, false = it is not (S1' drops the vote
+        // when enforced), undefined = nothing to check.
+        return valid
     },
     qcNoteOwnVote: (h, round, hash) => {
-        if (!consensus.qc.enabled) return
-        if (!Number.isInteger(h) || h < 0) return
-        if (typeof hash !== 'string' || hash.length === 0) return
+        if (!consensus.qc.enabled) return true
+        if (!Number.isInteger(h) || h < 0) return true
+        if (typeof hash !== 'string' || hash.length === 0) return true
 
         try {
             const prev = voteState.load(VOTE_STATE_PATH)
             const verdict = voteState.decide(prev.record, { height: h, round: round, hash: hash })
             if (!verdict.allow) {
-                // shadow: still send the vote, but this is exactly what S1'
-                // will refuse
                 consensus.qc.voteStateRefusals++
+                // 'equivocation' means "a different candidate at this height",
+                // which is the normal protocol behaviour, so it must never gate
+                // the vote even in enforce mode.
+                const enforceable = consensus.qc.enforce && verdict.reason !== 'equivocation'
                 if (verdict.reason === 'stale-height')
                     // expected after a cache.rollback: S1' must reset the file
                     // explicitly, never infer a rollback from the record
                     logr.warn('QC-VOTE-STATE behind head at '+h+'/'+round
-                        +' (recorded '+prev.record.height+'): vote state needs reset after a rollback (shadow: vote still sent)')
+                        +' (recorded '+prev.record.height+'): vote state needs reset after a rollback'
+                        + (enforceable ? ' (ENFORCED: vote refused)' : ' (shadow: vote still sent)'))
                 else if (verdict.reason === 'equivocation') {
                     // the protocol votes on several candidates at one height,
                     // so this is the normal case, not a defect (doc §4.2)
@@ -322,13 +335,16 @@ let consensus = {
                     }
                 } else
                     logr.debug('QC-VOTE-STATE would refuse own vote at '+h+'/'+round+'#'
-                        +hash.substr(0,8)+': '+verdict.reason+' (shadow: vote still sent)')
-                return
+                        +hash.substr(0,8)+': '+verdict.reason
+                        + (enforceable ? ' (ENFORCED)' : ' (shadow: vote still sent)'))
+                return !enforceable
             }
             voteState.saveVerified(VOTE_STATE_PATH, { height: h, round: round, hash: hash })
+            return true
         } catch (e) {
             consensus.qc.voteStateFailures++
             logr.error('QC-VOTE-STATE write failed: '+e.message+' (shadow: vote still sent)')
+            return true
         }
     },
     qcCompare: (h, round, hash, productionCount, threshold, roundSigners) => {
@@ -770,10 +786,16 @@ let consensus = {
             // S0' shadow: persist the vote BEFORE it leaves the process (§2.7)
             // and record it in the ledger. Only votes we actually broadcast.
             const qcH = consensus.qc.enabled ? consensus.qcHeightOf(block) : -1
+            let ownVoteAllowed = true
             consensus.qcGuard('own-vote', () => {
-                consensus.qcNoteOwnVote(qcH, round, block.hash)
+                ownVoteAllowed = consensus.qcNoteOwnVote(qcH, round, block.hash)
                 consensus.qcObserve(qcH, round, block.hash, process.env.NODE_OWNER)
             })
+            if (!ownVoteAllowed) {
+                logr.warn('S1\' enforcement: refusing to broadcast vote for '
+                    + block._id + '#' + (block.hash || '').substr(0, 8) + ' (vote state)')
+                return
+            }
 
             // QC on the wire (doc §2.5): send the explicit height, and on the
             // commit vote attach the round-0 QC as a verifiable `justify`.
@@ -815,13 +837,19 @@ let consensus = {
                 })
                 // QC on the wire (doc §2.5): a commit vote may carry the round-0
                 // QC as `justify`; verify it and retain the signed vote.
+                let remoteJustifyOk = true
                 consensus.qcGuard('remote-justify', () => {
                     if (round === consensusQuorum.COMMIT && Array.isArray(message.d.justify))
-                        consensus.qcVerifyJustify(qcH, consensusQuorum.PRECOMMIT, block.hash, message.d.justify)
+                        remoteJustifyOk = consensus.qcVerifyJustify(qcH, consensusQuorum.PRECOMMIT, block.hash, message.d.justify) !== false
                     // only round-0 votes are needed to build a `justify`
                     if (round === consensusQuorum.PRECOMMIT)
                         consensus.qcRememberVote(qcH, round, block.hash, leader, message)
                 })
+                if (consensus.qc.enforce && !remoteJustifyOk) {
+                    logr.warn('S1\' enforcement: dropping commit vote for '
+                        + block._id + '#' + (block.hash || '').substr(0, 8) + ' (invalid justify)')
+                    break
+                }
 
                 if (!consensus.possBlocks[i][round] || consensus.possBlocks[i][round].indexOf(leader) !== -1)
                     break
@@ -878,7 +906,18 @@ let consensus = {
     },
     requestForceFinalizeBlocks: (height, hashes) => {
         if (!p2p || !p2p.broadcast || !Array.isArray(hashes) || hashes.length === 0) return
-        const missing = hashes.filter(h => !consensus.findPossBlockByHash(h))
+        // Dedupe and cap: a runaway list (hundreds of stale hashes accumulated
+        // while the chain was halted) must not turn into a fetch storm. Only a
+        // handful of candidates can ever matter at one height (one per leader).
+        const maxCandidates = Math.max((config.leaders || 5) * 2, 1)
+        const seen = {}
+        const missing = []
+        for (const h of hashes) {
+            if (typeof h !== 'string' || seen[h]) continue
+            seen[h] = true
+            if (!consensus.findPossBlockByHash(h)) missing.push(h)
+            if (missing.length >= maxCandidates) break
+        }
         if (missing.length === 0) return
         logr.debug('FF_FETCH requesting ' + missing.length + ' candidate block(s) for height ' + height)
         p2p.broadcast({ t: 8, d: { height, hashes: missing } })
@@ -886,10 +925,19 @@ let consensus = {
     handleForceFinalizeProposal: (message) => {
         if (!consensus.ffProposals) return
         const sender = message.s && message.s.n
-        if (!sender || !consensus.getActiveLeaderKey(sender)) return
+        if (!sender || !consensus.getActiveLeaderKey(sender)) {
+            logr.debug('FF drop ' + sender + ': no active key')
+            return
+        }
         const actives = consensus.activeLeaders()
-        if (actives.indexOf(sender) === -1) return
-        if (message.d.height !== consensus.ffProposals.height) return
+        if (actives.indexOf(sender) === -1) {
+            logr.debug('FF drop ' + sender + ': not in actives [' + actives.join(',') + ']')
+            return
+        }
+        if (message.d.height !== consensus.ffProposals.height) {
+            logr.debug('FF drop ' + sender + ': height ' + message.d.height + ' != ' + consensus.ffProposals.height)
+            return
+        }
 
         // Determine which hash this sender is voting for
         let hash = message.d.hash
@@ -920,7 +968,10 @@ let consensus = {
                 }
             }
         
-        if (!consensus.ffProposals.proposals[hash]) return
+        if (!consensus.ffProposals.proposals[hash]) {
+            logr.debug('FF drop ' + sender + ': no local block for ' + (hash || '').substr(0, 8))
+            return
+        }
 
         // Monotone votes (doc §5.5.3): a peer may only move its FF vote towards a
         // strictly better rank, never away. Ignore a re-vote for a worse block.

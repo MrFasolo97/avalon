@@ -194,8 +194,8 @@ drill matrix above, the mainnet runbook
 
 ### Coordinator — before announcing
 
-- [ ] Tag **frozen and pushed**: `v2.1.0`; on every operator machine
-      `git describe --tags` = `v2.1.0`.
+- [ ] Tag **frozen and pushed**: `v2.2.0`; on every operator machine
+      `git describe --tags` = `v2.2.0`.
 - [ ] Testnet config patch written and published **as `git diff src/config.js`**:
       dedicated `originHash`, `block0ts`, fresh `masterPub`/`masterPubLeader`,
       `masterDaoTxs`, `leaderMaxVotes: 8`, `masterLeaderUntil: 0`, Layer S/H active
@@ -212,7 +212,7 @@ drill matrix above, the mainnet runbook
 - [ ] Node.js ≥ 24, MongoDB running, **NTP/chrony active** (`maxDrift` = 200 ms).
 - [ ] P2P port (6001) **reachable from the internet**; HTTP port per policy.
 - [ ] Fresh **testnet** keypair (`node src/cli.js keypair`); never mainnet keys.
-- [ ] `git checkout v2.1.0` + `npm ci`; `git diff src/config.js` **identical** to the coordinator's patch.
+- [ ] `git checkout v2.2.0` + `npm ci`; `git diff src/config.js` **identical** to the coordinator's patch.
 - [ ] Clean start: `db.dropDatabase()`, no `genesis.zip`, empty `blocks/`.
 - [ ] Env: `HTTP_HOST=0.0.0.0`, `CORS_ORIGIN`, `TRUST_PROXY`, `ADMIN_TOKEN`/`LOG_ADMIN_TOKEN`,
       `PEERS=ws://<bootstrap>:6001`, `NODE_OWNER*`.

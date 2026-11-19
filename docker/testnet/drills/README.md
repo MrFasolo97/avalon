@@ -127,7 +127,7 @@ Also, `/debug/statehash` no longer includes `possBlocks` (transient gossip that 
 healthy nodes look divergent), and `tryNextStep` no longer multiplies timers (it was a
 hot loop that blocked the event loop during a stall).
 
-**Status of the drills on the current build (v2.1.0): all of G1–G12 PASS** (G1–G11 in
+**Status of the drills on the current build (v2.2.0): all of G1–G12 PASS** (G1–G11 in
 one `run-all-drills.sh --long` run, G12 with the breaker-off overlay). See
 [`../README-drills.md`](../README-drills.md) for the full results and the fixes that
 came out of them.

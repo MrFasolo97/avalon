@@ -55,6 +55,10 @@ let consensus = {
     ffMonotoneRejects: 0,
     haltBreakerTimeout: null,
     possBlocks: [],
+    // View-change: when a candidate for a height was first seen, and the pending
+    // commit-retry timer per height (see castVote COMMIT).
+    heightSeen: {},
+    commitRetry: {},
     getActiveLeaderKey: (name) => {
         let shuffle = chain.schedule.shuffle
         for (let i = 0; i < shuffle.length; i++)
@@ -562,6 +566,14 @@ let consensus = {
                     
                             consensus.possBlocks = newPossBlocks
                             consensus.finalizing = false
+                            // drop view-change bookkeeping for finalised heights
+                            for (const k of Object.keys(consensus.heightSeen))
+                                if (Number(k) <= possBlock.block._id) delete consensus.heightSeen[k]
+                            for (const k of Object.keys(consensus.commitRetry))
+                                if (Number(k) <= possBlock.block._id) {
+                                    clearTimeout(consensus.commitRetry[k])
+                                    delete consensus.commitRetry[k]
+                                }
                             if (config.forceFinalize)
                                 consensus.cancelForceFinalize()
                         } catch (e) {
@@ -646,8 +658,14 @@ let consensus = {
                     // adding to possible blocks
                     if (consensus.possBlocks.length >= consensus.activeLeaders().length * 2)
                         logr.warn('possBlocks at capacity, not adding new block')
-                    else
+                    else {
                         consensus.possBlocks.push(possBlock)
+                        // View-change: remember when the first candidate for this
+                        // height appeared, so the commit can wait for the round
+                        // window to settle (castVote COMMIT).
+                        if (!consensus.heightSeen[block._id])
+                            consensus.heightSeen[block._id] = Date.now()
+                    }
                     if (config.forceFinalize)
                         consensus.scheduleForceFinalize()
                     // adding ourselves to precommit list
@@ -719,6 +737,21 @@ let consensus = {
         }
         return best ? best.block : null
     },
+    // One pending retry per height: re-runs the consensus step after the round
+    // window has settled, so a commit deferred by castVote() is actually retried
+    // (a deferred commit that is never retried would stall the height forever).
+    scheduleCommitRetry: (h) => {
+        if (consensus.commitRetry[h]) return
+        const settleMs = (config.leaders + 1) * config.blockTime
+        const anchor = consensus.heightSeen[h] || Date.now()
+        const delay = Math.max(200, anchor + settleMs - Date.now() + 50)
+        const t = setTimeout(() => {
+            delete consensus.commitRetry[h]
+            consensus.tryNextStep()
+        }, delay)
+        if (t.unref) t.unref()
+        consensus.commitRetry[h] = t
+    },
     // S1' "one candidate per round" gate: should this node cast its vote for
     // (round, block)?
     //   - PRECOMMIT: only the deterministic best-known candidate (monotone — a
@@ -735,6 +768,18 @@ let consensus = {
             // when a lower-round one exists — that is the round change, and it is
             // what un-freezes a silent/slow leader. INV-1 is per
             // (height, round, phase), enforced by the ledger.
+            //
+            // Rank-determinism: an honest node precommits only the best-ranked
+            // candidate it knows, so when two blocks collide at a height (an
+            // equivocation, or a latency collision) all honest nodes precommit
+            // the SAME one and a single precommit QC forms — instead of splitting
+            // and stalling (G7). A producer always precommits its own block, so it
+            // can never be blocked by a better-ranked candidate it did not see.
+            const mine = block.miner === process.env.NODE_OWNER
+            if (!mine && !consensus.isBestCandidate(block)) {
+                logr.debug('view-change: precommit skipped at ' + h + ' (not the best known)')
+                return false
+            }
             const vr = chain.roundFor(h, block.miner)
             const rec = consensusQuorum.recordVote(consensus.voteLedger, {
                 h: h, r: consensusQuorum.PRECOMMIT, hash: block.hash,
@@ -745,6 +790,25 @@ let consensus = {
                 return false
             }
             return true
+        }
+        // View-change: when a height has more than one candidate, a lower-round
+        // (better-ranked) one can still arrive. Committing before the round
+        // window settles locks this node onto a candidate the rest of the network
+        // may reject, and INV-1 makes the commit irreversible — that is the
+        // permanent split behind the G10 halt. Wait for the ladder window, then
+        // commit the deterministic best.
+        let contenders = 0
+        for (let i = 0; i < consensus.possBlocks.length; i++)
+            if (consensus.possBlocks[i] && consensus.possBlocks[i].block
+            && consensus.possBlocks[i].block._id === h) contenders++
+        if (contenders > 1) {
+            const settleMs = (config.leaders + 1) * config.blockTime
+            const anchor = consensus.heightSeen[h] || Date.now()
+            if (Date.now() < anchor + settleMs) {
+                consensus.scheduleCommitRetry(h)
+                logr.debug('view-change: commit for ' + h + ' deferred until the rounds settle')
+                return false
+            }
         }
         // COMMIT stays single per HEIGHT (the safety phase): at most one hash, for
         // the best candidate that reached the precommit quorum.

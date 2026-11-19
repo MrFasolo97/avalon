@@ -194,12 +194,18 @@ const leaderHealth = {
                 leaderHealth.heartbeat(tx.sender)
         }
 
-        // Auto-expire jail at block boundary.
+        // Auto-expire jail at block boundary. `active` must be cleared as well:
+        // isJailed() already returns false past untilBlock, but maybeJail()
+        // checks jail.active and would otherwise refuse to ever re-jail this
+        // leader (it stays in probation until it produces, which it cannot do
+        // while absent from the rotation).
         for (const name in leaderHealth.leaders)
             if (leaderHealth.leaders[name].jail
             && leaderHealth.leaders[name].jail.active
-            && leaderHealth.leaders[name].jail.untilBlock <= h)
+            && leaderHealth.leaders[name].jail.untilBlock <= h) {
+                leaderHealth.leaders[name].jail.active = false
                 leaderHealth.leaders[name].jail.probation = true
+            }
     },
 
     // Rebuild from an array of blocks (used at startup / rebuildState).

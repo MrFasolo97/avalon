@@ -98,6 +98,26 @@ test('jail expires after untilBlock', () => {
     assert.strictEqual(leaderHealth.isJailed('alice', until), false)
 })
 
+test('expired jail can be re-applied after more misses', () => {
+    reset()
+    const N = config.jailMissThreshold || 30
+    for (let i = 0; i < N; i++)
+        leaderHealth.processBlock(block(i + 1, 'bob', ['alice']), null)
+    const until = leaderHealth.get('alice').jail.untilBlock
+    // Process a block at the expiry height to run the auto-expire path.
+    leaderHealth.processBlock(block(until, 'bob', []), null)
+    const l = leaderHealth.get('alice')
+    assert.strictEqual(l.jail.active, false)
+    assert.strictEqual(l.jail.probation, true)
+    assert.strictEqual(leaderHealth.isJailed('alice', until), false)
+    // Still out of the rotation, so it keeps missing scheduled turns: it must
+    // be jailed again (with the backoff level increased).
+    for (let i = 0; i < N; i++)
+        leaderHealth.processBlock(block(until + i + 1, 'bob', ['alice']), null)
+    assert.strictEqual(leaderHealth.isJailed('alice', until + N), true)
+    assert.strictEqual(leaderHealth.get('alice').jail.level, 2)
+})
+
 test('heartbeat (type 18) clears jail immediately', () => {
     reset()
     const N = config.jailMissThreshold || 30

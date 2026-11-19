@@ -116,7 +116,17 @@ function startRebuild(startBlock) {
     chain.rebuildState(startBlock,(e,headBlockNum) => {
         if (e) {
             erroredRebuild = true
-            return logr.error('Error rebuilding chain at block',headBlockNum, e)
+            logr.error('Error rebuilding chain at block',headBlockNum, e)
+            // A failed rebuild must exit, not hang. This path used to `return`
+            // after logging: with no daemon started and the event loop still
+            // holding handles (Mongo, logger, ...), a bad artifact/state left
+            // the process alive forever — a silent stall instead of a visible
+            // failure. Exit non-zero so the operator/supervisor sees it; the
+            // periodic on-disk checkpoints let a re-run resume from
+            // state.headBlock+1.
+            if (blocks.isOpen)
+                blocks.close()
+            return process.exit(1)
         } else if (headBlockNum <= chain.restoredBlocks)
             logr.info('Rebuild interrupted at block '+headBlockNum+', so far it took ' + (new Date().getTime() - rebuildStartTime) + ' ms.')
         else

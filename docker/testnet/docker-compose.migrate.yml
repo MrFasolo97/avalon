@@ -1,0 +1,6 @@
+# S4 migration phase: restart bootstrap WITHOUT the genesis script
+# (testnet-genesis.sh drops the DB on every start — that would destroy chain
+# continuity). The config patch is applied idempotently before starting.
+services:
+  bootstrap:
+    command: ["bash", "-c", "node /avalon/scripts/s4-patch.js && exec node --stack-size=65500 src/main"]

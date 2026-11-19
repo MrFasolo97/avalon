@@ -119,11 +119,13 @@ test('mineBlock: no token required when MINE_TOKEN unset', () => {
     assert.strictEqual(r.status, 200)
 })
 
-test('requireAuth: passes through when no admin token is set', () => {
+test('requireAuth: fails closed when no admin token is set', () => {
     const auth = require('../src/http/auth')
     const saved = {}
     const vars = ['ADMIN_TOKEN', 'LOG_ADMIN_TOKEN', 'MINE_TOKEN', 'DEBUG_TOKEN', 'RECOVER_TOKEN']
     for (const v of vars) { saved[v] = process.env[v]; delete process.env[v] }
+    const savedAnon = process.env.ADMIN_ALLOW_ANONYMOUS
+    delete process.env.ADMIN_ALLOW_ANONYMOUS
 
     // Mock req/res as seen from `curl http://localhost:3001/mineBlock`
     const req = {
@@ -140,11 +142,20 @@ test('requireAuth: passes through when no admin token is set', () => {
         send(b) { this.body = b; return this }
     })
 
-    // No tokens configured -> request is accepted (no login HTML)
+    // No tokens configured -> FAIL CLOSED: no anonymous admin access
     let nextCalled = false
     res = newRes()
     auth.requireAuth()(req, res, () => { nextCalled = true })
-    assert.strictEqual(nextCalled, true, 'no tokens set: next() should be called')
+    assert.strictEqual(nextCalled, false, 'no tokens set: next() must NOT be called (fail closed)')
+    assert.strictEqual(res.statusCode, 401, 'no tokens set: must answer 401')
+
+    // ...unless the operator explicitly opts in to anonymous access
+    process.env.ADMIN_ALLOW_ANONYMOUS = '1'
+    nextCalled = false
+    res = newRes()
+    auth.requireAuth()(req, res, () => { nextCalled = true })
+    assert.strictEqual(nextCalled, true, 'ADMIN_ALLOW_ANONYMOUS=1: next() should be called')
+    delete process.env.ADMIN_ALLOW_ANONYMOUS
 
     // With ADMIN_TOKEN set -> curl without token still gets 401 + login HTML
     process.env.ADMIN_TOKEN = 'secret'
@@ -163,9 +174,12 @@ test('requireAuth: passes through when no admin token is set', () => {
     auth.requireAuth()(reqToken, res, () => { nextCalled = true })
     assert.strictEqual(nextCalled, true, 'valid token should be accepted')
 
-    for (const v of vars)
+    if (savedAnon === undefined) delete process.env.ADMIN_ALLOW_ANONYMOUS
+    else process.env.ADMIN_ALLOW_ANONYMOUS = savedAnon
+    for (const v of vars) 
         if (saved[v] === undefined) delete process.env[v]
         else process.env[v] = saved[v]
+    
     auth.sessions.clear()
 })
 
@@ -286,9 +300,13 @@ test('consensus.js has tryNextStepBusy', () => {
     assert.ok(c.includes('tryNextStepBusy: false'))
 })
 
-test('consensus.js uses unified blockQuorum from consensusQuorum', () => {
+test('consensus.js uses the chain-derived deterministic quorum', () => {
     const c = fs.readFileSync(path.join(__dirname, '../src/consensus.js'), 'utf8')
-    assert.ok(c.includes('consensusQuorum.blockQuorum'))
+    // F2: the denominator comes from the eligible set at the height being
+    // decided (identical on every node), not from the node-local active
+    // leaders or the config.leaders constant. The floor is config.quorumMin.
+    assert.ok(c.includes('consensus.eligibleLeaders('))
+    assert.ok(c.includes('consensusQuorum.blockQuorum('))
 })
 
 test('consensus.js has empty shuffle guard', () => {
@@ -306,6 +324,35 @@ test('auto_resolve_halt.sh has BSON << 8n', () => {
     const c = readScript('auto_resolve_halt.sh')
     assert.ok(c.includes('<< 8n'))
     assert.ok(!c.includes('<< 32n'))
+})
+
+// N. TRUST_PROXY parsing (http/index.js)
+console.log('\n--- http/index.js: TRUST_PROXY parsing ---')
+const { parseTrustProxy } = require('../src/http/index')
+
+test('TRUST_PROXY: a hop count becomes a number', () => {
+    assert.strictEqual(parseTrustProxy('1'), 1)
+    assert.strictEqual(parseTrustProxy('2'), 2)
+})
+
+test('TRUST_PROXY: off values disable trusting (undefined)', () => {
+    for (const v of ['0', 'false', 'FALSE', 'no', 'off', '', '  ', undefined, null])
+        assert.strictEqual(parseTrustProxy(v), undefined, 'value ' + JSON.stringify(v))
+})
+
+test('TRUST_PROXY: keywords accepted, case-insensitive', () => {
+    assert.strictEqual(parseTrustProxy('loopback'), 'loopback')
+    assert.strictEqual(parseTrustProxy('LinkLocal'), 'linklocal')
+    assert.strictEqual(parseTrustProxy('uniquelocal'), 'uniquelocal')
+})
+
+test('TRUST_PROXY: true/yes/on refused with a clear message', () => {
+    for (const v of ['true', 'yes', 'on'])
+        assert.throws(() => parseTrustProxy(v), /TRUST_PROXY/)
+})
+
+test('TRUST_PROXY: an explicit IP / subnet list passes through', () => {
+    assert.strictEqual(parseTrustProxy('127.0.0.1,10.0.0.0/8'), '127.0.0.1,10.0.0.0/8')
 })
 
 // Summary

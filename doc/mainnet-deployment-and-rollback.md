@@ -1,9 +1,10 @@
 # Avalon Mainnet — Deployment (Layer S/H) and Rollback Runbook
 
 **Type:** operational runbook
-**Target release:** the certified **Layer S/H** tag (`v2.1.x` line — **freeze the tag before
-publishing**: the reviewed tip is *ahead* of the existing `v2.1.0` tag, so cut an immutable
-tag at the exact reviewed commit and use it everywhere)
+**Target release:** the certified **Layer S/H** tag **`v2.2.0`** — the merge of the
+`feat/auto-force-finalize` release fixes into `feat/view-change` (S and H ship together in
+this cutover). **Freeze the tag before publishing**: `package.json.version` must match it
+exactly, because the G-1 census reads `/version` and `NODE_STATUS`.
 **From:** branch/line `new_net` (what mainnet runs today, halted) **plus** the intervening
 consensus work — see the companions below
 **Companions:**

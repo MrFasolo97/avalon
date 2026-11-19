@@ -3,7 +3,10 @@
 **Status:** design proposal (implementation plan) — **parameters approved 2026-10-26** (§10)
 **Scope:** Avalon consensus (`src/chain.js`, `src/consensus.js`, `src/config.js`, `src/p2p.js`, `src/leaderStats.js`)
 **Baseline analysed:** `feat/auto-force-finalize` @ `e15c1f0` (= PR #2, tag `v2.0.2` + the P2P catch-up fix; the `new_net` release line without Economy Fork `#13330000`)
-**Target release:** `v2.1.0` (Layer S) and `v2.2.0` (Layer H) — see §8
+**Target release:** `v2.1.0` (Layer S) and `v2.2.0` (Layer H) — see §8.
+**Update 2026-11-19:** the S and H stages now ship together in **`v2.2.0`**, the merge of
+the `feat/auto-force-finalize` release fixes into `feat/view-change` (single cutover while
+mainnet is halted); both fork heights stay at `13325000` / `13400000`.
 **Language:** English (project convention for `doc/`)
 
 ---

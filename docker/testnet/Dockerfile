@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl vim libvip
 ENV SHARP_IGNORE_GLOBAL_LIBVIPS=0
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY src/ src/
 COPY docker/testnet/scripts/ scripts/

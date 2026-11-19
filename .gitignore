@@ -15,3 +15,6 @@ opencode.bash
 state/
 # log4js writes ./logs/output.log relative to the process CWD
 src/logs/
+# Operator start script copied to the repo root (`cp scripts/start.sh ./start.sh`)
+# and edited with the node's real keys: never commit it.
+/start.sh

@@ -1,4 +1,9 @@
-const version = '1.6.6'
+// Release version, taken from package.json so it changes with the release. It is
+// reported in NODE_STATUS (visible via /peers) so operators can run the flag-day
+// version census (plan §8.2 gate 1). It used to be a hardcoded constant ('1.6.6')
+// that never changed, which made the census unable to tell two releases apart.
+// Informational only: no handshake rejects on it.
+const version = require('../package.json').version
 const default_port = 6001
 const replay_interval = 1500
 const discovery_interval = 60000

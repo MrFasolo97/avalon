@@ -31,6 +31,7 @@ const tests = [
     'schedule-endpoint.js',
     'block-rank.js',
     'schedule-persist.js',
+    'skip-early.js',
     'layer-h.js'
 ]
 

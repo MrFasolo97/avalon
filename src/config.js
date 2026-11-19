@@ -95,6 +95,11 @@ let config = {
             masterNoPreloadAcc: true,
             // the maximum time drift in ms before a block is invalid
             maxDrift: 200,
+            // heights at which the "block too early" temporal check is bypassed
+            // (historical migration incidents, e.g. block 3889058). This is chain
+            // data, NOT an env var: a per-node SKIP_EARLY_CHECK_BLOCKS made two
+            // nodes disagree on block validity at that height (F5, plan §2.2).
+            skipEarlyCheckBlocks: [3889058],
             // the maximum number of transactions in a single block (overridden below)
             // the max length of a transfer memo
             memoMaxLength: 250,

@@ -17,8 +17,12 @@ const GrowInt = require('growint')
 const default_replay_output = 100
 const replay_output = process.env.REPLAY_OUTPUT || default_replay_output
 // Temporal check bypass for specific block heights during migrations/forks.
-// Set via env: SKIP_EARLY_CHECK_BLOCKS=3889058,4000000
-const skip_check_early_blocks = (process.env.SKIP_EARLY_CHECK_BLOCKS || '3889058').split(',').map(Number)
+// Authority is config.skipEarlyCheckBlocks (chain data, identical on every node).
+// The old per-node SKIP_EARLY_CHECK_BLOCKS env var is deprecated and ignored: it
+// let two nodes disagree on block validity at that height (F5, plan §2.2).
+if (process.env.SKIP_EARLY_CHECK_BLOCKS && typeof logr !== 'undefined')
+    logr.warn('SKIP_EARLY_CHECK_BLOCKS is deprecated and ignored — set '
+        + 'skipEarlyCheckBlocks in config.history instead (consensus parameter)')
 const max_batch_blocks = 10000
 
 class Block {
@@ -722,8 +726,8 @@ let chain = {
             cb(false); return
         }
 
-        // check if new block isnt too early
-        if (newBlock.timestamp - previousBlock.timestamp < minerPriority*config.blockTime && skip_check_early_blocks.indexOf(newBlock._id) === -1) {
+        // check if new block isnt too early (bypass list is chain data, see F5)
+        if (newBlock.timestamp - previousBlock.timestamp < minerPriority*config.blockTime && !chain.isEarlyCheckSkipped(newBlock._id)) {
             logr.error('block too early for miner with priority #'+minerPriority)
             cb(false); return
         }
@@ -873,6 +877,14 @@ let chain = {
         const same = skips.length === expected.length && skips.every((n, i) => n === expected[i])
         if (!same) return { ok: false, reason: 'mismatch' }
         return { ok: true }
+    },
+
+    // F5: the "block too early" bypass list is chain data (config), identical on
+    // every node. It is deliberately NOT an env var: a per-node value lets two
+    // nodes disagree on block validity at that height (plan §2.2, F5).
+    isEarlyCheckSkipped: (blockId) => {
+        const list = config.skipEarlyCheckBlocks
+        return Array.isArray(list) && list.indexOf(blockId) !== -1
     },
 
     // View-change: the round (view) of a candidate is the ladder position of its

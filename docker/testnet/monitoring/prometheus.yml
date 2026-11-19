@@ -1,0 +1,32 @@
+# Prometheus scrape config for the Avalon testnet.
+#
+# Attach this to a Prometheus sidecar on the same docker network as the
+# testnet compose project (docker/testnet/docker-compose.drills.yml), or point
+# the targets at the host ports (bootstrap is 4201, minerN is 4201+N).
+#
+#   docker run --rm -p 9090:9090 \
+#     --network avalon-drills_default \
+#     -v "$PWD/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+#     -v "$PWD/alerts.yml:/etc/prometheus/alerts.yml:ro" \
+#     prom/prometheus --config.file=/etc/prometheus/prometheus.yml
+#
+# Metrics are served by every node at GET /metrics (Prometheus text 0.0.4).
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  - job_name: avalon
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - bootstrap:3001
+          - miner1:3001
+          - miner2:3001
+          - miner3:3001
+          - miner4:3001
+          - miner5:3001

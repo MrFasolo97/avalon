@@ -1,0 +1,63 @@
+# Alert rules for the Avalon testnet. Loaded by prometheus.yml (rule_files).
+#
+# Metric names come from GET /metrics (src/http/metrics/index.js); event series
+# come from the structured event ring buffer (src/events.js). Tune the windows
+# for your block time: the drills run at 3 s blocks, so 2 min ≈ 40 blocks.
+
+groups:
+  - name: avalon
+    rules:
+      - alert: AvalonHeightStalled
+        # Head did not move for 2 minutes on any node: chain halt.
+        expr: changes(avalon_height[2m]) == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Avalon chain halted on {{ $labels.instance }} (head {{ $value }})"
+
+      - alert: AvalonIsolated
+        expr: avalon_peers < 1
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Avalon node {{ $labels.instance }} has no peers"
+
+      - alert: AvalonQuorumDegraded
+        expr: avalon_eligible_leaders < avalon_active_leaders
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Avalon quorum degraded on {{ $labels.instance }} (eligible < active)"
+
+      - alert: AvalonLeaderJailed
+        expr: avalon_leader_jailed == 1
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "Avalon leader {{ $labels.leader }} jailed on {{ $labels.instance }}"
+
+      - alert: AvalonPossBlocksHigh
+        expr: avalon_poss_blocks > 20
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Avalon candidate backlog on {{ $labels.instance }} ({{ $value }} candidates)"
+
+      - alert: AvalonHaltBreakerFired
+        # Fires even when the chain self-healed before HeightStalled would trigger.
+        expr: increase(avalon_event_total{type="halt-breaker-fired"}[5m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Avalon halt breaker fired (a halt was auto-recovered)"
+
+      - alert: AvalonChainDivergence
+        expr: increase(avalon_event_total{type="chain-divergence"}[5m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "Avalon divergence suspected on {{ $labels.instance }}"
+
+      - alert: AvalonRecoverGiveup
+        expr: increase(avalon_event_total{type="recover-giveup"}[10m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Avalon node {{ $labels.instance }} gave up a recovery (will retry)"

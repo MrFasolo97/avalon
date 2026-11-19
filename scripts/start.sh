@@ -18,6 +18,22 @@
 #export NO_DISCOVERY=1
 #export DISCOVERY_EXCLUDE=dtube
 
+# HTTP / API security (see doc/mainnet-deployment-and-rollback.md)
+# CORS_ORIGIN unset = no CORS headers (browsers cannot read the API cross-origin)
+#export CORS_ORIGIN='*'
+# TRUST_PROXY: only set behind a reverse proxy, or all clients share one rate-limit bucket
+#export TRUST_PROXY=1
+# Admin endpoints (/mineBlock, /recover, /debug, /logs) FAIL CLOSED (401) without a token
+#export ADMIN_TOKEN=
+#export LOG_ADMIN_TOKEN=
+# Local/dev only: allow token-less admin endpoints
+#export ADMIN_ALLOW_ANONYMOUS=1
+# Abuse limits
+#export CONTENT_MAX_COMMENTS=2000
+#export CONTENT_MAX_RESULTS=10000
+#export IMG_MAX_BYTES=10485760
+#export IMG_MAX_PIXELS=20000000
+
 # Enable more modules
 #export NOTIFICATIONS=1
 #export RANKINGS=1
@@ -54,6 +70,17 @@ export MAX_PEERS=20
 export NODE_OWNER=dtube
 export NODE_OWNER_PUB=dTuBhkU6SUx9JEx1f4YEt34X9sC7QGso2dSrqE8eJyfz
 export NODE_OWNER_PRIV=34EpMEDFJwKbxaF7FhhLyEe3AhpM4dwHMLVfs4JyRto5
+
+# Consensus — Layer S/H (see doc/mainnet-deployment-and-rollback.md)
+# QC_SHADOW=1 enables the read-only vote-ledger observer (certifies, never refuses)
+#export QC_SHADOW=1
+# HALT_BREAKER=0 disables the halt-breaker recovery round on this node (liveness only)
+#export HALT_BREAKER=0
+# NOTE: the S1' gates singleVote / qcEnforce are CHAIN config (config.history), not
+# env — a lone node flipping either would refuse its own votes and diverge. Set them
+# (only) via the testnet config overlay; they stay off on mainnet.
+#export VOTE_STATE_PATH=./state/vote_state.json
+#export SCHEDULE_PERSIST_PATH=./state/schedule.json
 
 # Memory limit for in-memory rebuild (in MB)
 export NODE_OPTIONS=--max_old_space_size=8192

@@ -200,6 +200,12 @@ let config = {
             canonicalLeaderOrder: false,
             // max hold time for a future-dated block in the pending queue (plan §5.4)
             pendingBlockMaxMs: 30000,
+            // S1' gates (single-vote INV-1 + shadow enforcement). Chain config,
+            // NOT a per-node env: a lone node flipping either would refuse its
+            // own votes and diverge (same rule as skipEarlyCheckBlocks, F5).
+            // Both stay off until the view-change round election ships.
+            singleVote: false,
+            qcEnforce: false,
 
             forceFinalize: false,
             // force finalize fallback: if backoff is exhausted without quorum among

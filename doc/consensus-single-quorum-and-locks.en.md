@@ -480,9 +480,14 @@ It does not make 5 validators fault-tolerant to 2 failures, because no protocol 
 
 ## 7. S1′ single-vote / one-candidate-per-round — implementation status (2026-11-04)
 
-Two variants were implemented in `src/consensus.js`, both behind
-**`CONSENSUS_SINGLE_VOTE=1`** (default **off**) and reported as `singleVote` in
-`/consensus` and `avalon_flag{name="single_vote"}` in `/metrics`:
+Two variants were implemented in `src/consensus.js`, both gated by the **chain
+config** `singleVote` (default **off**) and reported as `singleVote` in
+`/consensus` and `avalon_flag{name="single_vote"}` in `/metrics`. This is a
+consensus-affecting toggle, so it is chain config and **not** a per-node env var:
+a lone node flipping it would refuse its own votes and diverge (same rule as
+`skipEarlyCheckBlocks`, F5). The legacy `CONSENSUS_SINGLE_VOTE` env is not read.
+The drill enables it through the shared overlay
+(`docker/testnet/docker-compose.drills-single-vote.yml` → `LAYER_SH_SINGLE_VOTE`):
 
 1. **Strict single-vote (both phases).** `castVote` refused any vote that was not
    the best candidate and any second hash at a `(height, phase)` (INV-1 via
@@ -530,8 +535,9 @@ a redesign, not a tweak.
 `chain.compareBlockRank`, every node votes `candidates[0]` and it requires unanimity —
 already "one candidate, one proposer".
 
-**Conclusion.** The gate stays **opt-in and default off**
-(`docker/testnet/docker-compose.drills-single-vote.yml` reproduces the experiment).
+**Conclusion.** The gate stays **off** (chain config `singleVote: false`); the
+drill reproduces it via the shared overlay
+(`docker/testnet/docker-compose.drills-single-vote.yml` → `LAYER_SH_SINGLE_VOTE`).
 The **F6, one-proposer and halt-stagger fixes are safe and always-on** — they make the
 schedule deterministic, reduce duplicate proposals and make halt recovery reliable.
 The practical fork in G10/G11 is already fixed by `eligibleLeaders()` (F2) with the

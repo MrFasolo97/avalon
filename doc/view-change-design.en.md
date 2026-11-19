@@ -3,7 +3,7 @@
 **Status:** design (not implemented). Companion to
 [`consensus-single-quorum-and-locks.en.md`](./consensus-single-quorum-and-locks.en.md) §7.
 **Goal:** make strict single-vote (INV-1) compatible with halt/liveness recovery, so
-the `CONSENSUS_SINGLE_VOTE` gate can become the default.
+the `singleVote` config gate can become the default.
 
 ## 1. Why the gate cannot just be switched on
 
@@ -68,7 +68,7 @@ round number per height.
 | `src/chain.js` | `minerWorker` proposes only in its round at `dueAt(h, r)` (already close: the ladder timing becomes the round timing); the "halt stagger" is subsumed by `dueAt`. |
 | `src/p2p.js` | consensus messages (`t:6`) already carry `h` (S0′); add the round so the receiver validates `(h, r, phase)`. |
 | block format | **unchanged** — the round is derived, not stored. No flag day on the block hash. |
-| activation | height-gated `config.history` entry (a flag day), opt-in via `CONSENSUS_SINGLE_VOTE=1` until the drills are green. |
+| activation | height-gated `config.history` entry (a flag day); gated by the `singleVote` chain config (`config.singleVote`, default off) until the drills are green — never a per-node env. |
 
 ## 5. Tests and drills (acceptance)
 

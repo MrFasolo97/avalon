@@ -13,19 +13,29 @@ const FF_BACKOFF_MS = [600, 1200, 2400, 4800]
 
 // S0' shadow mode: observe every vote in the ledger and compare the ledger's
 // verdict with the production one. Never refuses anything. Off by default.
+// It is read-only observability, so it stays a per-node env switch.
 const QC_SHADOW = process.env.QC_SHADOW === '1'
 // S1' enforcement: when enabled, the S0' shadow checks become real gates —
 // an invalid `justify` drops the vote and a vote-state violation refuses to
 // broadcast our own vote. Default OFF so mainnet keeps the shadow behaviour
 // until the flag day. Enabling requires QC_SHADOW (the checks must run).
-const QC_ENFORCE = process.env.QC_ENFORCE === '1'
+//
+// This changes what a node votes for, so it is CHAIN config, not a per-node
+// env: a lone node flipping it would refuse its own votes and diverge. Set
+// `qcEnforce` in config.history (or the testnet CONFIG_OVERLAY) so every node
+// derives the same value. The QC_ENFORCE env is not read.
+const QC_ENFORCE = typeof config !== 'undefined' && config.qcEnforce === true
 const VOTE_STATE_PATH = process.env.VOTE_STATE_PATH || './state/vote_state.json'
 
 // S1' single-vote (INV-1, doc/consensus-single-quorum-and-locks §2.3): a node
 // casts at most ONE hash per (height, phase), for the deterministic best-ranked
 // candidate it knows. A conflicting vote is refused — halt rather than fork.
-// Opt-in while it is validated on the drills (CONSENSUS_SINGLE_VOTE=1).
-const SINGLE_VOTE = process.env.CONSENSUS_SINGLE_VOTE === '1'
+// Not shippable yet (it needs the view-change round election), so it stays OFF.
+//
+// A per-node env switch would let one node refuse its own votes and diverge, so
+// this is CHAIN config: set `singleVote` in config.history (or the testnet
+// CONFIG_OVERLAY). The CONSENSUS_SINGLE_VOTE env is not read.
+const SINGLE_VOTE = typeof config !== 'undefined' && config.singleVote === true
 
 let consensus = {
     observer: false,

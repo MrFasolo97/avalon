@@ -42,6 +42,9 @@ function runChild(extraEnv, body) {
             maxDrift: 200,
             forceFinalize: false,
             forceFinalizeFallback: false,
+            // S1' gates are chain config now, not env (test-driven here)
+            singleVote: process.env.__CFG_SINGLE_VOTE === '1',
+            qcEnforce: process.env.__CFG_QC_ENFORCE === '1',
             read: () => global.config
         }
         const leader = (n) => ({ name: n, pub_leader: 'pub-' + n })
@@ -233,6 +236,28 @@ test('disabled: no comparison, no counters, no guard execution', () => {
     assert.strictEqual(off.value.guard, null)
     assert.strictEqual(off.value.internalErrors, 0)
     assert.strictEqual(off.value.checked, 0)
+})
+
+console.log('\n--- S1\' gates are chain config, not a per-node env ---')
+
+const cfgOn = runChild({ __CFG_SINGLE_VOTE: '1', __CFG_QC_ENFORCE: '1' }, `
+    const consensus = require(path.join(root, 'src', 'consensus'))
+    out({ singleVote: consensus.singleVoteEnabled, qcEnforce: consensus.qc.enforce })
+`)
+
+test('config.singleVote / config.qcEnforce drive the S1\' gates', () => {
+    assert.strictEqual(cfgOn.value.singleVote, true)
+    assert.strictEqual(cfgOn.value.qcEnforce, true)
+})
+
+const envIgnored = runChild({ CONSENSUS_SINGLE_VOTE: '1', QC_ENFORCE: '1' }, `
+    const consensus = require(path.join(root, 'src', 'consensus'))
+    out({ singleVote: consensus.singleVoteEnabled, qcEnforce: consensus.qc.enforce })
+`)
+
+test('the legacy per-node env vars are ignored (config is the source of truth)', () => {
+    assert.strictEqual(envIgnored.value.singleVote, false)
+    assert.strictEqual(envIgnored.value.qcEnforce, false)
 })
 
 console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED') + ' (' + passed + ' passed, ' + failed + ' failed)')

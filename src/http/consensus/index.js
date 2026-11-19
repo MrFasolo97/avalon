@@ -61,9 +61,9 @@ module.exports = {
                     haltBreaker: !!config.haltBreaker && process.env.HALT_BREAKER !== '0',
                     standbyEnabled: !!config.standbyEnabled,
                     canonicalLeaderOrder: !!config.canonicalLeaderOrder,
-                    // S1' single-vote enforcement (opt-in via CONSENSUS_SINGLE_VOTE=1)
+                    // S1' single-vote enforcement (chain config: config.singleVote)
                     singleVote: !!consensus.singleVoteEnabled,
-                    // S0' shadow / S1' enforcement (opt-in via QC_SHADOW=1 / QC_ENFORCE=1)
+                    // S0' shadow (per-node env QC_SHADOW) / S1' enforcement (config.qcEnforce)
                     qcShadow: !!(consensus.qc && consensus.qc.enabled),
                     qcEnforce: !!(consensus.qc && consensus.qc.enforce)
                 }

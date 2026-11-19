@@ -832,15 +832,17 @@ fork**.
 | 14 | `docker/testnet/*` | G1–G12 scripts + `statehash` comparison | 4 |
 | 15 | `doc/mainnet-deployment-and-rollback.md`, `doc/migration-runbook-no-econs.en.md` | new stages, gates, heartbeat procedure | 4 |
 | 16 | `doc/leader-101.md` | explain soft jail / standbys to operators | 4 |
+| 17 | `scripts/upgrade-preflight.js` | **new** — automates the §8.2 G-1 (version census) + G-2 (schedule agreement) gates | 1 |
+| 18 | `src/p2p.js` | release `version` from `package.json` (was a hardcoded `1.6.6`, so the G-1 census could not tell two releases apart) | 1 |
 
 Estimated effort: **S0+S1 ≈ 10–14 engineering days** (incl. tests), **H1+H2 ≈ 6–8 days**,
 **testnet soak ≈ 5 days**. Critical path: `leaderHealth` + `chain.js` ladder, then the
 quorum unification, then the standby set.
 
 `eslint` baseline is now **0 errors** (the `src/http/auth/index.js` `no-lonely-if` was fixed);
-`npm test` runs 20 assert-only suites, all green.
+`npm test` runs 23 assert-only suites, all green (re-run 2026-11-12).
 
-### 9.1 Implementation status (this branch)
+### 9.1 Implementation status (this branch — updated 2026-11-12)
 
 Implemented and unit-tested (`src/`, `test/`):
 
@@ -855,22 +857,43 @@ Implemented and unit-tested (`src/`, `test/`):
 * S0′ shadow: vote ledger, crash-safe vote state, QC-on-the-wire (`h` + `justify`),
   observer/backup finalize gate.
 * Observability: `/consensus`, `/debug/statehash`, additive `/schedule`, `/leader`,
-  `/allminers`, `/block` apidoc; `leaderStats` mirrors jail state; `scripts/heartbeat.js`.
+  `/allminers`, `/block` apidoc; `/metrics` (Prometheus), `/events` (structured ring
+  buffer); `leaderStats` mirrors jail state; `scripts/heartbeat.js`,
+  `scripts/avalon-watch.js` (Discord watcher) and the ready-made `docker/testnet/monitoring/`
+  scrape + alert rules.
+* Ops / flag-day tooling: `scripts/upgrade-preflight.js` automates gates **G-1** (version
+  census) and **G-2** (schedule agreement); the P2P `version` now comes from `package.json`
+  (it was a hardcoded `1.6.6`, so the census could not tell two releases apart). The S1′
+  gates `singleVote`/`qcEnforce` are chain config, not env.
+* Determinism fixes (§2.2): canonical leader order (**F6**, `generateLeaders()` sorts by
+  `(node_appr desc, name asc)`), one proposer per round (`minerWorker()`), and halt-stagger
+  recovery. These are **always-on** and not height-gated.
+* **F2 — deterministic `eligible(h)`: done.** `consensus.eligibleLeaders()` now derives the
+  quorum set from `chain.activeLeaderSet()` (identical on every node) instead of the local
+  `activeLeaders()` view; during the genesis transition it keeps the historical behaviour
+  while `config.masterName` is still in the epoch shuffle, so a fresh chain cannot deadlock.
 
-Still open before **testnet**: run the G1–G12 drills end-to-end (G11 must pass before the
-halt breaker is trusted), fix whatever the run surfaces.
+**Drill matrix: G1–G12 = 12/12 PASS** (run 2026-11-03/04, `docker/testnet`, 5 leaders +
+2 standbys; details and the fixes they drove in `docker/testnet/README-drills.md`).
+
+Still open before the **public multi-operator testnet**: launch it (coordinator freezes the
+tag, publishes the config patch, bootstraps and fixes a window — `doc/public-testnet.md`) and
+run the one drill the local suite cannot cover, **real P2P discovery over the internet** (the
+local drills run `NO_DISCOVERY=1`, star topology). Re-run G1–G12 on the frozen artifact.
 
 Still open before **mainnet**:
 
-* **S1′ enforcement is not shippable yet.** Two §4.2 preconditions remain: a
-  deterministic, chain-derived `eligible(h)` (**F2** — today `eligibleLeaders()` still
-  walks each node's local `recentBlocks`, so the denominator can differ by a block
-  between nodes) and "one candidate per `(height, phase)` per signer" (the protocol
-  still votes on every candidate at a height). Both are Layer S/H proper.
 * **Layer H flag day** (`H_strict = H_standby = 13 400 000`): version census, 1 000-block
-  schedule-agreement + warn-mode-clean gate, G1–G12 green, pre-H DB/`blocks.bson`
-  snapshot, operators coordinated. Freeze the heights before publishing.
-* Operator docs: `mainnet-deployment-and-rollback` (§9.15) is still missing.
+  schedule-agreement + warn-mode-clean gate, G1–G12 green on the frozen tag, pre-H
+  DB/`blocks.bson` snapshot, operators coordinated. Freeze the heights before publishing.
+  Runbook (gates + cutover sequence + rollback): **`doc/mainnet-deployment-and-rollback.md`**.
+* **S1′ single-vote stays opt-in and OFF.** It is **not shippable** as designed:
+  **G1, G7, G8 PASS** with the gate on, but **G10/G11 (halt recovery) FAIL** — a
+  single-vote protocol needs a view-change / round-election to keep one proposer per round,
+  which is a redesign, not a tweak (see `consensus-single-quorum-and-locks.en.md` §7). The
+  shipping config keeps it off; the round election is the `feat/view-change` follow-up.
+* Operator docs: `mainnet-deployment-and-rollback` (this plan's §9.15) is **now written**
+  (`doc/mainnet-deployment-and-rollback.md`), together with `doc/public-testnet.md`.
 
 ---
 

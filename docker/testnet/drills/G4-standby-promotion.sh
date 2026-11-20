@@ -8,7 +8,10 @@ source "$SCRIPT_DIR/lib.sh"
 
 require_running
 
-VICTIM="avalon-drills-miner5"
+# Victim must be in the current rotation; PROMOTED is the first leader below
+# the top-N cut in canonical approval order (miner4 in the 7-node drill net).
+VICTIM="${VICTIM:-avalon-drills-miner5}"
+PROMOTED="${PROMOTED:-standby1}"
 VICTIM_NAME="$(leader_name "$VICTIM")"
 log "G4 starting: stopping $VICTIM until jailed"
 start_height=$(get_height)
@@ -50,19 +53,19 @@ fi
 # depend on node's JSON quoting style (single vs double quotes).
 consensus=$(get_consensus)
 active=$(json_extract "$consensus" ".activeLeaders.map(l => l.name || l).join(',')" || echo "")
-if echo ",$active," | grep -q ",standby1,"; then
-    pass "standby1 promoted to active leader set ($active)"
+if echo ",$active," | grep -q ",$PROMOTED,"; then
+    pass "$PROMOTED promoted to active leader set ($active)"
 else
-    fail "standby1 not found in active leader set: $active"
+    fail "$PROMOTED not found in active leader set: $active"
 fi
 
 # Verify standby1 produced at least one block
 schedule=$(api_get "$BOOTSTRAP" "/schedule")
 shuffle=$(json_extract "$schedule" ".shuffle.map(l => l.name || l).join(',')" || echo "")
-if echo ",$shuffle," | grep -q ",standby1,"; then
-    pass "standby1 appears in the current schedule shuffle ($shuffle)"
+if echo ",$shuffle," | grep -q ",$PROMOTED,"; then
+    pass "$PROMOTED appears in the current schedule shuffle ($shuffle)"
 else
-    log "Warning: standby1 not in shuffle yet (may need one more epoch): $shuffle"
+    fail "$PROMOTED not in the schedule shuffle after promotion: $shuffle"
 fi
 
 start_nodes "$VICTIM"

@@ -8,7 +8,10 @@ source "$SCRIPT_DIR/lib.sh"
 
 require_running
 
-VICTIM="avalon-drills-miner5"
+# The victim must be a leader in the current rotation, not a fixed name: the
+# canonical top-5 changes with approvals/jail state. Defaults kept for the
+# original five-miner topology; override VICTIM for other rotations.
+VICTIM="${VICTIM:-avalon-drills-miner5}"
 VICTIM_NAME="$(leader_name "$VICTIM")"
 log "G2 starting: stopping $VICTIM until jailed"
 start_height=$(get_height)

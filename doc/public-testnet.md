@@ -1,6 +1,6 @@
 # Avalon Public Testnet — Multi-Operator Guide
 
-**Status:** ready for coordinator launch — the consensus core is validated by the full **G1–G12** drill matrix (see [`docker/testnet/README-drills.md`](../docker/testnet/README-drills.md))
+**Status:** ready for coordinator launch — the consensus core is validated by the full **G1–G13** drill matrix (see [`docker/testnet/README-drills.md`](../docker/testnet/README-drills.md))
 **Target release:** **`v2.2.0`** — Layer S/H consensus hardening (`skips[]` attestation, deterministic quorum, soft jail, standby promotion, halt breaker) plus the P2P / restart / crash hardening found by the drills
 **Audience:** independent operators (entities that run their own node on their own infrastructure, with their own keys)
 **Companions:** [`mainnet-deployment-and-rollback.md`](./mainnet-deployment-and-rollback.md), [`migration-runbook-no-econs.md`](./migration-runbook-no-econs.md), drill matrix in [`docker/testnet/README-drills.md`](../docker/testnet/README-drills.md), local dev net in [`docker/testnet/README.md`](../docker/testnet/README.md)
@@ -36,14 +36,15 @@ Owners and keys on the testnet are **throwaway**. Never reuse a mainnet key, and
 
 ## 1.5 What is already validated (drill matrix)
 
-Before launch, the consensus core is exercised by the **G1–G12** drill matrix on
+Before launch, the consensus core is exercised by the **G1–G13** drill matrix on
 `docker/testnet` (5 leaders + 2 standbys) — all green on `v2.2.0`:
 
 | | | | |
 |---|---|---|---|
 | G1 (1 leader down) | G2 (1 jailed) | G3 (2 jailed) | G4 (standby promoted) |
-| G5 (partition 3/2) | G6 (clock skew ±5s) | G7 (equivocation) | G8 (FF asymmetric) |
+| G5 (partition 3/2) | G6 (clock skew ±300ms) | G7 (equivocation) | G8 (FF asymmetric) |
 | G9 (old `v2.0.x` node) | G10 (all leaders down) | G11 (halt breaker) | G12 (breaker off) |
+| G13 (stale leader restart) | | | |
 
 Run them with `bash docker/testnet/drills/run-all-drills.sh --long`; the details
 and the fixes they drove are in

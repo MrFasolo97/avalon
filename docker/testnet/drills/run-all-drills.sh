@@ -21,6 +21,7 @@ FAST_DRILLS=(
     G8-force-finalize-asymmetric.sh
     G10-all-leaders-down.sh
     G11-halt-breaker-recovery.sh
+    G13-stale-leader-restart.sh
     G9-old-node.sh
 )
 

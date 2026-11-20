@@ -48,6 +48,15 @@ let chain = {
     recentBlocks: [],
     worker: null,
     workerPending: false,
+    // Set by p2p when a recovery batch finishes. A node that just caught up
+    // must not immediately mine from its (freshly rebuilt) head: a backup may
+    // already have proposed a candidate for the next height while we were
+    // offline. Mining from that stale view creates a competing block and a
+    // 4-4 split that the forward-only recovery cannot heal (F8).
+    lastCatchUpAt: 0,
+    markCatchUp: () => {
+        chain.lastCatchUpAt = Date.now()
+    },
     recentTxs: {},
     getNewKeyPair: () => {
         let privKey, pubKey
@@ -339,6 +348,16 @@ let chain = {
         mineInMs += 20
         logr.debug('Trying to mine in '+mineInMs+'ms (ladder pos '+pos+')')
         consensus.observer = false
+        // A node that JUST finished recovery has a STALE VIEW: a backup may have
+        // already proposed the next height while we were offline. Gate the
+        // one-proposer and pending_head checks on that BOUNDED grace window only.
+        // Using the permanent `chainHalted` state instead would make every node
+        // yield forever on a stale, unfinalisable possBlock (e.g. one held by an
+        // observer) and deadlock the chain after an all-leaders-down restart.
+        const catchUpGraceMs = config.blockTime * config.leaders
+        const recentCatchUp = chain.lastCatchUpAt > 0
+            && (Date.now() - chain.lastCatchUpAt) < catchUpGraceMs
+        const chainHalted = (new Date().getTime() - block.timestamp) > config.blockTime * config.leaders
         if (mineInMs < config.blockTime/2) {
             // Giving up the slot is only safe if somebody else can take it.
             // With no other miner in the recent history (genesis, a 1-node
@@ -350,7 +369,6 @@ let chain = {
             // If the head itself is stale the chain is HALTED: nobody else is
             // going to produce instead of us, so giving up the slot here (the D3
             // fix for a healthy chain) would freeze it forever. Mine anyway.
-            const chainHalted = (new Date().getTime() - block.timestamp) > config.blockTime * config.leaders
             if (chainHalted) {
                 // Head is old: the ladder timing is meaningless (every slot is
                 // already "due"). Instead of making the backups give up — which
@@ -360,9 +378,16 @@ let chain = {
                 // yield once an earlier one produced. That keeps ONE candidate per
                 // round (no scatter) while letting a backup take over when the
                 // scheduled leader is absent.
-                mineInMs = 20 + pos * config.blockTime
-                logr.warn('Chain halted (head is old): '
-                    + (pos === 0 ? 'scheduled leader' : 'backup pos ' + pos) + ' will try to mine')
+                // A recent catch-up is a STALE VIEW: give in-flight candidates
+                // time to arrive before proposing from the freshly rebuilt head.
+                const stallMs = recentCatchUp ? catchUpGraceMs : 20
+                mineInMs = stallMs + pos * config.blockTime
+                logr.warn((recentCatchUp ? 'Recent catch-up' : 'Chain halted')
+                    + ' (head is old): '
+                    + (pos === 0 ? 'scheduled leader' : 'backup pos ' + pos)
+                    + (recentCatchUp
+                        ? ' staggering in ' + mineInMs + 'ms to avoid a stale-head fork'
+                        : ' will try to mine'))
             } else if (othersProducing) {
                 logr.warn('Slow performance detected, will not try to mine next block')
                 return
@@ -379,15 +404,29 @@ let chain = {
             chain.workerPending = false
             // One proposer per round: a BACKUP proposes only if no candidate block
             // for this height has been seen yet — i.e. the leader's (and earlier
-            // backups') slots are proven empty. The scheduled leader (ladder
-            // position 0) always proposes. This stops a backup from adding a
-            // second candidate for a height the leader already filled, which is
-            // what makes strict single-vote freeze.
-            const candidateSeen = pos > 0 && consensus.possBlocks.some(function(pb) {
+            // backups') slots are proven empty. A node inside its POST-CATCH-UP
+            // GRACE window applies the same rule even at ladder position 0: a
+            // backup may have filled the slot while we were offline, and
+            // proposing from that stale view would create a competing block.
+            const candidateSeen = (pos > 0 || recentCatchUp) && consensus.possBlocks.some(function(pb) {
                 return pb && pb.block && pb.block._id === height
             })
             if (candidateSeen) {
-                logr.debug('one-proposer: candidate for ' + height + ' already seen; backup pos ' + pos + ' yields')
+                logr.debug('one-proposer: candidate for ' + height + ' already seen; '
+                    + (pos > 0 ? 'backup pos ' + pos : 'recently recovered leader') + ' yields')
+                return
+            }
+            // A peer may be holding a candidate for this height that we have not
+            // received yet (it was produced while we were catching up). Its
+            // NODE_STATUS advertises `pending_head`; during the grace window we
+            // yield instead of mining from a view we know is behind. The check is
+            // deliberately bounded to the grace window: after it expires we MUST
+            // propose again, otherwise a stale unfinalisable candidate would
+            // freeze the chain forever (all-leaders-down recovery deadlock).
+            if (recentCatchUp && p2p.sockets && p2p.sockets.some(function(ws) {
+                return ws && ws.node_status && ws.node_status.pending_head >= height
+            })) {
+                logr.warn('Recently recovered node yields: a peer already has a candidate for ' + height)
                 return
             }
             chain.mineBlock(function(error, finalBlock) {

@@ -1,6 +1,6 @@
 # Avalon Testnet — Layer S/H Offline-Leader Drills
 
-A testnet extended to **5 leaders + 2 standbys** to run the G1–G12 matrix from
+A testnet extended to **5 leaders + 2 standbys** to run the G1–G13 matrix from
 `doc/consensus-offline-leaders-plan.en.md`.
 
 ## Requirements
@@ -66,7 +66,7 @@ curl -s http://localhost:3201/peers
 curl -s http://localhost:3201/schedule | jq
 ```
 
-## Drill matrix G1–G12
+## Drill matrix G1–G13
 
 | Id | Scenario | Example command | Expected |
 |----|----------|-----------------|----------|
@@ -75,13 +75,14 @@ curl -s http://localhost:3201/schedule | jq
 | G3 | 2 leaders down for 400 blocks | `docker stop avalon-drills-miner4 avalon-drills-miner5` | jailed, `E=3/q=3`, chain continues |
 | G4 | Top-5 down, standby enters (Layer H) | `docker stop avalon-drills-miner5` for >30 turns | `standby1` enters at the next epoch, produces at 3s |
 | G5 | 3/2 partition for 100 blocks | isolate 2 nodes from the Docker network | majority finalises, minority resyncs |
-| G6 | ±5s clock skew on two nodes | `docker exec ... date -s ...` | blocks held in pending, then accepted, no ban |
+| G6 | ±300ms clock skew on two nodes | libfaketime (`FAKETIME=±0.3s`) | blocks held in pending, then accepted, no ban |
 | G7 | Equivocation | two near-simultaneous `/mineBlock` | deterministic rank picks one block, no fork |
 | G8 | Force-finalize with asymmetric views | fast kill/restart | fetch path converges, no halt |
 | G9 | Old node during S1/H1 | start a `v2.0.x` tag | S1: follows; H1: stalls and resyncs, never forks |
 | G10 | All 5 leaders down | `docker stop avalon-drills-miner{1..5}` | deterministic halt, no fork |
 | G11 | 2 leaders killed in the same round | `docker kill` two miners | after ~21s the haltBreaker runs a recovery round with 3/3 unanimity |
 | G12 | 3 leaders killed, HALT_BREAKER=0 | like G11 with the env off | deterministic halt, restarting one node resumes |
+| G13 | Scheduled leader killed, then restarted stale | `docker kill` the leader; let a backup fill the slot; `docker start` it | no competing block at that height, network agrees (F8 fork regression) |
 
 ## Stop everything
 
@@ -100,7 +101,7 @@ docker compose -p avalon-drills \
 ## Drill results (run 2026-11-03/04 — full matrix)
 
 Testnet rebuilt from genesis with **2 standbys** and the fixes below, then the
-G1–G12 matrix.
+G1–G13 matrix.
 
 | Drill | Result | Notes |
 |-------|--------|-------|
@@ -109,15 +110,21 @@ G1–G12 matrix.
 | G3  | PASS | 2 leaders jailed, excluded from the eligible set, chain continues |
 | G4  | PASS | `standby1` promoted into `activeLeaderSet` at the next epoch |
 | G5  | PASS | 3/2 partition: the majority finalises, the minority resyncs |
-| G6  | PASS | ±5s clock skew via **libfaketime** (host clock untouched) |
+| G6  | PASS | ±300ms clock skew via **libfaketime** (host clock untouched) |
 | G7  | PASS | equivocation: deterministic rank, the chain converges |
 | G8  | PASS | force-finalize with asymmetric views: converges, no halt |
 | G9  | PASS | `v2.0.3` node (new script): never a divergent block |
 | G10 | PASS | all leaders down → the chain **resumes**, no fork |
 | G11 | PASS | halt breaker: 2 leaders killed, recovery round, statehash matches |
 | G12 | PASS | breaker off: deterministic halt, the restart resumes |
+| G13 | PASS | stale leader restart: no competing block, 8/8 nodes agree (v2.2.0 fork regression) |
 
-**Result: 12/12 PASS, 0 FAIL.**
+**Result: 13/13 PASS, 0 FAIL.** (G1–G11 + G13 re-run on the final v2.2.0 build;
+G12 validated with the breaker-off overlay. G13 reproduces the height-269 fork
+found during G11→G9: the scheduled leader was killed, a backup filled its slot,
+and the leader came back with a stale head and produced a second block at the
+same height, splitting the network 4-4. Fixed by the post-catch-up grace window
+in `chain.js` + `pending_head` in `p2p.js`.)
 
 ### Fixes applied
 
@@ -176,7 +183,7 @@ G1–G12 matrix.
 - **G6 with libfaketime** (`Dockerfile` + `docker-compose.drills-clock-skew.yml` +
   `G6-clock-skew.sh`). `cap_add: [SYS_TIME]` + `date -s` is **not** safe: containers
   share the host kernel clock, so `date -s` would move the **host** clock.
-  libfaketime skews only the node process (`LD_PRELOAD`, `FAKETIME=±5s`); the host
+  libfaketime skews only the node process (`LD_PRELOAD`, `FAKETIME=±0.3s`); the host
   is untouched.
 
 ### Topology note

@@ -73,6 +73,19 @@ let p2p = {
     recoverAttempt: 0,
     lastDivergenceHeight: null,
     nodeId: null,
+    // Highest height for which we hold a candidate block (finalised head or
+    // in-flight possBlock). Advertised in NODE_STATUS so a node that just came
+    // back online can see that someone already proposed the next height before
+    // it mines from its stale local head (F8 fork fix). Old nodes ignore the
+    // extra field, so this is wire-compatible in both directions.
+    pendingHead: () => {
+        let head = chain.getLatestBlock()._id
+        const cands = consensus.possBlocks || []
+        for (let i = 0; i < cands.length; i++)
+            if (cands[i] && cands[i].block && cands[i].block._id > head)
+                head = cands[i].block._id
+        return head
+    },
     init: () => {
         p2p.generateNodeId()
         let server = new WebSocket.Server({host:p2p_host, port: p2p_port, maxPayload: 10 * 1024 * 1024})
@@ -329,6 +342,7 @@ let p2p = {
                     head_block: chain.getLatestBlock()._id,
                     head_block_hash: chain.getLatestBlock().hash,
                     previous_block_hash: chain.getLatestBlock().phash,
+                    pending_head: p2p.pendingHead(),
                     nodeId: p2p.nodeId.pub,
                     version: version,
                     sign: sign
@@ -603,7 +617,12 @@ let p2p = {
                 peersAhead.push(p2p.sockets[i])
 
         if (peersAhead.length === 0) {
-            if (p2p.recovering) events.emit('recover-done', 'info', { head: chain.getLatestBlock()._id })
+            if (p2p.recovering) {
+                events.emit('recover-done', 'info', { head: chain.getLatestBlock()._id })
+                // Let chain.js know a catch-up just finished so its minerWorker
+                // can apply the stale-head grace period before proposing again.
+                chain.markCatchUp()
+            }
             p2p.recovering = false
             return
         }

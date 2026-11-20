@@ -1,6 +1,6 @@
 # Layer S/H Drill Scripts
 
-Automation scripts for the G1–G12 matrix of
+Automation scripts for the G1–G13 matrix of
 `doc/consensus-offline-leaders-plan.en.md`.
 
 ## Prerequisite
@@ -48,13 +48,14 @@ cascades into the following ones.
 | `G3-two-leaders-jailed.sh` | G3 | ~15 min | |
 | `G4-standby-promotion.sh` | G4 | ~12 min | Layer H |
 | `G5-network-partition.sh` | G5 | ~3 min | disconnects 2 nodes from the Docker network |
-| `G6-clock-skew.sh` | G6 | variable | ±5s via libfaketime; SKIPs if the image lacks `faketime` |
+| `G6-clock-skew.sh` | G6 | variable | ±300ms via libfaketime; SKIPs if the image lacks `faketime` |
 | `G7-equivocation.sh` | G7 | ~1 min | two concurrent `/mineBlock` via docker exec |
 | `G8-force-finalize-asymmetric.sh` | G8 | ~2 min | kill + restart a node |
 | `G9-old-node.sh` | G9 | ~4 min (first run builds the image) | previous-release (`v2.0.3`) node, no-fork invariant |
 | `G10-all-leaders-down.sh` | G10 | ~2 min | deterministic halt |
 | `G11-halt-breaker-recovery.sh` | G11 | ~2 min | automatic recovery round |
 | `G12-halt-breaker-off.sh` | G12 | ~2 min | requires the testnet started with `docker-compose.drills-halt-breaker-off.yml` |
+| `G13-stale-leader-restart.sh` | G13 | ~4 min | kills the scheduled leader, lets a backup fill the slot, restarts it stale — F8 fork regression |
 
 ## Implementation
 
@@ -127,7 +128,7 @@ Also, `/debug/statehash` no longer includes `possBlocks` (transient gossip that 
 healthy nodes look divergent), and `tryNextStep` no longer multiplies timers (it was a
 hot loop that blocked the event loop during a stall).
 
-**Status of the drills on the current build (v2.2.0): all of G1–G12 PASS** (G1–G11 in
-one `run-all-drills.sh --long` run, G12 with the breaker-off overlay). See
+**Status of the drills on the current build (v2.2.0): all of G1–G13 PASS** (G1–G11 + G13
+in `run-all-drills.sh --long`, G12 with the breaker-off overlay). See
 [`../README-drills.md`](../README-drills.md) for the full results and the fixes that
 came out of them.

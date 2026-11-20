@@ -402,20 +402,40 @@ let chain = {
         // it twice crashed the node with E11000 (an unhandled promise
         // rejection). Treat the already-persisted identical block as a no-op;
         // a DIFFERENT block at the same height is a real fork and must fail.
-        try {
-            if (blocks.isOpen) {
-                if (block._id <= blocks.height) {
-                    const existing = blocks.read(block._id)
-                    if (existing && existing.hash && block.hash && existing.hash !== block.hash) {
-                        logr.error('conflicting block at height ' + block._id + ' — refusing to append')
-                        cb(new Error('conflicting block at height ' + block._id)); return
-                    }
-                    logr.debug('block #' + block._id + ' already persisted — skipping duplicate append')
-                    cb(null, block); return
+        // Fast path: the head and the recentBlocks window are already in RAM,
+        // so the usual duplicate (same height as the local head, arriving from
+        // the recovery query right after local finalisation) costs no DB read.
+        const head = chain.getLatestBlock ? chain.getLatestBlock() : null
+        if (head && block._id <= head._id) {
+            let existing = null
+            for (let i = chain.recentBlocks.length - 1; i >= 0; i--)
+                if (chain.recentBlocks[i]._id === block._id) {
+                    existing = chain.recentBlocks[i]
+                    break
                 }
+            if (!existing && blocks.isOpen && block._id <= blocks.height)
+                existing = blocks.read(block._id)
+            if (existing) {
+                if (existing.hash && block.hash && existing.hash !== block.hash) {
+                    logr.error('conflicting block at height ' + block._id + ' — refusing duplicate')
+                    cb(new Error('conflicting block at height ' + block._id)); return
+                }
+                logr.debug('block #' + block._id + ' already in memory — skipping duplicate')
+                cb(null, block); return
+            }
+            // Not in the in-memory window (a very old height): fall through to
+            // the DB read below instead of appending a duplicate.
+        }
+
+        try {
+            if (blocks.isOpen)
                 blocks.appendBlock(block)
-            } else {
-                const existing = await db.collection('blocks').findOne({ _id: block._id }, { projection: { hash: 1 } })
+            else {
+                // Only reached for a normal next block, or the rare duplicate
+                // older than the in-memory window.
+                let existing = null
+                if (head && block._id <= head._id)
+                    existing = await db.collection('blocks').findOne({ _id: block._id }, { projection: { hash: 1 } })
                 if (existing) {
                     if (existing.hash && block.hash && existing.hash !== block.hash) {
                         logr.error('conflicting block at height ' + block._id + ' — refusing to insert')

@@ -65,8 +65,12 @@ const overlay = {
 const dir = path.dirname(overlayPath)
 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
 
-// Atomic write: several containers run this at the same time and share the volume.
-const tmp = overlayPath + '.tmp' + process.pid
+// Atomic write: several containers run this at the same time and share the
+// volume. PIDs collide across containers (they are all PID 25 in their own
+// namespace), so a PID-only suffix made renameSync race and crash nodes with
+// ENOENT. Add a random suffix to make each writer's temp file unique.
+const crypto = require('crypto')
+const tmp = overlayPath + '.tmp' + process.pid + '-' + crypto.randomBytes(8).toString('hex')
 fs.writeFileSync(tmp, JSON.stringify(overlay, null, 2))
 fs.renameSync(tmp, overlayPath)
 

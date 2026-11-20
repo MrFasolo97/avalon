@@ -397,11 +397,39 @@ let chain = {
         }, mineInMs)
     },
     addBlock: async (block, cb) => {
-        // add the block in our own db
-        if (blocks.isOpen)
-            blocks.appendBlock(block)
-        else
-            await db.collection('blocks').insertOne(block)
+        // A block can reach addBlock twice: once when it is finalised locally
+        // and again from the P2P recovery query for the same height. Inserting
+        // it twice crashed the node with E11000 (an unhandled promise
+        // rejection). Treat the already-persisted identical block as a no-op;
+        // a DIFFERENT block at the same height is a real fork and must fail.
+        try {
+            if (blocks.isOpen) {
+                if (block._id <= blocks.height) {
+                    const existing = blocks.read(block._id)
+                    if (existing && existing.hash && block.hash && existing.hash !== block.hash) {
+                        logr.error('conflicting block at height ' + block._id + ' — refusing to append')
+                        cb(new Error('conflicting block at height ' + block._id)); return
+                    }
+                    logr.debug('block #' + block._id + ' already persisted — skipping duplicate append')
+                    cb(null, block); return
+                }
+                blocks.appendBlock(block)
+            } else {
+                const existing = await db.collection('blocks').findOne({ _id: block._id }, { projection: { hash: 1 } })
+                if (existing) {
+                    if (existing.hash && block.hash && existing.hash !== block.hash) {
+                        logr.error('conflicting block at height ' + block._id + ' — refusing to insert')
+                        cb(new Error('conflicting block at height ' + block._id)); return
+                    }
+                    logr.debug('block #' + block._id + ' already persisted — skipping duplicate insert')
+                    cb(null, block); return
+                }
+                await db.collection('blocks').insertOne(block)
+            }
+        } catch (e) {
+            logr.error('could not persist block #' + block._id + ': ' + e.message)
+            cb(e); return
+        }
 
         // push cached accounts and contents to mongodb
         chain.cleanMemory()

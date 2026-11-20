@@ -32,7 +32,8 @@ const tests = [
     'block-rank.js',
     'schedule-persist.js',
     'skip-early.js',
-    'layer-h.js'
+    'layer-h.js',
+    'poss-block-prune.js'
 ]
 
 let failed = 0

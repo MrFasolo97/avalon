@@ -82,6 +82,29 @@ let consensus = {
         }
         return true
     },
+    // Stale candidates for heights already committed to the canonical chain are
+    // normally dropped on the commit path. Catch-up/recovery adds blocks straight
+    // through chain.validateAndAddBlock (p2p.addRecursive), bypassing that cleanup,
+    // so losing candidates from forks/equivocation can accumulate until possBlocks
+    // reaches capacity (activeLeaders*2) and no new block can be precommitted — a
+    // full chain halt. Prune them defensively against the local head.
+    pruneStaleCandidates: () => {
+        const head = chain.getLatestBlock && chain.getLatestBlock()
+        if (!head || !Number.isInteger(head._id)) return
+        const h = head._id
+        const before = consensus.possBlocks.length
+        consensus.possBlocks = consensus.possBlocks.filter(pb => pb.block && pb.block._id > h)
+        if (consensus.possBlocks.length !== before)
+            logr.debug('Pruned ' + (before - consensus.possBlocks.length)
+                + ' stale possBlock candidate(s) at/below #' + h)
+        for (const k of Object.keys(consensus.heightSeen))
+            if (Number(k) <= h) delete consensus.heightSeen[k]
+        for (const k of Object.keys(consensus.commitRetry))
+            if (Number(k) <= h) {
+                clearTimeout(consensus.commitRetry[k])
+                delete consensus.commitRetry[k]
+            }
+    },
     activeLeaders: () => {
         // the real active leaders are those who can mine or backup this block
         // i.e. a new leader only enters consensus on the block he gets scheduled for
@@ -655,7 +678,10 @@ let consensus = {
                 } else {
                     logr.cons('Precommitting block '+block._id+'#'+block.hash.substr(0,4))
 
-                    // adding to possible blocks
+                    // adding to possible blocks. Drop candidates for heights
+                    // already on the canonical chain first — catch-up can advance
+                    // the head without going through the commit-path cleanup.
+                    consensus.pruneStaleCandidates()
                     if (consensus.possBlocks.length >= consensus.activeLeaders().length * 2)
                         logr.warn('possBlocks at capacity, not adding new block')
                     else {

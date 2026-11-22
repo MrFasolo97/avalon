@@ -1,7 +1,10 @@
 # View-change / round election — design (for the single-vote invariant)
 
-**Status:** design (not implemented). Companion to
+**Status:** implemented; `singleVote` is ON by default in `config.history[0]`. Companion to
 [`consensus-single-quorum-and-locks.en.md`](./consensus-single-quorum-and-locks.en.md) §7.
+Round-aware PRECOMMIT (M1) and a COMMIT that follows the node's own precommit lock and
+prefers the highest round with a precommit QC (M2) are in `src/consensus.js`; covered by
+`test/single-vote-handover.js`. `forceFinalizeFallback` stays false.
 **Goal:** make strict single-vote (INV-1) compatible with halt/liveness recovery, so
 the `singleVote` config gate can become the default.
 
@@ -68,7 +71,7 @@ round number per height.
 | `src/chain.js` | `minerWorker` proposes only in its round at `dueAt(h, r)` (already close: the ladder timing becomes the round timing); the "halt stagger" is subsumed by `dueAt`. |
 | `src/p2p.js` | consensus messages (`t:6`) already carry `h` (S0′); add the round so the receiver validates `(h, r, phase)`. |
 | block format | **unchanged** — the round is derived, not stored. No flag day on the block hash. |
-| activation | height-gated `config.history` entry (a flag day); gated by the `singleVote` chain config (`config.singleVote`, default off) until the drills are green — never a per-node env. |
+| activation | `config.singleVote` in `config.history` — **ON by default** (`true` at height 0), never a per-node env. Cutover remains a coordinated build rollout with the preflight gates. |
 
 ## 5. Tests and drills (acceptance)
 

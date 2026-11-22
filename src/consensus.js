@@ -533,6 +533,11 @@ let consensus = {
             // still finalise on the QC alone: requiring its own vote stalled every
             // non-leader node from following the chain (doc §2.5).
             const selfIsActive = consensus.isActive()
+            const nextHeight = chain.getLatestBlock()._id + 1
+            // Settle window used by the S1' COMMIT path (castVote). Reused here so
+            // singleVote:false nodes do not apply whichever colliding candidate
+            // happens to reach the local threshold first (G10/G11 fork class).
+            const settleMs = (config.leaders + 1) * config.blockTime
             for (let i = 0; i < consensus.possBlocks.length; i++) {
                 const possBlock = consensus.possBlocks[i]
                 logr.cons('T'+Math.ceil(threshold)+' R0-'+(possBlock[0]?possBlock[0].length:'?')+' R1-'+(possBlock[1]?possBlock[1].length:'?'))
@@ -543,6 +548,29 @@ let consensus = {
                         consensus.qcCompare(possBlock.block._id, config.consensusRounds-1,
                             possBlock.block.hash, lastRound.length, qcThreshold, lastRound)
                     })
+
+                // Multiple valid candidates at the next height (slow leader +
+                // backup, or equivocation). With singleVote OFF every node votes
+                // on every candidate, so the first one to cross the LOCAL quorum
+                // is arrival-order dependent: different nodes would finalise
+                // different blocks. Wait for the round window to settle, then
+                // apply only the deterministic best-ranked candidate. The
+                // SINGLE_VOTE path already does this inside castVote().
+                const h = possBlock.block._id
+                if (!SINGLE_VOTE && Number.isInteger(h) && h === nextHeight
+                && possBlocksById[h] && possBlocksById[h].length > 1) {
+                    if (!consensus.heightSeen[h]) consensus.heightSeen[h] = Date.now()
+                    if (Date.now() < consensus.heightSeen[h] + settleMs) {
+                        consensus.scheduleCommitRetry(h)
+                        logr.debug('view-change: finalization for ' + h + ' deferred until the round window settles')
+                        continue
+                    }
+                    if (!consensus.isBestCandidate(possBlock.block)) {
+                        logr.debug('view-change: not the best-ranked candidate at ' + h + ', skip finalize')
+                        continue
+                    }
+                }
+
                 // if 2/3+ of the final round and not already finalizing another block
                 const selfPrecommitted = possBlock[0] && possBlock[0].indexOf(process.env.NODE_OWNER) !== -1
                 if (possBlock[config.consensusRounds-1].length >= threshold 
@@ -739,27 +767,49 @@ let consensus = {
     // Deterministic best (lowest chain rank) known candidate at a height.
     // chain.compareBlockRank over chain.deriveBlockRank is a total order derived
     // from chain data, so every node picks the same winner for the same set.
-    isBestCandidate: (block) => {
+    // M1: when `round` is given, compare only candidates of THAT view. A higher
+    // round is the legitimate successor of a silent lower-round proposer and
+    // must not be rejected because its (naturally later) timestamp ranks worse.
+    isBestCandidate: (block, round) => {
         let best = null
         for (let i = 0; i < consensus.possBlocks.length; i++) {
             const b = consensus.possBlocks[i].block
             if (!b || b._id !== block._id) continue
+            if (Number.isInteger(round) && chain.roundFor(b._id, b.miner) !== round) continue
             if (!best || chain.compareBlockRank(chain.deriveBlockRank(b), chain.deriveBlockRank(best)) < 0)
                 best = b
         }
         return !best || best.hash === block.hash
     },
+    // Lowest view with a known candidate at `height` (Infinity if none).
+    lowestCandidateRound: (height) => {
+        let min = Infinity
+        for (let i = 0; i < consensus.possBlocks.length; i++) {
+            const b = consensus.possBlocks[i] && consensus.possBlocks[i].block
+            if (!b || b._id !== height) continue
+            const r = chain.roundFor(height, b.miner)
+            if (r < min) min = r
+        }
+        return min
+    },
     // Best candidate at `height` that has reached the precommit quorum among the
-    // candidates we know. Two honest nodes that have seen the same set pick the
-    // same one, so their COMMIT votes align.
+    // candidates we know. M2: the HIGHEST round with a precommit QC wins (a later
+    // view supersedes a silent earlier one); rank breaks ties inside that round.
+    // Two honest nodes that have seen the same set pick the same hash, so their
+    // COMMIT votes align.
     bestCommittableCandidate: (height, threshold) => {
         let best = null
+        let bestRound = -1
         for (let i = 0; i < consensus.possBlocks.length; i++) {
             const pb = consensus.possBlocks[i]
             if (!pb || !pb.block || pb.block._id !== height) continue
             if (!pb[consensusQuorum.PRECOMMIT] || pb[consensusQuorum.PRECOMMIT].length < threshold) continue
-            if (!best || chain.compareBlockRank(chain.deriveBlockRank(pb.block), chain.deriveBlockRank(best.block)) < 0)
+            const r = chain.roundFor(height, pb.block.miner)
+            if (!best || r > bestRound
+            || (r === bestRound && chain.compareBlockRank(chain.deriveBlockRank(pb.block), chain.deriveBlockRank(best.block)) < 0)) {
                 best = pb
+                bestRound = r
+            }
         }
         return best ? best.block : null
     },
@@ -802,11 +852,17 @@ let consensus = {
             // and stalling (G7). A producer always precommits its own block, so it
             // can never be blocked by a better-ranked candidate it did not see.
             const mine = block.miner === process.env.NODE_OWNER
-            if (!mine && !consensus.isBestCandidate(block)) {
-                logr.debug('view-change: precommit skipped at ' + h + ' (not the best known)')
+            const vr = chain.roundFor(h, block.miner)
+            // M1: a candidate from a HIGHER view than any known candidate is the
+            // legitimate handover when lower-round proposers were silent. Ranking
+            // it against those lower rounds by timestamp always favours the stale
+            // candidate, split the precommit quorum and stalled the height.
+            const minRound = consensus.lowestCandidateRound(h)
+            const handover = Number.isFinite(minRound) && vr > minRound
+            if (!mine && !handover && !consensus.isBestCandidate(block, vr)) {
+                logr.debug('view-change: precommit skipped at ' + h + ' (not the best known in round ' + vr + ')')
                 return false
             }
-            const vr = chain.roundFor(h, block.miner)
             const rec = consensusQuorum.recordVote(consensus.voteLedger, {
                 h: h, r: consensusQuorum.PRECOMMIT, hash: block.hash,
                 signer: process.env.NODE_OWNER, round: vr
@@ -835,6 +891,14 @@ let consensus = {
                 logr.debug('view-change: commit for ' + h + ' deferred until the rounds settle')
                 return false
             }
+        }
+        // M2: a node may only COMMIT what it PRECOMMITTED. The ledger keeps one
+        // lock per height; following a different best-ranked hash here is what
+        // let two nodes commit two blocks at the same height (G10/G11).
+        const locked = consensusQuorum.lockedOn(consensus.voteLedger, h)
+        if (!locked || locked !== block.hash) {
+            logr.debug('view-change: commit skipped at ' + h + ' (not our precommit)')
+            return false
         }
         // COMMIT stays single per HEIGHT (the safety phase): at most one hash, for
         // the best candidate that reached the precommit quorum.

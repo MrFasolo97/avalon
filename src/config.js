@@ -212,8 +212,13 @@ let config = {
             // S1' gates (single-vote INV-1 + shadow enforcement). Chain config,
             // NOT a per-node env: a lone node flipping either would refuse its
             // own votes and diverge (same rule as skipEarlyCheckBlocks, F5).
-            // Both stay off until the view-change round election ships.
-            singleVote: false,
+            // singleVote is now the DEFAULT: the view-change round election and
+            // the M1/M2 handover fixes make INV-1 safe (round-aware PRECOMMIT and
+            // a COMMIT that follows the node's own precommit lock). qcEnforce
+            // stays off: it changes vote acceptance and still needs its own flag
+            // day. Consensus-affecting default — mainnet cutover still needs the
+            // preflight gates and an explicit confirmation.
+            singleVote: true,
             qcEnforce: false,
 
             forceFinalize: false,

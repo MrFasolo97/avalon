@@ -51,12 +51,14 @@ Three non-negotiables:
 | Observability | `/consensus`, `/debug/statehash`, `/metrics`, `/events`, additive `/schedule` `/leader` `/allminers` `/block`; `scripts/avalon-watch.js` | S — `src/http/*` | none |
 | Vote ledger (shadow) | `QC_SHADOW` observer; `h` + `justify` on the wire | S0′ — `consensus.js`, `voteState.js` | none while shadow |
 
-**Explicitly NOT in this release:** single-vote enforcement stays **opt-in and OFF**
-(`config.singleVote: false`, no env). The local drills proved it is not shippable without a
-view-change/round-election mechanism (see `consensus-single-quorum-and-locks.en.md` §7 —
-G10/G11 fail with the gate ON). The **shipping** config keeps the gate OFF; the round
-election is the `feat/view-change` follow-up (v2.2+). Also out: economy fork `#13330000`
-(already excluded — see the migration runbook).
+**Single-vote enforcement is ON by default** (`config.singleVote: true`, chain config —
+no env). The view-change round election ships with this release: PRECOMMIT is round-aware
+(a higher-round backup is a legitimate handover) and COMMIT follows the node's own
+precommit lock, preferring the highest round with a precommit QC. `qcEnforce` stays OFF.
+This is a consensus-affecting default: every node must run the same build before the cutover
+and the G1–G11 drills must be green with the gate ON. Force-finalize fallback stays OFF
+(`forceFinalizeFallback: false`) — no halt recovery by bypassing quorum. Also out: economy
+fork `#13330000` (already excluded — see the migration runbook).
 
 ---
 
@@ -216,10 +218,12 @@ In addition to the v2.0.3 set (`CORS_ORIGIN`, `HTTP_HOST`, `TRUST_PROXY`, `ADMIN
 | Variable | Default | Ship value | Meaning |
 |---|---|---|---|
 | `HALT_BREAKER` | on (when `config.haltBreaker`) | leave unset | `0` disables the recovery round per node (liveness only; see §9) |
-| `CONSENSUS_SINGLE_VOTE` | **off** | **deprecated — do not set** | S1′ single-vote is now **chain config** (`config.singleVote`), **not** an env var: a per-node switch would let one node refuse its own votes and diverge. It is **not shippable yet** (needs the view-change round election) and stays off. Same rule for `QC_ENFORCE` → `config.qcEnforce`. |
+| `CONSENSUS_SINGLE_VOTE` | **off** | **deprecated — do not set** | S1′ single-vote is **chain config** (`config.singleVote`), **not** an env var: a per-node switch would let one node refuse its own votes and diverge. It is now **ON by default** (`true` in `config.history[0]`) — verify `/consensus` reports `singleVote: true` on every node. Same rule for `QC_ENFORCE` → `config.qcEnforce` (still off). |
 | `QC_SHADOW` | off | `1` recommended | enables the read-only vote-ledger observer (logs `QC-*`, refuses nothing) |
 | `VOTE_STATE_PATH` | `./state/vote_state.json` | leave default | crash-safe vote record (local file, never chain data) |
 | `SCHEDULE_PERSIST_PATH` | `./state/schedule.json` | leave default | persisted epoch schedule (fixes F7 restart divergence) |
+| `AUTO_ROLLBACK` | on | leave unset | set to `0` only on explicit operator instruction to disable proof-gated automatic rollback on `CHAIN DIVERGENCE` |
+| `MAX_REORG_DEPTH` | `100` | leave default | maximum number of blocks walked back to find a common ancestor; deeper forks fail closed |
 | `LEADER_STATS` | off | `1` optional | per-leader produced/missed/jail counters |
 
 `QC_SHADOW=1` is the intended posture during the S→H observation window: it certifies the
@@ -305,7 +309,7 @@ the standby heights — must be settled before the artifact is published (§4/§
 - [ ] P2P port reachable from the internet; HTTP port per policy.
 - [ ] `git checkout <tag>` + `npm ci`; `git describe --tags` matches the coordinator's.
 - [ ] `state/` directory exists and is writable (vote_state.json + schedule.json).
-- [ ] `HALT_BREAKER` unset, `QC_SHADOW=1`; no S1′ env set (`config.singleVote`/`qcEnforce` off).
+- [ ] `HALT_BREAKER` unset, `QC_SHADOW=1`; no S1′ env set. `GET /consensus` shows `singleVote: true`, `qcEnforce: false` on every node.
 - [ ] Backups taken: `blocks.bson` + index, Mongo dump, `.env`, previous commit.
 
 **Launch day — checkpoints**
@@ -321,6 +325,42 @@ the standby heights — must be settled before the artifact is published (§4/§
 - [ ] Zero `QC-DIVERGENCE` (unsafe direction) with `QC_SHADOW=1`.
 - [ ] Alerts wired from `/metrics` + `/events` (halt, isolation, quorum degraded, jailed leader,
   halt-breaker fired, divergence).
+
+---
+
+## 11.1 Automatic rollback on `CHAIN DIVERGENCE` (v2.2)
+
+A node that detects a fetched block not extending its head no longer stays stuck in a
+forward-only recovery loop. It compares its own head vote proof with the proofs advertised
+by peers in `NODE_STATUS.headVoteProof`. A rollback happens **only** when a competing chain
+is both (a) at least as high and backed by a verifiable quorum of signed round-0 PRECOMMITs
+from the eligible set, and (b) shares a common ancestor with the local store within
+`MAX_REORG_DEPTH`. Otherwise the node fails closed: it keeps its chain, logs
+`CHAIN DIVERGENCE`, and emits `chain-divergence`.
+
+When it does fire, the sequence is:
+
+1. `chain-rollback-start` event + warning log with ancestor/target heights and signers;
+2. mining paused, BSON block index/file truncated (index first), or Mongo `blocks` tail deleted;
+3. derived Mongo state reset to genesis and all RAM state (cache, DAOs, vote ledger, schedule,
+   anti-replay `recentTxs`, tx-history queue, jail/stats indexes, pending consensus votes) cleared —
+   no in-place mutation of a corrupt state;
+4. deterministic rebuild from genesis over the remaining blocks: balances, nonces, leader
+   schedule, jail state and the `txs` index are re-derived **only from blocks ≤ ancestor**;
+5. `chain-rollback` event, `recovering` set to the ancestor and forward `recover()` resumed.
+
+**Transactions from the orphaned tail:** their effects on accounts/contracts are gone (the
+derived DB was dropped and replayed without them). Their hashes are also removed from
+`recentTxs`, so a resubmission is accepted again. Before truncating, the node saves those txs
+and re-offers them to the mempool *after* the rebuild, but only if they are still valid under
+the canonical state; if the majority chain already contains them, normal sync removes them
+from the pool again. No half-applied transaction survives.
+
+Observe it with `curl -s localhost:3001/events | jq`. A clean drill shows
+`chain-divergence → chain-rollback-start → chain-rollback → recover-start`. A
+`recover-giveup` event with `rollback:true` means the rollback stopped before dropping
+state and requires operator investigation. Unit/integration proof:
+`node test/divergence-rollback.js` and `node test/p2p-rollback-integration.js`.
 
 ---
 

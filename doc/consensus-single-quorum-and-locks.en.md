@@ -220,7 +220,9 @@ For contrast, the two designs that *do* touch blocks, and why this draft avoids 
   `hash`/`signature` (`chain.js:822-833`). Not needed by S0′/S1′.
 * **A QC in the block header** — would give light clients verifiable finality, and would be
   a hard fork with `blockHashSerialization: 3`. Deliberately out of scope: the QC stays
-  volatile, so `recover()` remains forward-only and no external tooling changes.
+  volatile and no external tooling changes. Signed round-0 PRECOMMITs are retained in RAM
+  anyway as a *transferable fork proof*, so a proven minority fork can now roll back
+  before `recover()` resumes its forward sync (F8, v2.2).
 
 ### 2.6 Force-finalize joins the same ledger
 
@@ -469,7 +471,7 @@ accepted, while a stale envelope is not).
 | 2 of 5 leaders dead, denominator never drains | Layer S `skips[]` + Layer H standby promotion. INV-1 cannot create liveness out of 3/5. |
 | schedule recomputed at restart (**F7**) | Layer S schedule persistence |
 | `maxDrift = 200 ms` (**F4**), `SKIP_EARLY_CHECK_BLOCKS` (**F5**) | Layer S grace margin |
-| no reorg / forward-only `recover()` (**F8**) | separate decision — INV-1 makes divergence *detectable*, not recoverable |
+| unproven or too-deep divergence (**F8**) | INV-1 makes divergence detectable; v2.2 adds a fail-closed automatic rollback gated on a verified quorum vote proof and a common ancestor within `MAX_REORG_DEPTH`. Without proof the node stays put and alerts the operator. |
 | non-deterministic state application (`cache.rollback`, Mongo, floats) | this is the one place where a CometBFT-style state-machine discipline is the right long-term answer — for a **new** chain, not for un-halting this one |
 
 The honest summary: this draft makes Avalon's consensus **provable**, and reduces the
@@ -535,9 +537,11 @@ a redesign, not a tweak.
 `chain.compareBlockRank`, every node votes `candidates[0]` and it requires unanimity —
 already "one candidate, one proposer".
 
-**Conclusion.** The gate stays **off** (chain config `singleVote: false`); the
-drill reproduces it via the shared overlay
-(`docker/testnet/docker-compose.drills-single-vote.yml` → `LAYER_SH_SINGLE_VOTE`).
+**Conclusion (superseded).** The gate was initially kept off; the view-change round
+election later closed G10/G11 and `singleVote` is now **ON by default** in
+`config.history[0]`. See `view-change-design.en.md` and `test/single-vote-handover.js`.
+The overlay (`docker/testnet/docker-compose.drills-single-vote.yml` → `LAYER_SH_SINGLE_VOTE`)
+is now redundant but harmless.
 The **F6, one-proposer and halt-stagger fixes are safe and always-on** — they make the
 schedule deterministic, reduce duplicate proposals and make halt recovery reliable.
 The practical fork in G10/G11 is already fixed by `eligibleLeaders()` (F2) with the

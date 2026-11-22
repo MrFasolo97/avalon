@@ -56,7 +56,9 @@ shipped and battle-tested while the chain is still halted; Layer H should be act
 the same maintenance window because the network is already halted at block **13,320,067**.
 
 **Non-goals:** slashing, permanent key removal, reward changes, changes to public
-key/signature structures, transaction fee changes, reorg/fork-choice support.
+key/signature structures, transaction fee changes. Reorg/fork-choice (F8) was originally a
+non-goal of this plan; it is now implemented separately (see §8.5) as a bounded,
+proof-gated automatic rollback that does not change block validity or signatures.
 
 ---
 
@@ -93,7 +95,7 @@ The plan is explicit about which rule is active at which height.
 | Quorum | `consensus.js` ~L74-95 | `max(3, floor(activeLeaders·2/3)+1)`, `+1` for observers; `activeLeaders()` = current shuffle + recent producers that are in the current shuffle |
 | Force finalize | `consensus.js` ~L387-643 | local timer (`Date.now()`), local winner (earliest `ts`, then lowest hash), broadcast all candidates, collect votes, backoff `600/1200/2400/4800 ms`, **halt if no quorum** (`forceFinalizeFallback=false`) |
 | Message signing | `consensus.js` ~L644 | consensus votes are valid only if the signer is in the **current** shuffle |
-| Sync | `p2p.js` `recover()` ~L469 | forward-only, by height; a node that is behind adds blocks **without** consensus rounds |
+| Sync | `p2p.js` `recover()` | forward-only by height (a node behind adds blocks **without** consensus rounds); since v2.2 a node on a *proven* minority fork first rolls back to the common ancestor, then resumes this same forward sync (§8.5) |
 | Leader index | `leaderStats.js` | optional (`LEADER_STATS=1`) counters `produced/missed` from `missedBy` |
 
 ### 2.2 Failure modes found (F)
@@ -107,7 +109,7 @@ The plan is explicit about which rule is active at which height.
 | **F5** | `SKIP_EARLY_CHECK_BLOCKS` (hard-coded height `3889058`) is a binary escape hatch for a past early-block incident | a validation rule that can only be bypassed by an env var, not by chain evidence | S (grace margin + attested skips), H (strict) |
 | **F6** | `generateLeaders()` sorts by `node_appr` only, over `Object.keys(cache.leaders)` (Mongo natural order) | **ties are not canonical**: two nodes can compute different top-`L` sets, hence different schedules | H (canonical order), S (diagnostics) |
 | **F7** | `minerSchedule(block)` is recomputed at **restart** from the *current* `cache.accounts` (`main.js` ~L137-144) instead of the state at that block | a restart after an approval/disapproval in the current epoch yields a different schedule than the running nodes → priority-1 blocks at 3 s are rejected until the next epoch | S (persist the epoch schedule) |
-| **F8** | No reorg / fork-choice; `recover()` is forward-only | any real divergence requires manual truncation (`scripts/auto_resolve_halt.sh`) or a DB restore | mitigated (deterministic ranking + quorum intersection), §5.5 |
+| **F8** | No reorg / fork-choice; `recover()` was forward-only | a real divergence used to require manual truncation (`scripts/auto_resolve_halt.sh`) or a DB restore | mitigated by deterministic ranking + quorum intersection (§5.5); since v2.2 a proven minority fork rolls back automatically (§8.5) |
 | **F9** | A dead leader can never be replaced by the next-ranked (lower-vote) leader | the rotation keeps one slot per round permanently degraded (3 s → 6.5 s), and the dead account keeps its slot indefinitely | H |
 
 ### 2.3 Two lemmas that shape the design
@@ -794,12 +796,22 @@ patch; it must not ship.
 |---|---|---|
 | S0/S1 misbehaves | redeploy the previous tag; the chain is unchanged (no new validity rule), old code ignores `skips` | none |
 | H1/H2 must be undone **after** activation | full coordinated rollback: stop all nodes, restore the pre-`H` DB + `blocks.bson` snapshot, redeploy the old tag (runbook §6) | blocks produced after `H` are lost (bounded by the snapshot age) |
-| Split detected | **do not truncate automatically**; `auto_resolve_halt.sh` is last-resort only, and it now refuses repeated truncation | per script |
+| Minority fork with a **verified quorum vote proof** from a competing chain | automatic, bounded rollback to the common ancestor (`MAX_REORG_DEPTH`, default 100) followed by normal `recover()`; local blocks/state are truncated and deterministically rebuilt from genesis — no operator action | only the minority tail beyond the ancestor |
+| Split without quorum proof, or no common ancestor inside the bound | **fail closed**: log `CHAIN DIVERGENCE`, emit `chain-divergence`, keep the local chain; `auto_resolve_halt.sh` remains a last-resort manual tool and refuses repeated truncation | none (automatic); per script if forced |
+
+Automatic rollback is a **fork-choice** mechanism, not a validation change: a signed
+PRECOMMIT quorum (`t:6`, round 0) carried in peer `NODE_STATUS.headVoteProof` is verified
+against the eligible set of the contested height before anything is touched. The node
+then truncates blocks (BSON index first, so a crash cannot expose a half-fork), resets
+derived Mongo state, replays from genesis and resumes forward recovery. `AUTO_ROLLBACK=0`
+disables it for emergency operator control; `MAX_REORG_DEPTH` bounds the walk. Tests:
+`test/divergence-rollback.js`, `test/p2p-rollback-integration.js`.
 
 Because Layer H is height-gated and its gate is evaluated before the release ships, the
 "rollback after activation" case is an operational failure, not an expected path. The
 recommended posture (same as PR #2's `forceFinalizeFallback: false`) is: **halt rather than
-fork**.
+fork**. Automatic rollback does not weaken this: it only converges a node that is already
+proven to be on the minority side of a fork.
 
 ### 8.6 Risk register
 

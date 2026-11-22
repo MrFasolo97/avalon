@@ -170,6 +170,30 @@ let mongo = {
             rs(block)
         })
     }),
+    // Automatic reorg primitives. `truncateBlocks` removes the minority tail;
+    // `resetDerivedState` drops blockchain state and rebuilds only the genesis
+    // account, leaving the validated block set untouched. The node then replays
+    // from block 0 with the normal deterministic rebuild (REBUILD_STATE path).
+    truncateBlocks: (height) => new Promise((rs, rj) => {
+        if (!Number.isInteger(height) || height < 0) return rj(new Error('Invalid block height'))
+        db.collection('blocks').deleteMany({_id: {$gt: height}}, (e, res) => {
+            if (e) return rj(e)
+            rs(res && res.deletedCount)
+        })
+    }),
+    resetDerivedState: (height) => (async () => {
+        if (process.env.BLOCKS_DIR)
+            await db.dropDatabase()
+        else {
+            const kept = await db.collection('blocks').find({_id: {$lte: height}}).toArray()
+            if (!kept.length || !kept.find(b => b._id === 0)) throw new Error('No genesis block to preserve')
+            await db.dropDatabase()
+            await db.collection('blocks').insertMany(kept)
+        }
+        await mongo.insertMasterAccount()
+        await mongo.addMongoIndexes()
+        return true
+    })(),
     restoreBlocks: (cb) => {
         let dump_dir = process.cwd() + '/dump'
         let dump_location = dump_dir + '/blocks.zip'

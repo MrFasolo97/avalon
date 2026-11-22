@@ -39,6 +39,8 @@ const blocks = require('./blocks')
 const dao = require('./dao')
 const daoMaster = require('./daoMaster')
 const events = require('./events')
+const consensusQuorum = require('./consensusQuorum')
+const divergence = require('./divergence')
 
 const ff_amplify_seen = {}
 
@@ -343,6 +345,11 @@ let p2p = {
                     head_block_hash: chain.getLatestBlock().hash,
                     previous_block_hash: chain.getLatestBlock().phash,
                     pending_head: p2p.pendingHead(),
+                    // Transferable PRECOMMIT proof for our head. Lets a diverged
+                    // peer prove its branch has quorum votes (fork choice).
+                    headVoteProof: consensus.getVoteProof
+                        ? consensus.getVoteProof(chain.getLatestBlock()._id, chain.getLatestBlock().hash)
+                        : [],
                     nodeId: p2p.nodeId.pub,
                     version: version,
                     sign: sign
@@ -775,6 +782,127 @@ let p2p = {
     broadcastBlock: (block) => {
         p2p.broadcast({t:4,d:block})
     },
+    // F8 automatic recovery: when the local branch is detected as divergent,
+    // compare verifiable vote proofs and roll back to the common ancestor only
+    // if a peer proves a stronger chain. Fail closed on missing proof/ancestor.
+    maybeRollback: (conflict) => {
+        if (process.env.AUTO_ROLLBACK === '0') return
+        if (p2p._rollbackPending || !conflict || !Number.isInteger(conflict.height)) return
+        const head = chain.getLatestBlock()
+        if (!head || !head.hash) return
+        const eligible = (consensus.eligibleLeaders && consensus.eligibleLeaders(head._id)) || []
+        const quorum = consensusQuorum.blockQuorum(eligible.length, config.quorumMin || 3)
+        const verify = (msg, cb) => consensus.verifySignature(msg, cb)
+        const local = {
+            height: head._id, hash: head.hash,
+            proof: consensus.getVoteProof ? consensus.getVoteProof(head._id, head.hash) : []
+        }
+        const peers = (p2p.sockets || []).map(ws => ws.node_status).filter(s =>
+            s && s.origin_block === config.originHash
+            && Number.isInteger(s.head_block) && typeof s.head_block_hash === 'string'
+        ).map(s => ({ height: s.head_block, hash: s.head_block_hash, proof: s.headVoteProof || [] }))
+
+        const decision = divergence.evaluate({ local, peers, quorum, eligible, verifySignature: verify })
+        if (!decision) return
+        const localHashAt = (h) => {
+            for (let i = chain.recentBlocks.length - 1; i >= 0; i--)
+                if (chain.recentBlocks[i]._id === h) return chain.recentBlocks[i].hash
+            try { return blocks.isOpen ? blocks.read(h).hash : null } catch (e) { return null }
+        }
+        const ancestor = divergence.findAncestor({
+            height: conflict.height, phash: conflict.phash, localHashAt: localHashAt
+        })
+        if (ancestor === null) {
+            logr.warn('CHAIN DIVERGENCE: proven peer found but no common ancestor within '
+                + (process.env.MAX_REORG_DEPTH || 100) + ' blocks — refusing rollback')
+            return
+        }
+        decision.ancestor = ancestor
+        decision.fromHeight = head._id
+        // Keep the txs of the orphaned tail so they can be re-offered to the
+        // mempool AFTER the state has been rebuilt to the ancestor. Without
+        // this, a minority node silently drops user txs that the majority may
+        // still include in the canonical chain.
+        decision.orphanTxs = []
+        if (blocks.isOpen)
+            for (let h = ancestor + 1; h <= head._id; h++)
+                try {
+                    const orphan = blocks.read(h)
+                    if (orphan && Array.isArray(orphan.txs)) decision.orphanTxs.push(...orphan.txs)
+                } catch (e) { /* a truncated/unreadable tail is already being discarded */ }
+        p2p._rollbackPending = true
+        events.emit('recover-start', 'info', { head: head._id, rollback: true })
+
+        const mongo = require('./mongo')
+        const voteState = require('./voteState')
+        const txHistory = require('./txHistory')
+        const leaderHealth = require('./leaderHealth')
+        const leaderStats = require('./leaderStats')
+        const transaction = require('./transaction')
+        const deps = {
+            logr, events,
+            pause: () => {
+                p2p.recovering = head._id
+                if (chain.worker) clearTimeout(chain.worker)
+                chain.workerPending = false
+                cache.rollback()
+            },
+            truncateBlocks: (h) => blocks.isOpen ? blocks.truncate(h) : mongo.truncateBlocks(h),
+            resetState: (h) => mongo.resetDerivedState(h),
+            resetRuntime: () => {
+                cache.clear()
+                dao.resetID()
+                daoMaster.resetID()
+                voteState.reset()
+                if (consensus.resetVoteProofs) consensus.resetVoteProofs()
+                consensus.voteLedger = consensusQuorum.createLedger({ singleVote: true })
+                // Derived RAM state from the discarded tail must not survive the
+                // rebuild: stale anti-replay hashes are the worst offender, since
+                // they make a resubmitted orphan tx look already used forever.
+                chain.blocksToRebuild = []
+                chain.recentBlocks = []
+                chain.recentTxs = {}
+                chain.schedule = {}
+                chain.validating = []
+                chain.processed = []
+                chain.queue = []
+                consensus.possBlocks = []
+                consensus.heightSeen = {}
+                consensus.commitRetry = {}
+                consensus.finalizing = false
+                consensus.cancelForceFinalize()
+                txHistory.indexQueue = []
+                leaderHealth.leaders = {}
+                if (process.env.LEADER_STATS === '1' && leaderStats.reset) leaderStats.reset()
+            },
+            rebuildState: () => new Promise((rs, rj) => {
+                chain.rebuildState(0, (e, builtTo) => e ? rj(e) : rs(builtTo))
+            }),
+            resume: (h) => {
+                p2p.recovering = h
+                p2p.recoverAttempt = 0
+                p2p.recoveredBlocks = {}
+                p2p.recoveringBlocks = []
+                p2p.lastDivergenceHeight = null
+                p2p._rollbackPending = false
+                // Re-offer orphan txs only after the rebuilt state is back at the
+                // ancestor, so validity/nonce checks run against the canonical
+                // state rather than the one we just discarded.
+                for (const tx of decision.orphanTxs || [])
+                    try {
+                        transaction.isValid(tx, Date.now(), (ok) => {
+                            if (ok) transaction.addToPool([tx])
+                        })
+                    } catch (e) { logr.debug('Orphan tx not re-queued: ' + e.message) }
+                setTimeout(() => p2p.recover(), 100)
+            }
+        }
+        divergence.rollback(decision, deps).catch(e => {
+            p2p._rollbackPending = false
+            logr.error('CHAIN ROLLBACK failed: ' + e.message)
+            events.emit('recover-giveup', 'error', { rollback: true, error: e.message })
+        })
+    },
     addRecursive: (block) => {
         chain.validateAndAddBlock(block, true, function(err, newBlock) {
             if (err) {
@@ -797,6 +925,10 @@ let p2p = {
                         })
                         logr.error('CHAIN DIVERGENCE suspected at #' + bid + ' (our head #'
                             + head._id + '): fetched block does not extend our chain')
+                        p2p.maybeRollback({ height: bid, phash: block.phash, hash: block.hash })
+                        // The rollback owns state/reset/recovery from here; the
+                        // normal "try another peer" path must not race with it.
+                        if (p2p._rollbackPending) return
                     }
                 }
                 // try another peer if bad block

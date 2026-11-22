@@ -43,6 +43,9 @@ let consensus = {
     // Production ledger for our OWN votes. singleVote:true so the rule is
     // enforced by recordVote(); only consulted when SINGLE_VOTE is on.
     voteLedger: consensusQuorum.createLedger({ singleVote: true }),
+    // Signed PRECOMMITs retained as a transferable fork proof for NODE_STATUS.
+    // Top-level (not inside `qc`) because it must exist with QC_SHADOW off.
+    voteProofs: new Map(),
     validating: [],
     processed: [],
     queue: [],
@@ -255,6 +258,30 @@ let consensus = {
     // online for round 0 (doc §2.5). Only compact (hash-only) votes are kept: a
     // miner's own round-0 vote carries the whole block and the block itself is
     // already on the wire, so it is not needed to prove the QC.
+    // Retain a signed PRECOMMIT as a transferable proof of the chain we follow.
+    rememberVoteProof: (h, round, hash, message) => {
+        if (round !== consensusQuorum.PRECOMMIT) return
+        if (!Number.isInteger(h) || h < 0 || typeof hash !== 'string' || !hash) return
+        if (!message || !message.s || !message.s.n || !message.s.s) return
+        let byHash = consensus.voteProofs.get(h)
+        if (!byHash) { byHash = new Map(); consensus.voteProofs.set(h, byHash) }
+        let bySigner = byHash.get(hash)
+        if (!bySigner) { bySigner = new Map(); byHash.set(hash, bySigner) }
+        if (!bySigner.has(message.s.n)) bySigner.set(message.s.n, message)
+        consensus.pruneVoteProofs(h)
+    },
+    pruneVoteProofs: (currentHeight) => {
+        const keepFrom = Number.isInteger(currentHeight) ? currentHeight - (config.leaders * 3) : -1
+        for (const h of Array.from(consensus.voteProofs.keys()))
+            if (h < keepFrom) consensus.voteProofs.delete(h)
+    },
+    getVoteProof: (h, hash) => {
+        const byHash = consensus.voteProofs.get(h)
+        const bySigner = byHash && byHash.get(hash)
+        if (!bySigner) return []
+        return Array.from(bySigner.values())
+    },
+    resetVoteProofs: () => { consensus.voteProofs.clear() },
     qcRememberVote: (h, round, hash, signer, message) => {
         if (!consensus.qc.enabled) return
         if (!Number.isInteger(h) || h < 0) return
@@ -963,7 +990,13 @@ let consensus = {
 
             // QC on the wire (doc §2.5): send the explicit height, and on the
             // commit vote attach the round-0 QC as a verifiable `justify`.
-            let msgD = { r: round, b: onlyBlockHash, ts: new Date().getTime() }
+            // `h` is sent even with QC_SHADOW off: it is part of the transferable
+            // fork proof (NODE_STATUS.headVoteProof) and old nodes simply treat
+            // the extra signed field as opaque, so this is wire-compatible.
+            let msgD = {
+                r: round, b: onlyBlockHash, ts: new Date().getTime(),
+                h: Number.isInteger(block._id) ? block._id : qcH
+            }
             if (consensus.qc.enabled) {
                 msgD.h = qcH
                 if (round === consensusQuorum.COMMIT) {
@@ -977,6 +1010,10 @@ let consensus = {
                     consensus.qcRememberVote(qcH, round, block.hash, process.env.NODE_OWNER, signed)
                 })
             p2p.broadcast(signed)
+            // Transferable fork proof: keep our own signed PRECOMMIT regardless
+            // of QC_SHADOW, so peers can verify the chain we consider decided.
+            if (round === consensusQuorum.PRECOMMIT)
+                consensus.rememberVoteProof(block._id, round, block.hash, signed)
         }
 
         // try to move to next consensus step
@@ -1009,6 +1046,12 @@ let consensus = {
                     if (round === consensusQuorum.PRECOMMIT)
                         consensus.qcRememberVote(qcH, round, block.hash, leader, message)
                 })
+                // Fork proof is production data, not observability: retain it even
+                // when QC_SHADOW is off. Old peers without d.h are indexed by the
+                // possBlock height, which is the same value.
+                if (round === consensusQuorum.PRECOMMIT)
+                    consensus.rememberVoteProof(Number.isInteger(message.d.h) ? message.d.h : qcH,
+                        round, block.hash, message)
                 if (consensus.qc.enforce && !remoteJustifyOk) {
                     logr.warn('S1\' enforcement: dropping commit vote for '
                         + block._id + '#' + (block.hash || '').substr(0, 8) + ' (invalid justify)')

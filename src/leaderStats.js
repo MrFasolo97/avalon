@@ -6,19 +6,27 @@
 // are only extra keys on the same `leaders` document (no schema migration).
 const leaderHealth = require('./leaderHealth')
 
+const initialLeaders = () => ({
+    dtube: {
+        sinceTs: 0,
+        sinceBlock: 0,
+        produced: 1,
+        missed: 0,
+        voters: 1, // genesis
+        last: 0
+    }
+})
+
 let indexer = {
-    leaders: {
-        dtube: {
-            sinceTs: 0,
-            sinceBlock: 0,
-            produced: 1,
-            missed: 0,
-            voters: 1, // genesis
-            last: 0
-        }
-    },
+    leaders: initialLeaders(),
     updates: {
         leaders: []
+    },
+    // A reorg rebuild replays from genesis; the in-memory index must start from
+    // the same seed or it keeps counters from the discarded fork.
+    reset: () => {
+        indexer.leaders = initialLeaders()
+        indexer.updates.leaders = []
     },
     processBlock: (block) => {
         if (process.env.LEADER_STATS !== '1') return

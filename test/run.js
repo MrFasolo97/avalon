@@ -33,7 +33,14 @@ const tests = [
     'schedule-persist.js',
     'skip-early.js',
     'layer-h.js',
-    'poss-block-prune.js'
+    'poss-block-prune.js',
+    'block-apply-serialization.js',
+    'jail-determinism.js',
+    'competing-candidate-finalize.js',
+    'single-vote-handover.js',
+    'divergence-rollback.js',
+    'p2p-rollback-integration.js',
+    'vote-proof-wiring.js'
 ]
 
 let failed = 0

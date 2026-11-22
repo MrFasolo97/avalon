@@ -229,6 +229,31 @@ let blocks = {
         chain.recentBlocks = blocks.readRange(start,end)
         eco.loadHistory()
     },
+    // Truncate the append-only store to `height` for an automatic reorg.
+    // The index entry for `height+1` is the exact BSON offset of the next block;
+    // truncating the index first makes the store unreadable past `height` even
+    // if the BSON truncate fails, so a crash never exposes a half-fork.
+    truncate: (height) => {
+        if (!blocks.isOpen) throw new Error(blocks.notOpenError)
+        if (!Number.isInteger(height) || height < 0 || height > blocks.height)
+            throw new Error('Invalid truncation height ' + height + ' (head ' + blocks.height + ')')
+
+        const idxSize = (height + 1) * 8
+        let bsonSize = blocks.bsonSize
+        if (height < blocks.height) {
+            const buf = Buffer.alloc(8)
+            fs.readSync(blocks.fdIndex, buf, { offset: 0, position: idxSize, length: 8 })
+            bsonSize = (BigInt(buf.readUInt32LE(0)) << 8n) + BigInt(buf.readUInt32LE(4))
+            if (bsonSize < 0n || bsonSize > blocks.bsonSize)
+                throw new Error('Invalid truncation position ' + bsonSize)
+        }
+        fs.ftruncateSync(blocks.fdIndex, idxSize)
+        fs.ftruncateSync(blocks.fd, Number(bsonSize))
+        blocks.height = height
+        blocks.bsonSize = bsonSize
+        logr.warn('Truncated blocks.bson/index to height ' + height)
+        return height
+    },
     lastBlock: () => blocks.read(blocks.height),
     close: () => {
         if (blocks.isOpen) {

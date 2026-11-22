@@ -1,0 +1,200 @@
+// == F8: CHAIN DIVERGENCE detection and automatic rollback ==
+// node test/divergence-rollback.js
+//
+// A minority fork must recover without an operator: verify the competing
+// branch's signed vote proof, find the common ancestor, truncate the local
+// tail, reset derived state, rebuild deterministically and resume forward
+// recovery. Every destructive step must fail closed.
+
+const assert = require('assert')
+const fs = require('fs')
+const os = require('os')
+const path = require('path')
+
+if (typeof global.config === 'undefined')
+    global.config = {
+        b58Alphabet: '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz',
+        maxTxPerBlock: 200, jsonMaxBytes: 60000, quorumMin: 3
+    }
+if (typeof global.logr === 'undefined')
+    global.logr = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, fatal: () => {}, trace: () => {} }
+require.cache[require.resolve('../src/logger')] = { exports: global.logr }
+
+const voteProof = require('../src/voteProof')
+const divergence = require('../src/divergence')
+
+let passed = 0
+let failed = 0
+function test(name, fn) {
+    return Promise.resolve().then(fn).then(() => {
+        console.log('  PASS: ' + name)
+        passed++
+    }).catch(e => {
+        console.log('  FAIL: ' + name + ' — ' + e.message)
+        failed++
+    })
+}
+
+// deterministic fake verifier: signatures are the literal string "sig:<name>"
+const verify = (msg, cb) => cb(String(msg.s.s).startsWith('sig:' + msg.s.n))
+
+function proof(height, hash, names) {
+    return {
+        height, hash,
+        votes: names.map(n => ({
+            t: 6, d: { r: 0, h: height, b: { hash } },
+            s: { n, s: 'sig:' + n, v: 2 }
+        }))
+    }
+}
+
+async function main() {
+    console.log('=== Divergence detection / automatic rollback ===\n')
+
+    await test('vote proof: quorum of distinct eligible PRECOMMITs is valid', () => {
+        const p = proof(7, 'aaa', ['miner1', 'miner2', 'miner3', 'miner4'])
+        const r = voteProof.verifyProof(p, {
+            verifySignature: verify,
+            eligible: ['miner1', 'miner2', 'miner3', 'miner4', 'miner5'],
+            quorum: 4
+        })
+        assert.strictEqual(r.valid, true)
+        assert.strictEqual(r.count, 4)
+    })
+
+    await test('vote proof: invalid signature, duplicate signer and wrong hash are rejected', () => {
+        const good = proof(7, 'aaa', ['miner1', 'miner2', 'miner3', 'miner4'])
+        const eligible = good.votes.map(v => v.s.n)
+        const bad = JSON.parse(JSON.stringify(good))
+        bad.votes[0].s.s = 'sig:someone-else'
+        assert.strictEqual(voteProof.verifyProof(bad, { verifySignature: verify, eligible, quorum: 4 }).valid, false)
+
+        const dup = JSON.parse(JSON.stringify(good))
+        dup.votes[1].s.n = 'miner1'
+        dup.votes[1].s.s = 'sig:miner1'
+        assert.strictEqual(voteProof.verifyProof(dup, { verifySignature: verify, eligible, quorum: 4 }).valid, false)
+
+        const wrongHash = JSON.parse(JSON.stringify(good))
+        wrongHash.votes[2].d.b.hash = 'bbb'
+        assert.strictEqual(voteProof.verifyProof(wrongHash, { verifySignature: verify, eligible, quorum: 4 }).valid, false)
+
+        const short = { height: 7, hash: 'aaa', votes: good.votes.slice(0, 2) }
+        assert.strictEqual(voteProof.verifyProof(short, { verifySignature: verify, eligible, quorum: 4 }).valid, false)
+    })
+
+    await test('detection: proven competing chain triggers rollback, unproven does not', () => {
+        const eligible = ['miner1', 'miner2', 'miner3', 'miner4', 'miner5']
+        const input = {
+            quorum: 4, eligible, verifySignature: verify,
+            local: { height: 10, hash: 'local', proof: [] },
+            peers: [{ height: 13, hash: 'majority', proof: proof(13, 'majority', eligible.slice(0, 4)).votes }]
+        }
+        const d = divergence.evaluate(input)
+        assert.ok(d && d.shouldRollback)
+        assert.strictEqual(d.height, 13)
+        assert.strictEqual(d.hash, 'majority')
+
+        const bad = Object.assign({}, input, {
+            peers: [{ height: 13, hash: 'majority', proof: proof(13, 'majority', eligible.slice(0, 2)).votes }]
+        })
+        assert.strictEqual(divergence.evaluate(bad), null)
+    })
+
+    await test('detection: a locally proven chain is NOT abandoned for a weaker peer', () => {
+        const eligible = ['miner1', 'miner2', 'miner3', 'miner4', 'miner5']
+        const d = divergence.evaluate({
+            quorum: 4, eligible, verifySignature: verify,
+            local: { height: 10, hash: 'local', proof: proof(10, 'local', eligible).votes },
+            peers: [{ height: 10, hash: 'peer', proof: proof(10, 'peer', eligible.slice(0, 4)).votes }]
+        })
+        assert.strictEqual(d, null)
+    })
+
+    await test('ancestor: walks back to the matching parent and fails closed when unbounded', () => {
+        const hashes = { 0: 'g', 1: 'a', 2: 'b', 3: 'c', 4: 'local' }
+        const a = divergence.findAncestor({
+            height: 5, phash: 'x', localHashAt: h => hashes[h] || null, maxReorg: 4
+        })
+        assert.strictEqual(a, null)
+        hashes[3] = 'x'
+        assert.strictEqual(divergence.findAncestor({
+            height: 5, phash: 'x', localHashAt: h => hashes[h] || null, maxReorg: 4
+        }), 3)
+    })
+
+    await test('rollback: truncates, resets state, rebuilds, resumes and emits events', async () => {
+        const calls = []
+        const events = []
+        const d = {
+            shouldRollback: true, fromHeight: 12, ancestor: 9, height: 13,
+            hash: 'majority', signers: ['miner1', 'miner2', 'miner3', 'miner4']
+        }
+        await divergence.rollback(d, {
+            logr: global.logr,
+            events: { emit: (n) => events.push(n) },
+            pause: () => calls.push('pause'),
+            truncateBlocks: (h) => { calls.push('truncate:' + h); return h },
+            resetState: (h) => calls.push('state:' + h),
+            resetRuntime: (h) => calls.push('runtime:' + h),
+            rebuildState: (h) => { calls.push('rebuild:' + h); return Promise.resolve(h) },
+            resume: (h) => calls.push('resume:' + h)
+        })
+        assert.deepStrictEqual(calls, ['pause', 'truncate:9', 'state:9', 'runtime:9', 'rebuild:9', 'resume:9'])
+        assert.deepStrictEqual(events, ['chain-rollback-start', 'chain-rollback'])
+    })
+
+    await test('rollback: refuses an unproven decision without touching persistence', async () => {
+        let touched = false
+        await assert.rejects(() => divergence.rollback({ shouldRollback: true, height: 10 },
+            { truncateBlocks: () => { touched = true } }))
+        assert.strictEqual(touched, false)
+    })
+
+    await test('rollback: a truncation failure stops before state is dropped', async () => {
+        const calls = []
+        await assert.rejects(() => divergence.rollback({
+            shouldRollback: true, fromHeight: 5, ancestor: 3, height: 6, hash: 'x'
+        }, {
+            logr: global.logr, events: { emit: () => {} },
+            truncateBlocks: () => { throw new Error('disk failure') },
+            resetState: () => calls.push('state'),
+            rebuildState: () => calls.push('rebuild')
+        }), /disk failure/)
+        assert.deepStrictEqual(calls, [])
+    })
+
+    await test('BSON store truncation keeps the ancestor readable and drops the fork', () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'avalon-reorg-'))
+        const prevDir = process.env.BLOCKS_DIR
+        process.env.BLOCKS_DIR = tmp
+        global.chain = {
+            getGenesisBlock: () => ({ _id: 0, hash: 'g', txs: [], dist: 0, burn: 0 })
+        }
+        global.eco = { loadHistory: () => {} }
+        delete require.cache[require.resolve('../src/blocks')]
+        const blocks = require('../src/blocks')
+        blocks.touch()
+        blocks.fd = fs.openSync(path.join(tmp, 'blocks.bson'), 'a+')
+        blocks.fdIndex = fs.openSync(path.join(tmp, 'blocks.index'), 'a+')
+        blocks.bsonSize = 0n
+        blocks.height = -1
+        blocks.isOpen = true
+        for (let h = 0; h <= 5; h++)
+            blocks.appendBlock({ _id: h, hash: 'h' + h, txs: [], dist: 0, burn: 0 })
+
+        blocks.truncate(3)
+        assert.strictEqual(blocks.height, 3)
+        assert.strictEqual(fs.statSync(path.join(tmp, 'blocks.index')).size, 4 * 8)
+        assert.strictEqual(blocks.read(3).hash, 'h3')
+        assert.throws(() => blocks.read(4), /Block not found/)
+        blocks.close()
+        fs.rmSync(tmp, { recursive: true, force: true })
+        if (prevDir === undefined) delete process.env.BLOCKS_DIR
+        else process.env.BLOCKS_DIR = prevDir
+    })
+
+    console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED') + ' (' + passed + ' passed, ' + failed + ' failed)')
+    process.exit(failed === 0 ? 0 : 1)
+}
+
+main().catch(e => { console.error(e); process.exit(1) })

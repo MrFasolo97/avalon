@@ -15,8 +15,13 @@
 
 services:
   mongodb:
-    container_name: avalon-drills-mongodb
+    # Name bumped after a stale Docker name reservation from a previous drill
+    # run; service DNS alias is still `mongodb`, so peers are unaffected.
+    container_name: avalon-drills-mongodb2
     init: true
+    # Drill-only: G7/G8 inject asymmetric network delays with `tc netem`.
+    cap_add:
+      - NET_ADMIN
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ping:1})"]
       interval: 5s
@@ -27,6 +32,9 @@ services:
   bootstrap:
     container_name: avalon-drills-bootstrap
     init: true
+    # Drill-only: G7/G8 inject asymmetric network delays with `tc netem`.
+    cap_add:
+      - NET_ADMIN
     ports:
       - "4201:3001"
       - "7201:6001"
@@ -37,6 +45,9 @@ services:
   setup:
     container_name: avalon-drills-setup
     init: true
+    # Drill-only: G7/G8 inject asymmetric network delays with `tc netem`.
+    cap_add:
+      - NET_ADMIN
     environment:
       - TESTNET_MINERS=7
       # Names must match the leader accounts the drills expect (5 leaders +
@@ -47,6 +58,9 @@ services:
   miner1:
     container_name: avalon-drills-miner1
     init: true
+    # Drill-only: G7/G8 inject asymmetric network delays with `tc netem`.
+    cap_add:
+      - NET_ADMIN
     ports:
       - "4202:3001"
       - "7202:6001"
@@ -57,6 +71,9 @@ services:
   miner2:
     container_name: avalon-drills-miner2
     init: true
+    # Drill-only: G7/G8 inject asymmetric network delays with `tc netem`.
+    cap_add:
+      - NET_ADMIN
     ports:
       - "4203:3001"
       - "7203:6001"
@@ -67,6 +84,9 @@ services:
   miner3:
     container_name: avalon-drills-miner3
     init: true
+    # Drill-only: G7/G8 inject asymmetric network delays with `tc netem`.
+    cap_add:
+      - NET_ADMIN
     ports:
       - "4204:3001"
       - "7204:6001"
@@ -81,6 +101,9 @@ services:
     hostname: miner4
     container_name: avalon-drills-miner4
     init: true
+    # Drill-only: G7/G8 inject asymmetric network delays with `tc netem`.
+    cap_add:
+      - NET_ADMIN
     ports:
       - "4205:3001"
       - "7205:6001"
@@ -121,6 +144,9 @@ services:
     hostname: miner5
     container_name: avalon-drills-miner5
     init: true
+    # Drill-only: G7/G8 inject asymmetric network delays with `tc netem`.
+    cap_add:
+      - NET_ADMIN
     ports:
       - "4206:3001"
       - "7206:6001"
@@ -161,6 +187,9 @@ services:
     hostname: standby1
     container_name: avalon-drills-standby1
     init: true
+    # Drill-only: G7/G8 inject asymmetric network delays with `tc netem`.
+    cap_add:
+      - NET_ADMIN
     ports:
       - "4207:3001"
       - "7207:6001"
@@ -201,6 +230,9 @@ services:
     hostname: standby2
     container_name: avalon-drills-standby2
     init: true
+    # Drill-only: G7/G8 inject asymmetric network delays with `tc netem`.
+    cap_add:
+      - NET_ADMIN
     ports:
       - "4208:3001"
       - "7208:6001"

@@ -313,3 +313,83 @@ settle_testnet() {
     log "settle: WARNING chain not advancing within ${timeout}s (head ${prev:-?})"
     return 1
 }
+
+# --- Asymmetric network delay helpers (G7/G8) -------------------------------
+# `tc netem` is installed in the testnet image and NET_ADMIN is granted by the
+# drills compose overlay. localhost API calls bypass eth0, so /mineBlock and
+# /count keep working while P2P traffic to peers is delayed.
+apply_delay() {
+    local container="$1"
+    local ms="$2"
+    # A node may still be restarting when a drill begins; make sure it is up.
+    if ! docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null | grep -q true; then
+        docker start "$container" >/dev/null 2>&1 || true
+        sleep 3
+    fi
+    local attempt
+    for attempt in 1 2 3; do
+        if docker exec "$container" tc qdisc replace dev eth0 root netem delay "${ms}ms" 2>/dev/null; then
+            log "netem: $container P2P delay ${ms}ms"
+            return 0
+        fi
+        sleep 2
+    done
+    fail "cannot inject ${ms}ms delay on $container (NET_ADMIN/tc missing?)"
+}
+
+clear_delay() {
+    local container="$1"
+    docker exec "$container" tc qdisc del dev eth0 root 2>/dev/null || true
+}
+
+clear_all_delays() {
+    local c
+    for c in "${ALL_MINERS[@]}" "$BOOTSTRAP"; do
+        clear_delay "$c"
+    done
+    log "netem: all injected delays cleared"
+}
+
+# STRICT convergence check for G7/G8: block-hash agreement, then identical
+# head height AND identical derived state hash on every node in one poll.
+# A mismatch is a hard failure (unlike the historical WARN-only helper).
+require_exact_statehash() {
+    local containers=("$@")
+    verify_chain_agreement "${containers[@]}"
+
+    local attempts="${STATEHASH_ATTEMPTS:-60}"
+    local a c hh hash first mismatch same i
+    for a in $(seq 1 "$attempts"); do
+        local heights=() hashes=()
+        for c in "${containers[@]}"; do
+            hh=$(api_get "$c" "/count" | grep -oP '"count":\s*\K[0-9]+' || echo "")
+            hash=$(get_statehash "$c")
+            heights+=("${hh:-}")
+            hashes+=("${hash:-}")
+        done
+        first="${heights[0]:-}"
+        same=1
+        for hh in "${heights[@]}"; do
+            if [ -z "$hh" ] || [ "$hh" != "$first" ]; then same=0; fi
+        done
+        if [ "$same" -eq 1 ] && [ -n "$first" ]; then
+            mismatch=""
+            for i in "${!containers[@]}"; do
+                if [ -z "${hashes[$i]}" ] || [ "${hashes[$i]}" != "${hashes[0]}" ]; then
+                    mismatch="${containers[$i]}"
+                fi
+            done
+            if [ -z "$mismatch" ]; then
+                pass "Exact state hash converges on ${#containers[@]} node(s) at height $first: ${hashes[0]}"
+                return 0
+            fi
+            log "[FAIL] State hash mismatch at height $first:"
+            for i in "${!containers[@]}"; do
+                log "  ${containers[$i]} -> ${hashes[$i]:-<none>}"
+            done
+            fail "state hash mismatch on $mismatch"
+        fi
+        sleep 1
+    done
+    fail "heights never aligned within ${attempts}s; cannot verify exact state hash"
+}

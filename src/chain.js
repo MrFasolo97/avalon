@@ -6,6 +6,7 @@ const series = require('run-series')
 const cloneDeep = require('clone-deep')
 const fs = require('fs')
 const path = require('path')
+const SerialQueue = require('./serialQueue')
 const dao = require('./dao')
 const daoMaster = require('./daoMaster')
 const transaction = require('./transaction.js')
@@ -46,6 +47,11 @@ let chain = {
     restoredBlocks: 0,
     schedule: null,
     recentBlocks: [],
+    // H2: one block at a time, in FIFO order. Recovery, the pending-block timer,
+    // local finalisation and force-finalize can all submit the same height
+    // concurrently; this queue is the single serialization point for the whole
+    // validate → execute → persist → commit path.
+    applyQueue: new SerialQueue(),
     worker: null,
     workerPending: false,
     // Set by p2p when a recovery batch finishes. A node that just caught up
@@ -222,54 +228,86 @@ let chain = {
     },
     validateAndAddBlock: (newBlock, revalidate, cb) => {
         // when we receive an outside block and check whether we should add it to our chain or not
-        if (chain.shuttingDown) return
-        chain.isValidNewBlock(newBlock, revalidate, false, function(isValid) {
-            if (!isValid) 
-                return cb(true, newBlock)
-            
-            // straight execution
-            chain.executeBlockTransactions(newBlock, revalidate, function(validTxs, distributed, burned) {
-                // if any transaction is wrong, thats a fatal error
-                if (newBlock.txs.length !== validTxs.length) {
-                    logr.error('Invalid tx(s) in block')
-                    cb(true, newBlock); return
+        // H2: the whole path mutates shared state (head, cache, tx pool) and is
+        // entered from several async sources at once. Run it strictly one block
+        // at a time so a concurrent recovery/consensus call cannot validate
+        // against the same head and persist the same height twice.
+        const done = (err, block) => {
+            if (typeof cb === 'function') cb(err, block || newBlock)
+        }
+        if (chain.shuttingDown) {
+            done(new Error('node is shutting down'))
+            return
+        }
+        chain.applyQueue.run(() => new Promise((resolve, reject) => {
+            // We may have waited in the queue while shutdown started.
+            if (chain.shuttingDown) {
+                reject(new Error('node is shutting down'))
+                return
+            }
+            chain.isValidNewBlock(newBlock, revalidate, false, function(isValid) {
+                if (!isValid) {
+                    reject(new Error('invalid block #' + (newBlock && newBlock._id)))
+                    return
                 }
 
-                // error if distributed or burned computed amounts are different than the reported one
-                let blockDist = newBlock.dist || 0
-                if (blockDist !== distributed) {
-                    logr.error('Wrong dist amount', blockDist, distributed)
-                    cb(true, newBlock); return
-                }
-                let blockBurn = newBlock.burn || 0
-                if (blockBurn !== burned) {
-                    logr.error('Wrong burn amount', blockBurn, burned)
-                    cb(true, newBlock); return
-                }
+                // straight execution
+                chain.executeBlockTransactions(newBlock, revalidate, function(validTxs, distributed, burned) {
+                    // if any transaction is wrong, thats a fatal error
+                    if (newBlock.txs.length !== validTxs.length) {
+                        logr.error('Invalid tx(s) in block')
+                        reject(new Error('Invalid tx(s) in block')); return
+                    }
 
-                // add txs to recents
-                chain.addRecentTxsInBlock(newBlock.txs)
+                    // error if distributed or burned computed amounts are different than the reported one
+                    let blockDist = newBlock.dist || 0
+                    if (blockDist !== distributed) {
+                        logr.error('Wrong dist amount', blockDist, distributed)
+                        reject(new Error('Wrong dist amount')); return
+                    }
+                    let blockBurn = newBlock.burn || 0
+                    if (blockBurn !== burned) {
+                        logr.error('Wrong burn amount', blockBurn, burned)
+                        reject(new Error('Wrong burn amount')); return
+                    }
 
-                // remove all transactions from this block from our transaction pool
-                transaction.removeFromPool(newBlock.txs)
+                    // add txs to recents
+                    chain.addRecentTxsInBlock(newBlock.txs)
 
-                chain.addBlock(newBlock, function() {
-                    // and broadcast to peers (if not replaying)
-                    if (!p2p.recovering)
-                        p2p.broadcastBlock(newBlock)
+                    // remove all transactions from this block from our transaction pool
+                    transaction.removeFromPool(newBlock.txs)
 
-                    // process notifications and leader stats (non blocking)
-                    notifications.processBlock(newBlock)
+                    const adding = chain.addBlock(newBlock, function(err) {
+                        // H2: a failed persist used to be reported as success to
+                        // consensus/P2P, which then cleared their buffers and
+                        // believed the block was applied.
+                        if (err) {
+                            reject(err)
+                            return
+                        }
+                        // and broadcast to peers (if not replaying)
+                        if (!p2p.recovering)
+                            p2p.broadcastBlock(newBlock)
 
-                    // emit event to confirm new transactions in the http api
-                    if (!p2p.recovering)
-                        for (let i = 0; i < newBlock.txs.length; i++)
-                            transaction.eventConfirmation.emit(newBlock.txs[i].hash)
+                        // process notifications and leader stats (non blocking)
+                        notifications.processBlock(newBlock)
 
-                    cb(null, newBlock)
+                        // emit event to confirm new transactions in the http api
+                        if (!p2p.recovering)
+                            for (let i = 0; i < newBlock.txs.length; i++)
+                                transaction.eventConfirmation.emit(newBlock.txs[i].hash)
+
+                        resolve(newBlock)
+                    })
+                    // addBlock is async: an exception outside its own try/catch
+                    // must not leave this promise pending forever.
+                    if (adding && typeof adding.catch === 'function') adding.catch(reject)
                 })
             })
-        })
+        })).then(
+            (block) => done(null, block),
+            (err) => done(err)
+        )
     },
     addRecentTxsInBlock: (txs = []) => {
         for (let t = 0; t < txs.length; t++)
@@ -516,8 +554,22 @@ let chain = {
         chain.recentBlocks.push(block)
         chain.minerWorker(block)
         chain.output(block)
-        cache.writeToDisk(false)
-        cb(true)
+        // H2: wait for the state flush and surface persistence errors. This was
+        // fire-and-forget: a failed Mongo write was only logged by the writer
+        // queue and the caller still got a success callback.
+        try {
+            await new Promise((resolve, reject) => {
+                cache.writeToDisk(false, (err) => {
+                    if (err) reject(err)
+                    else resolve()
+                })
+            })
+        } catch (e) {
+            logr.error('could not persist state for block #' + block._id + ': ' + (e.message || e))
+            cb(e)
+            return
+        }
+        cb(null, block)
     },
     output: (block,rebuilding) => {
         chain.nextOutput.txs += block.txs.length

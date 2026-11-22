@@ -254,7 +254,7 @@ let cache = {
                             logr.warn('Duplicate insert ignored for ' + insert.collection + ' ' + (insert.document && insert.document._id))
                             return callback()
                         }
-                        throw err
+                        return callback(err)
                     }
                     callback()
                 })
@@ -283,7 +283,7 @@ let cache = {
                     let query = {}
                     query[key] = newDoc[key]
                     db.collection(col).replaceOne(query, newDoc, function(err) {
-                        if (err) throw err
+                        if (err) return callback(err)
                         callback()
                     })
                 })
@@ -303,9 +303,16 @@ let cache = {
                 executions.push(txHistoryWriteOps[op])
         }
 
-        // current state at block number
-        executions.push((callback) => db.collection('state').updateOne({_id: 0},{$set:{headBlock:chain.getLatestBlock()._id}},{ upsert: true },() => callback(null,true)))
-        
+        // current state at block number (H2): a failed head-pointer write used
+        // to be ignored, leaving the durable head behind the persisted block.
+        executions.push((callback) => db.collection('state').updateOne(
+            {_id: 0}, {$set:{headBlock:chain.getLatestBlock()._id}}, {upsert: true},
+            (err) => {
+                if (err) return callback(err)
+                callback(null, true)
+            }
+        ))
+
         if (typeof cb === 'function') {
             let timeBefore = new Date().getTime()
             parallel(executions, function(err, results) {
@@ -314,16 +321,17 @@ let cache = {
                     logr.warn('Slow write execution: ' + executions.length + ' mongo queries took ' + execTime + 'ms')
                 else
                     logr.debug(executions.length+' mongo queries executed in '+execTime+'ms')
-                cache.clear()
+                // H2: keep pending changes when the flush failed so they are not
+                // silently lost; a successful flush clears them as before.
+                if (!err) cache.clear()
                 cb(err, results)
             })
         } else {
             logr.debug(executions.length+' mongo ops queued')
-            cache.writerQueue.push((callback) => parallel(executions,(err) => {
-                if (err) logr.error('mongo write queue error', err)
+            cache.writerQueue.push((callback) => parallel(executions, (err) => {
+                if (!err) cache.clear()
                 callback(err)
-            }))
-            cache.clear()
+            }), (err) => logr.error('mongo write queue error', err))
         }
     },
     processRebuildOps: (cb,writeToDisk) => {

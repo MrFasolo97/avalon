@@ -150,8 +150,15 @@ function startDaemon() {
     // exist before the schedule/active set is computed or this node would rotate
     // jailed leaders back in and diverge from its peers.
     chain.rebuildLeaderHealth((e, n) => {
-        if (e) logr.error('leaderHealth rebuild failed, starting with empty state', e)
-        else logr.info('leaderHealth rebuilt from ' + n + ' recent blocks')
+        if (e) {
+            // H1: starting with an empty jail state would give this node a
+            // different activeLeaderSet/schedule from its peers — i.e. a fork.
+            // Fail closed and let the supervisor retry instead of joining.
+            logr.fatal('leaderHealth rebuild failed — refusing to start with divergent jail state', e)
+            if (blocks.isOpen) blocks.close()
+            return process.exit(1)
+        }
+        logr.info('leaderHealth rebuilt from ' + n + ' recent blocks')
         startDaemonAfterLeaderHealth()
     })
 }

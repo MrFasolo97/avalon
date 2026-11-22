@@ -1017,7 +1017,14 @@ let chain = {
                 fs.mkdirSync(dir, { recursive: true })
             const data = JSON.stringify({
                 height: chain.getLatestBlock()._id,
-                schedule: chain.schedule
+                schedule: chain.schedule,
+                // H1: fork-activation fingerprint. A schedule generated under
+                // different gates must not be restored by a node whose chain
+                // data encodes different activation heights.
+                activation: {
+                    jail: leaderHealth.jailActivationHeight(),
+                    standby: chain.standbyActivationHeight()
+                }
             })
             fs.writeFileSync(file + '.tmp', data)
             fs.renameSync(file + '.tmp', file)
@@ -1033,6 +1040,14 @@ let chain = {
             const parsed = JSON.parse(raw)
             if (!parsed || !parsed.schedule || !parsed.schedule.shuffle
             || !Array.isArray(parsed.schedule.shuffle)) return null
+            // Legacy files have no fingerprint: accept them, but never restore
+            // a schedule written under different activation heights (H1).
+            if (parsed.activation
+            && (parsed.activation.jail !== leaderHealth.jailActivationHeight()
+             || parsed.activation.standby !== chain.standbyActivationHeight())) {
+                logr.error('Persisted schedule fork gates differ from local config, ignoring')
+                return null
+            }
             return parsed
         } catch (e) {
             logr.error('Failed to load persisted schedule', e)
@@ -1054,6 +1069,18 @@ let chain = {
     // slots (and, on the drills, hide the standbys behind it).
     // The "enough real leaders" guard makes it impossible to deadlock: the
     // master only steps out when the rotation can be filled without it.
+    // H1/H2: rotation gates come from chain config history, never from a bare
+    // local boolean. `standbyEnabled` is set at H_standby (13,400,000 on
+    // mainnet); before it the jail filter must not touch the rotation even if
+    // CONFIG_OVERLAY or a stale build sets canonicalLeaderOrder=true.
+    standbyActivationHeight: () => {
+        if (typeof config.activationHeight === 'function')
+            return config.activationHeight('standbyEnabled')
+        if (typeof config.standbyActivationHeight === 'number')
+            return config.standbyActivationHeight
+        return 0 // legacy unit-test stubs
+    },
+    jailFilterActiveAt: (h) => Number.isFinite(h) && h >= chain.standbyActivationHeight(),
     masterIsLeaderNow: (height, others) => {
         if (typeof config.masterLeaderUntil !== 'number') return true
         if (height <= config.masterLeaderUntil) return true
@@ -1066,7 +1093,7 @@ let chain = {
     },
     activeLeaderSet: () => {
         const headHeight = chain.getLatestBlock()._id
-        if (!config.canonicalLeaderOrder)
+        if (!config.canonicalLeaderOrder || !chain.jailFilterActiveAt(headHeight))
             return chain.filterMaster(chain.generateLeaders(true, false, config.leaders, 0), headHeight)
 
         const need = config.leaders
@@ -1098,8 +1125,8 @@ let chain = {
     // Standby pool for Layer H: leaders immediately below the active cut that
     // are not jailed. Exposed via /consensus and used at epoch boundaries.
     standbyLeaderSet: () => {
-        if (!config.canonicalLeaderOrder) return []
         const headHeight = chain.getLatestBlock()._id
+        if (!config.canonicalLeaderOrder || !chain.jailFilterActiveAt(headHeight)) return []
         const need = config.leaders
         const standbyCount = config.leaderStandbys || 0
         const all = chain.generateLeaders(true, false, need + standbyCount + 20, 0)
@@ -1353,10 +1380,14 @@ let chain = {
     })(),
     rebuildLeaderHealth: (cb) => {
         const head = chain.getLatestBlock()._id
-        const count = chain.leaderHealthRebuildBlocks
-        const from = Math.max(1, head - count + 1)
+        // H1: anchor the fold at the chain-data jail activation height. Every
+        // node replays exactly the same post-activation blocks in the same
+        // order, so restart timing, rebuild-window length and local build
+        // config cannot change the resulting jail state.
+        const from = Math.max(leaderHealth.jailActivationHeight(), 1,
+            head - chain.leaderHealthRebuildBlocks + 1)
         leaderHealth.leaders = {}
-        if (head < 1) return cb(null, 0)
+        if (head < from) return cb(null, 0)
         const fold = (bs) => {
             for (let i = 0; i < bs.length; i++)
                 leaderHealth.processBlock(bs[i], null)

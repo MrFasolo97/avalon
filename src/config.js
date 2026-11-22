@@ -195,6 +195,10 @@ let config = {
             skipGraceMs: 0,
             quorumMin: 3,
             quorumEligibility: 'activeLeaders',
+            // H1: jail/absence accounting is a chain rule, OFF from genesis and
+            // turned ON at exactly one height (H_S). Until then every node has
+            // the same empty jail state regardless of restarts or local build.
+            jailEnabled: false,
             jailMissThreshold: 30,
             jailBlocks: 200,
             jailBackoffMax: 4,
@@ -238,6 +242,8 @@ let config = {
             skipGraceMs: 500,
             quorumMin: 3,
             quorumEligibility: 'lastTurn',
+            // H_S: first height at which jail state exists on any node.
+            jailEnabled: true,
             jailMissThreshold: 30,
             jailBlocks: 200,
             jailBackoffMax: 4,
@@ -286,8 +292,19 @@ let config = {
         }
         
         return finalConfig
+    },
+    // Deterministic activation height for a boolean chain rule. Derived only
+    // from `history` — chain data shared by every node (including CONFIG_OVERLAY
+    // when a whole testnet uses one), never from env vars, wall clock or node
+    // local state. The H1/H2 gates use this instead of testing a bare boolean,
+    // which could otherwise be true on one node and false on another.
+    activationHeight: (key) => {
+        const keys = Object.keys(config.history).map(Number).sort((a, b) => a - b)
+        for (let i = 0; i < keys.length; i++)
+            if (config.history[keys[i]][key] === true) return keys[i]
+        return Infinity
     }
-} 
+}
 
 // Optional runtime config overlay.
 //

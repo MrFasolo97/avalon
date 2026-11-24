@@ -146,6 +146,9 @@ function startRebuild(startBlock) {
 }
 
 function startDaemon() {
+    // Make sure a proof-gated rollback always has a snapshot to restore, even
+    // on a node started from an existing database before the first interval.
+    require('./stateSnapshot').ensure(chain.getLatestBlock()._id).catch(() => {})
     // Layer S/H: leaderHealth (streaks, jail, absence) is derived state. It must
     // exist before the schedule/active set is computed or this node would rotate
     // jailed leaders back in and diverge from its peers.

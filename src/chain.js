@@ -13,6 +13,7 @@ const transaction = require('./transaction.js')
 const notifications = require('./notifications.js')
 const txHistory = require('./txHistory')
 const blocks = require('./blocks')
+const stateSnapshot = require('./stateSnapshot')
 const leaderHealth = require('./leaderHealth')
 const GrowInt = require('growint')
 const default_replay_output = 100
@@ -547,16 +548,20 @@ let chain = {
         txHistory.processBlock(block)
 
         // if block id is mult of n leaders, reschedule next n blocks
-        if (block._id % config.leaders === 0) {
+        const prevSchedule = chain.schedule
+        const scheduleChanged = block._id % config.leaders === 0
+        if (scheduleChanged) {
             chain.schedule = chain.minerSchedule(block)
             chain.saveSchedule()
         }
-        chain.recentBlocks.push(block)
-        chain.minerWorker(block)
-        chain.output(block)
         // H2: wait for the state flush and surface persistence errors. This was
         // fire-and-forget: a failed Mongo write was only logged by the writer
         // queue and the caller still got a success callback.
+        //
+        // The in-memory head (recentBlocks), miner worker and output MUST only
+        // advance after a successful flush. Otherwise a flush failure leaves the
+        // process mining/serving a head that is not persisted in Mongo, while the
+        // next restart rebuilds from the older persisted state.
         try {
             await new Promise((resolve, reject) => {
                 cache.writeToDisk(false, (err) => {
@@ -566,9 +571,18 @@ let chain = {
             })
         } catch (e) {
             logr.error('could not persist state for block #' + block._id + ': ' + (e.message || e))
+            if (scheduleChanged) chain.schedule = prevSchedule
+            // The block may already be in the block store; the in-memory head is
+            // intentionally NOT advanced so a restart/recovery can reconcile.
             cb(e)
             return
         }
+        chain.recentBlocks.push(block)
+        chain.minerWorker(block)
+        chain.output(block)
+        // Bounded snapshot for proof-gated reorgs: a rollback restores this state
+        // and replays only the short canonical prefix instead of all of history.
+        stateSnapshot.maybeSave(block._id).catch(() => {})
         cb(null, block)
     },
     output: (block,rebuilding) => {
@@ -1143,8 +1157,12 @@ let chain = {
         if (chain.masterIsLeaderNow(height, others.length)) return list
         return others
     },
-    activeLeaderSet: () => {
-        const headHeight = chain.getLatestBlock()._id
+    // `height` is optional. Fork-choice proof verification asks for the leader
+    // set at a CONTESTED height, not the local head's adaptive view; passing it
+    // keeps jail/standby gates height-specific. Existing callers keep the old
+    // head-relative behaviour.
+    activeLeaderSet: (height) => {
+        const headHeight = Number.isInteger(height) ? height : chain.getLatestBlock()._id
         if (!config.canonicalLeaderOrder || !chain.jailFilterActiveAt(headHeight))
             return chain.filterMaster(chain.generateLeaders(true, false, config.leaders, 0), headHeight)
 
@@ -1415,29 +1433,23 @@ let chain = {
         if (blockNum === 4860000)
             eco.loadHistory() // reset previous votes
     },
-    // Rebuild leaderHealth from the last N finalised blocks (startup path).
+    // Rebuild leaderHealth from finalised blocks (startup path).
     //
     // Jail/streak/absence are DERIVED state: a node that restarts with an empty
     // leaderHealth would compute a different activeLeaderSet (jailed leaders
     // back in rotation) than its peers, i.e. a different schedule and a
     // different shuffle — a fork. A full blockchain rebuild gets this for free
-    // (processBlock runs on every block); this bounded scan covers the resume
-    // path. Window: the longest possible jail (jailBlocks * 2^(backoffMax-1))
-    // plus enough blocks to accumulate jailMissThreshold skips.
-    leaderHealthRebuildBlocks: (function () {
-        const jailBlocks = config.jailBlocks || 200
-        const backoff = config.jailBackoffMax || 4
-        const threshold = config.jailMissThreshold || 30
-        return Math.max(2200, jailBlocks * Math.pow(2, backoff - 1) + threshold * (config.leaders || 5) + 200)
-    })(),
+    // (processBlock runs on every block); this startup fold covers restarts.
+    //
+    // H1: the fold MUST cover the entire jail history since the chain-data jail
+    // activation height. A bounded tail window loses jail backoff levels once the
+    // chain is more than that window past activation, so restarted nodes would
+    // compute a different jail state than long-running nodes. The activation
+    // height is deterministic chain config, so every node folds the same block
+    // range in the same order.
     rebuildLeaderHealth: (cb) => {
         const head = chain.getLatestBlock()._id
-        // H1: anchor the fold at the chain-data jail activation height. Every
-        // node replays exactly the same post-activation blocks in the same
-        // order, so restart timing, rebuild-window length and local build
-        // config cannot change the resulting jail state.
-        const from = Math.max(leaderHealth.jailActivationHeight(), 1,
-            head - chain.leaderHealthRebuildBlocks + 1)
+        const from = Math.max(leaderHealth.jailActivationHeight(), 1)
         leaderHealth.leaders = {}
         if (head < from) return cb(null, 0)
         const fold = (bs) => {

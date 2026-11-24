@@ -243,5 +243,96 @@ test('leader schedule is identical before and after a restart', () => {
     assert.deepStrictEqual(noRestart.shuffle, afterRestart.shuffle)
 })
 
+// --- 5. restart beyond the old 2200-block window ----------------------------
+// Regression: rebuildLeaderHealth used to fold only the last ~2200 blocks, so
+// once head > activation+2200 a restarted node lost early jail history/backoff
+// levels while a continuously running node kept them. The fold must cover the
+// entire jail history since activation.
+test('restart >2200 blocks after activation preserves jail backoff and schedule', () => {
+    const oldStore = store
+    const oldHead = chain.getLatestBlock
+    try {
+        // Build a deterministic chain: 'b' misses scheduled turns, gets jailed
+        // (level 1), serves jail, produces once (clears probation), misses again,
+        // gets jailed at level 2. All of this happens early; head is far later.
+        const longStore = []
+        leaderHealth.leaders = {}
+        setHead(H_JAIL - 1)
+        // Seed pre-activation blocks (no jail state, but keeps block ids contiguous).
+        for (let h = H_JAIL - 5; h < H_JAIL; h++) {
+            const b = { _id: h, miner: schedule.shuffle[(h - 1) % 3].name, skips: [], txs: [], hash: 'pre' + h }
+            longStore.push(b)
+            leaderHealth.processBlock(b, schedule)
+        }
+
+        let bProducedAfterJail = false
+        for (let h = H_JAIL; h <= H_JAIL + 2400; h++) {
+            setHead(h)
+            const scheduled = schedule.shuffle[(h - 1) % 3].name
+            let miner = scheduled
+            let skips = []
+            const bJailed = leaderHealth.isJailed('b', h)
+
+            if (scheduled === 'b') 
+                if (bJailed) {
+                    // jailed leader cannot produce; backup 'a' produces
+                    miner = 'a'
+                    skips = ['b']
+                } else if (!bProducedAfterJail && leaderHealth.leaders.b && leaderHealth.leaders.b.jail && leaderHealth.leaders.b.jail.probation) {
+                    // produce once to clear probation, then resume missing
+                    miner = 'b'
+                    skips = []
+                    bProducedAfterJail = true
+                } else if (bProducedAfterJail) {
+                    // miss again to accumulate a second jail with backoff
+                    miner = 'a'
+                    skips = ['b']
+                } else {
+                    // first jail cycle: miss scheduled turns
+                    miner = 'a'
+                    skips = ['b']
+                }
+            
+
+            const block = { _id: h, miner, skips, txs: [], hash: 'long' + h }
+            longStore.push(block)
+            leaderHealth.processBlock(block, schedule)
+        }
+
+        // Continuous node state at far head.
+        const head = H_JAIL + 2400
+        setHead(head)
+        const continuous = {}
+        for (const name in leaderHealth.leaders)
+            continuous[name] = Object.assign({}, JSON.parse(JSON.stringify(leaderHealth.leaders[name])),
+                { jailed: leaderHealth.isJailed(name, head) })
+        assert.strictEqual(continuous.b.jail.level, 2, 'continuous node should have backoff level 2')
+
+        const continuousSchedule = chain.minerSchedule({ _id: head, hash: 'abcdef123456' }).shuffle.map(s => s.name)
+
+        // Restarted node: rebuild from store only (this is where the old 2200-block
+        // window would lose early backoff history).
+        store = longStore
+        leaderHealth.leaders = {}
+        setHead(head)
+        chain.rebuildLeaderHealth((err) => { if (err) throw err })
+        const restarted = {}
+        for (const name in leaderHealth.leaders)
+            restarted[name] = Object.assign({}, JSON.parse(JSON.stringify(leaderHealth.leaders[name])),
+                { jailed: leaderHealth.isJailed(name, head) })
+
+        assert.strictEqual(restarted.b.jail.level, 2, 'restarted node must preserve jail backoff level 2')
+        assert.deepStrictEqual(restarted.b, continuous.b, 'restarted and continuous jail state must be identical')
+        assert.deepStrictEqual(restarted, continuous, 'full leader-health snapshot must be identical across restart')
+
+        const restartedSchedule = chain.minerSchedule({ _id: head, hash: 'abcdef123456' }).shuffle.map(s => s.name)
+        assert.deepStrictEqual(restartedSchedule, continuousSchedule, 'leader schedule must be identical after restart')
+    } finally {
+        store = oldStore
+        chain.getLatestBlock = oldHead
+        setHead(H_STANDBY + 5)
+    }
+})
+
 console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED') + ' (' + passed + ' passed, ' + failed + ' failed)')
 process.exit(failed === 0 ? 0 : 1)

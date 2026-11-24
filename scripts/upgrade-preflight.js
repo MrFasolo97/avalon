@@ -69,12 +69,23 @@ async function getJson(url, path) {
     return JSON.parse(await get(url, path))
 }
 
-async function versionOf(url) {
+async function versionInfoOf(url) {
     try {
-        return (await getJson(url, '/version')).version
+        const v = await getJson(url, '/version')
+        return {
+            version: v && v.version ? String(v.version) : 'unknown',
+            commit: v && v.commit ? String(v.commit) : 'unknown'
+        }
     } catch (e) {
-        return 'UNREACHABLE(' + e.message + ')'
+        return { version: 'UNREACHABLE', commit: 'UNREACHABLE', error: e.message }
     }
+}
+
+function versionLabel(info) {
+    if (!info) return 'unknown'
+    if (info.version === 'UNREACHABLE')
+        return 'UNREACHABLE(' + info.error + ')'
+    return info.version + ' (' + info.commit + ')'
 }
 
 async function heightOf(url) {
@@ -100,19 +111,29 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 async function main() {
     const report = { nodes, gates: {}, ok: true }
 
-    // ---- G-1 version census ----
+    // ---- G-1 version/commit census ----
+    const versionDetails = {}
     const versions = {}
-    for (const n of nodes) versions[n] = await versionOf(n)
-    const distinct = Array.from(new Set(Object.values(versions)))
-    const censusOk = distinct.length === 1 && !distinct[0].startsWith('UNREACHABLE')
-    report.gates.versionCensus = { ok: censusOk, versions }
+    for (const n of nodes) {
+        const info = await versionInfoOf(n)
+        versionDetails[n] = info
+        versions[n] = versionLabel(info)
+    }
+    const commits = Object.values(versionDetails).map(v => v.commit)
+    const distinctCommits = Array.from(new Set(commits))
+    const censusOk = distinctCommits.length === 1
+        && distinctCommits[0] !== 'unknown'
+        && distinctCommits[0] !== 'UNREACHABLE'
+    report.gates.versionCensus = { ok: censusOk, versions, commits: versionDetails }
     report.ok = report.ok && censusOk
 
     if (!asJson) {
-        process.stdout.write('G-1 version census:\n')
+        process.stdout.write('G-1 version/commit census:\n')
         for (const n of nodes) process.stdout.write('  ' + versions[n] + '  ' + n + '\n')
-        if (censusOk) process.stdout.write('  PASS (all nodes report ' + distinct[0] + ')\n')
-        else process.stdout.write('  FAIL — nodes disagree: ' + distinct.join(', ') + '\n')
+        if (censusOk)
+            process.stdout.write('  PASS (all nodes report commit ' + distinctCommits[0] + ')\n')
+        else
+            process.stdout.write('  FAIL — nodes disagree on commit: ' + distinctCommits.join(', ') + '\n')
     }
 
     // ---- G-2 schedule / statehash agreement at a common height ----

@@ -90,11 +90,15 @@ function pb(hash, miner, timestamp, preVotes) {
 
 console.log('=== Single-vote default / round handover (M1, M2) ===\n')
 
-test('singleVote is enabled by default in the shipped chain config', () => {
+test('singleVote is height-gated in the shipped chain config', () => {
     const realConfig = require('../src/config')
-    assert.strictEqual(realConfig.history[0].singleVote, true)
+    assert.strictEqual(realConfig.history[0].singleVote, false)
     assert.strictEqual(realConfig.history[13325000].singleVote, undefined,
-        'the S/H fork must not override the default')
+        'the S/H fork must not override singleVote')
+    assert.strictEqual(realConfig.history[14000000].singleVote, true,
+        'singleVote must activate at the future height gate')
+    assert.strictEqual(realConfig.read(13999999).singleVote, false)
+    assert.strictEqual(realConfig.read(14000000).singleVote, true)
     assert.strictEqual(realConfig.history[0].forceFinalizeFallback, false,
         'FF fallback must stay off: no halt recovery by bypassing quorum')
     assert.strictEqual(consensus.singleVoteEnabled, true)

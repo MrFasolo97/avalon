@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop, new_econs, 'release/**', 'feat/**']
+    branches: [main, master, develop, new_econs, new_net, 'release/**', 'feat/**']
   pull_request:
-    branches: [main, master, develop]
+    branches: [main, master, develop, new_net]
 
 jobs:
   lint-and-test:
@@ -23,7 +23,7 @@ jobs:
           node-version: ${{ matrix.node-version }}
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Lint
         run: npm run lint
@@ -51,7 +51,7 @@ jobs:
           node-version: ${{ matrix.node-version }}
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Determinism gate
         run: node test/run.js schedule-determinism consensus-invariants block-rank schedule-persist leader-health skip-attestation skip-early

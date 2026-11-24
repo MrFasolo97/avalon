@@ -42,7 +42,7 @@ function proof(height, hash, names) {
     return {
         height, hash,
         votes: names.map(n => ({
-            t: 6, d: { r: 0, h: height, b: { hash } },
+            t: 6, d: { r: 1, h: height, b: { hash } }, // 1 = COMMIT (finality)
             s: { n, s: 'sig:' + n, v: 2 }
         }))
     }
@@ -51,7 +51,7 @@ function proof(height, hash, names) {
 async function main() {
     console.log('=== Divergence detection / automatic rollback ===\n')
 
-    await test('vote proof: quorum of distinct eligible PRECOMMITs is valid', () => {
+    await test('vote proof: quorum of distinct eligible COMMITs is valid', () => {
         const p = proof(7, 'aaa', ['miner1', 'miner2', 'miner3', 'miner4'])
         const r = voteProof.verifyProof(p, {
             verifySignature: verify,
@@ -80,6 +80,63 @@ async function main() {
 
         const short = { height: 7, hash: 'aaa', votes: good.votes.slice(0, 2) }
         assert.strictEqual(voteProof.verifyProof(short, { verifySignature: verify, eligible, quorum: 4 }).valid, false)
+    })
+
+    await test('vote proof: PRECOMMITs are never accepted as finality evidence', () => {
+        const p = proof(7, 'aaa', ['miner1', 'miner2', 'miner3', 'miner4'])
+        p.votes.forEach(v => { v.d.r = 0 })
+        assert.strictEqual(voteProof.verifyProof(p, {
+            verifySignature: verify,
+            eligible: ['miner1', 'miner2', 'miner3', 'miner4', 'miner5'],
+            quorum: 4
+        }).valid, false)
+    })
+
+    await test('fork choice: a locally finalized head is never replaced by a peer proof', () => {
+        const eligible = ['miner1', 'miner2', 'miner3', 'miner4', 'miner5']
+        assert.strictEqual(voteProof.stronger(
+            { valid: true, height: 99, hash: 'peer', count: 5 },
+            { valid: true, height: 10, hash: 'local', count: 4 }
+        ), false)
+        assert.strictEqual(voteProof.stronger(
+            { valid: true, height: 10, hash: 'peer', count: 5 },
+            { valid: true, height: 10, hash: 'local', count: 4 }
+        ), false)
+        assert.strictEqual(voteProof.stronger(
+            { valid: true, height: 13, hash: 'peer', count: 4 },
+            { valid: false, height: 10, hash: 'local', count: 0 }
+        ), true)
+        const d = divergence.evaluate({
+            quorum: 4, eligible, verifySignature: verify,
+            local: { height: 10, hash: 'local', proof: proof(10, 'local', eligible).votes },
+            peers: [{ height: 99, hash: 'peer', proof: proof(99, 'peer', eligible).votes }]
+        })
+        assert.strictEqual(d, null)
+    })
+
+    await test('detection: eligible set and quorum are resolved at each proof height', () => {
+        const heights = []
+        const localEligible = ['l1', 'l2', 'l3', 'l4', 'l5']
+        const peerEligible = ['p1', 'p2', 'p3', 'p4', 'p5']
+        const d = divergence.evaluate({
+            verifySignature: verify,
+            eligibleAt: (h) => { heights.push('e:' + h); return h < 12 ? localEligible : peerEligible },
+            quorumAt: (h) => { heights.push('q:' + h); return 4 },
+            local: { height: 10, hash: 'local', proof: [] },
+            peers: [{ height: 13, hash: 'majority', proof: proof(13, 'majority', peerEligible.slice(0, 4)).votes }]
+        })
+        assert.ok(d && d.shouldRollback)
+        assert.deepStrictEqual(heights.sort(), ['e:10', 'e:13', 'q:10', 'q:13'])
+        // The same votes signed by the local-height set cannot prove the peer
+        // height when the peer height has a different eligible set.
+        const wrong = divergence.evaluate({
+            verifySignature: verify,
+            eligibleAt: (h) => h < 12 ? localEligible : peerEligible,
+            quorumAt: () => 4,
+            local: { height: 10, hash: 'local', proof: [] },
+            peers: [{ height: 13, hash: 'majority', proof: proof(13, 'majority', localEligible.slice(0, 4)).votes }]
+        })
+        assert.strictEqual(wrong, null)
     })
 
     await test('detection: proven competing chain triggers rollback, unproven does not', () => {
@@ -122,6 +179,45 @@ async function main() {
         }), 3)
     })
 
+    await test('ancestor: identical or unverifiable local block at the contested height is never a reorg', () => {
+        const hashes = { 0: 'g', 1: 'a', 2: 'b', 3: 'c', 4: 'local' }
+        // Same hash as our local #4: a serialized duplicate delivery, not a fork.
+        assert.strictEqual(divergence.findAncestor({
+            height: 4, hash: 'local', phash: 'c', localHashAt: h => hashes[h] || null
+        }), null)
+        // No local block at the contested height: fail closed.
+        assert.strictEqual(divergence.findAncestor({
+            height: 5, hash: 'peer-5', phash: 'local', localHashAt: h => hashes[h] || null
+        }), null)
+        // A genuinely different block at the contested height still finds the ancestor.
+        assert.strictEqual(divergence.findAncestor({
+            height: 4, hash: 'peer-4', phash: 'c', localHashAt: h => hashes[h] || null
+        }), 3)
+    })
+
+    await test('ancestor: reorg bound comes from chain config, not an env var', () => {
+        const previous = global.config.maxReorgDepth
+        const hashes = { 0: 'g', 1: 'a', 2: 'b', 3: 'c', 4: 'local' }
+        delete process.env.MAX_REORG_DEPTH
+        global.config.maxReorgDepth = 2
+        try {
+            assert.strictEqual(divergence.findAncestor({
+                height: 5, phash: 'x', localHashAt: h => hashes[h] || null
+            }), null)
+            global.config.maxReorgDepth = 3
+            assert.strictEqual(divergence.findAncestor({
+                height: 5, phash: 'x', localHashAt: h => hashes[h] || null
+            }), null)
+            hashes[3] = 'x'
+            assert.strictEqual(divergence.findAncestor({
+                height: 5, phash: 'x', localHashAt: h => hashes[h] || null
+            }), 3)
+        } finally {
+            if (previous === undefined) delete global.config.maxReorgDepth
+            else global.config.maxReorgDepth = previous
+        }
+    })
+
     await test('rollback: truncates, resets state, rebuilds, resumes and emits events', async () => {
         const calls = []
         const events = []
@@ -148,6 +244,21 @@ async function main() {
         await assert.rejects(() => divergence.rollback({ shouldRollback: true, height: 10 },
             { truncateBlocks: () => { touched = true } }))
         assert.strictEqual(touched, false)
+    })
+
+    await test('rollback: refuses to truncate when no usable state snapshot exists', async () => {
+        const calls = []
+        await assert.rejects(() => divergence.rollback({
+            shouldRollback: true, fromHeight: 12, ancestor: 9, height: 13, hash: 'majority'
+        }, {
+            logr: global.logr, events: { emit: () => {} },
+            hasSnapshot: () => Promise.resolve(false),
+            pause: () => calls.push('pause'),
+            truncateBlocks: () => calls.push('truncate'),
+            resetState: () => calls.push('state'),
+            rebuildState: () => calls.push('rebuild')
+        }), /no usable state snapshot/)
+        assert.deepStrictEqual(calls, [])
     })
 
     await test('rollback: a truncation failure stops before state is dropped', async () => {

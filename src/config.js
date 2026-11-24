@@ -195,6 +195,13 @@ let config = {
             skipGraceMs: 0,
             quorumMin: 3,
             quorumEligibility: 'activeLeaders',
+            // Fork-choice reorg bound (chain data, not a per-node env var): the
+            // maximum number of blocks a proof-gated rollback may walk back to
+            // find a common ancestor. Small on purpose — COMMIT-finalized blocks
+            // are final and must never be reverted; see
+            // doc/mainnet-deployment-and-rollback.md for the confirmation depth
+            // exchanges/bridges must wait for (2x this value).
+            maxReorgDepth: 10,
             // H1: jail/absence accounting is a chain rule, OFF from genesis and
             // turned ON at exactly one height (H_S). Until then every node has
             // the same empty jail state regardless of restarts or local build.

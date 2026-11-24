@@ -27,7 +27,11 @@ let mongo = {
                 logr.fatal('MongoDB connection failed: ' + err.message); process.exit(1)
             }
             mongo._connectAttempts = 0
-            this.db = client.db(db_name)
+            mongo.client = client
+            mongo.dbName = db_name
+            db = client.db(db_name)
+            this.db = db
+            mongo.db = db
             try {
                 await this.db.executeDbAdminCommand({
                     setParameter: 1,
@@ -152,7 +156,8 @@ let mongo = {
     fillInMemoryBlocks: (cb,headBlock) => {
         let query = {}
         if (headBlock && Number.isInteger(headBlock) && headBlock > 0) query._id = {$lt: headBlock}
-        db.collection('blocks').find(query, {
+        const target = mongo._rebuildOriginalDb || db
+        target.collection('blocks').find(query, {
             sort: {_id: -1},
             limit: config.ecoBlocksIncreasesSoon ? config.ecoBlocksIncreasesSoon : config.ecoBlocks
         }).toArray(function(err, blocks) {
@@ -163,7 +168,8 @@ let mongo = {
         })
     },
     lastBlock: () => new Promise((rs,rj) => {
-        db.collection('blocks').findOne({}, {
+        const target = mongo._rebuildOriginalDb || db
+        target.collection('blocks').findOne({}, {
             sort: {_id: -1}
         }, function(err, block) {
             if (err) return rj(err)
@@ -171,27 +177,126 @@ let mongo = {
         })
     }),
     // Automatic reorg primitives. `truncateBlocks` removes the minority tail;
-    // `resetDerivedState` drops blockchain state and rebuilds only the genesis
-    // account, leaving the validated block set untouched. The node then replays
-    // from block 0 with the normal deterministic rebuild (REBUILD_STATE path).
+    // `resetDerivedState` restores the newest state snapshot at/below the
+    // ancestor (never drops the database), leaving the validated block store
+    // untouched. The node then replays only snapshot+1..ancestor with the normal
+    // deterministic rebuild. If no usable snapshot exists the promise rejects
+    // and the rollback fails closed.
+    //
+    // Rollback rebuilds derived state into a fresh temporary database and swaps
+    // it in only on success. On any failure the temp DB is discarded and the
+    // original database remains the active one, so a rebuild failure never
+    // leaves the node with an empty active database.
     truncateBlocks: (height) => new Promise((rs, rj) => {
         if (!Number.isInteger(height) || height < 0) return rj(new Error('Invalid block height'))
-        db.collection('blocks').deleteMany({_id: {$gt: height}}, (e, res) => {
+        const target = mongo._rebuildOriginalDb || db
+        target.collection('blocks').deleteMany({_id: {$gt: height}}, (e, res) => {
             if (e) return rj(e)
             rs(res && res.deletedCount)
         })
     }),
+    hasStateSnapshotAtOrBelow: (height) => {
+        const stateSnapshot = require('./stateSnapshot')
+        return stateSnapshot.latestAtOrBelow(height).then(h => h !== null)
+    },
     resetDerivedState: (height) => (async () => {
-        if (process.env.BLOCKS_DIR)
-            await db.dropDatabase()
-        else {
-            const kept = await db.collection('blocks').find({_id: {$lte: height}}).toArray()
-            if (!kept.length || !kept.find(b => b._id === 0)) throw new Error('No genesis block to preserve')
-            await db.dropDatabase()
-            await db.collection('blocks').insertMany(kept)
+        const stateSnapshot = require('./stateSnapshot')
+        if (!mongo.client) throw new Error('mongo client not initialized')
+        const originalDb = mongo._rebuildOriginalDb || db
+        const tempDbName = mongo.dbName + '_rebuild_tmp'
+
+        // Discard any stale temp DB from a previous interrupted attempt.
+        try { await mongo.client.db(tempDbName).dropDatabase() } catch (e) {}
+
+        const tempDb = mongo.client.db(tempDbName)
+        const snapshotHeight = await stateSnapshot.restore(height, {
+            sourceDb: originalDb,
+            targetDb: tempDb
+        })
+
+        // Switch the active DB to the temp rebuild target. All derived-state
+        // writes (cache flush, rebuild replay) go to temp until swapped or discarded.
+        mongo._rebuildContext = {
+            originalDb,
+            tempDb,
+            tempDbName,
+            snapshotHeight
         }
-        await mongo.insertMasterAccount()
+        mongo._rebuildOriginalDb = originalDb
+        db = tempDb
+        mongo.db = tempDb
+
+        // Indexes on the temp DB so replay/write paths behave like production.
         await mongo.addMongoIndexes()
+
+        // The resolved height is the exact point the caller must replay from.
+        return snapshotHeight
+    })(),
+    finalizeRebuildSwap: () => (async () => {
+        const ctx = mongo._rebuildContext
+        if (!ctx) return false
+        const { originalDb, tempDb, tempDbName } = ctx
+        const stateSnapshot = require('./stateSnapshot')
+        const incoming = (name) => name + '_rebuild_incoming'
+
+        // Phase 1: copy rebuilt collections into staging collections in the
+        // original DB. The original derived collections are untouched, so a
+        // failure here leaves the active DB intact.
+        for (const name of stateSnapshot.collections) {
+            const staging = originalDb.collection(incoming(name))
+            await staging.deleteMany({})
+            const docs = await tempDb.collection(name).find({}).toArray()
+            if (docs.length) await staging.insertMany(docs)
+        }
+
+        // Phase 2: swap staging into place. renameCollection with dropTarget
+        // replaces the original collection atomically per collection.
+        for (const name of stateSnapshot.collections) {
+            const stagingName = incoming(name)
+            // Ensure staging exists even when empty (rename requires it).
+            const stagingExists = await originalDb.listCollections({name: stagingName}).hasNext()
+            if (!stagingExists) await originalDb.createCollection(stagingName)
+            await originalDb.collection(stagingName).rename(name, { dropTarget: true })
+        }
+
+        // Recreate indexes on original DB.
+        db = originalDb
+        mongo.db = originalDb
+        try {
+            await mongo.addMongoIndexes()
+        } catch (e) {
+            logr.warn('Index ensure on original DB after rebuild swap failed: ' + e.message)
+        }
+        db = originalDb
+        mongo.db = originalDb
+
+        // Clean up temp DB. Failure to drop temp is non-fatal; original is active.
+        try { await mongo.client.db(tempDbName).dropDatabase() } catch (e) {
+            logr.warn('Could not drop rebuild temp DB ' + tempDbName + ': ' + e.message)
+        }
+        mongo._rebuildContext = null
+        mongo._rebuildOriginalDb = null
+        return true
+    })(),
+    discardRebuildTemp: () => (async () => {
+        const ctx = mongo._rebuildContext
+        if (!ctx) {
+            // Ensure globals are not left pointing at a temp db if context was lost.
+            if (mongo._rebuildOriginalDb) {
+                db = mongo._rebuildOriginalDb
+                mongo.db = mongo._rebuildOriginalDb
+                mongo._rebuildOriginalDb = null
+            }
+            return false
+        }
+        const { originalDb, tempDbName } = ctx
+        db = originalDb
+        mongo.db = originalDb
+        mongo._rebuildContext = null
+        mongo._rebuildOriginalDb = null
+        try { await mongo.client.db(tempDbName).dropDatabase() } catch (e) {
+            logr.warn('Could not drop rebuild temp DB ' + tempDbName + ': ' + e.message)
+        }
         return true
     })(),
     restoreBlocks: (cb) => {

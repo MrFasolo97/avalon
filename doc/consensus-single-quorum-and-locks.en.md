@@ -471,7 +471,7 @@ accepted, while a stale envelope is not).
 | 2 of 5 leaders dead, denominator never drains | Layer S `skips[]` + Layer H standby promotion. INV-1 cannot create liveness out of 3/5. |
 | schedule recomputed at restart (**F7**) | Layer S schedule persistence |
 | `maxDrift = 200 ms` (**F4**), `SKIP_EARLY_CHECK_BLOCKS` (**F5**) | Layer S grace margin |
-| unproven or too-deep divergence (**F8**) | INV-1 makes divergence detectable; v2.2 adds a fail-closed automatic rollback gated on a verified quorum vote proof and a common ancestor within `MAX_REORG_DEPTH`. Without proof the node stays put and alerts the operator. |
+| unproven or too-deep divergence (**F8**) | INV-1 makes divergence detectable; v2.2 adds a fail-closed automatic rollback gated on a verified COMMIT-quorum proof, height-specific eligibility, local finality floor, and a common ancestor within `config.maxReorgDepth`. Without proof the node stays put and alerts the operator. |
 | non-deterministic state application (`cache.rollback`, Mongo, floats) | this is the one place where a CometBFT-style state-machine discipline is the right long-term answer — for a **new** chain, not for un-halting this one |
 
 The honest summary: this draft makes Avalon's consensus **provable**, and reduces the

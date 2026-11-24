@@ -796,16 +796,28 @@ patch; it must not ship.
 |---|---|---|
 | S0/S1 misbehaves | redeploy the previous tag; the chain is unchanged (no new validity rule), old code ignores `skips` | none |
 | H1/H2 must be undone **after** activation | full coordinated rollback: stop all nodes, restore the pre-`H` DB + `blocks.bson` snapshot, redeploy the old tag (runbook §6) | blocks produced after `H` are lost (bounded by the snapshot age) |
-| Minority fork with a **verified quorum vote proof** from a competing chain | automatic, bounded rollback to the common ancestor (`MAX_REORG_DEPTH`, default 100) followed by normal `recover()`; local blocks/state are truncated and deterministically rebuilt from genesis — no operator action | only the minority tail beyond the ancestor |
+| Minority fork with a **verified quorum vote proof** from a competing chain | opt-in (`AUTO_ROLLBACK=1`), bounded rollback to the common ancestor (`config.maxReorgDepth`, chain config, default 10) followed by normal `recover()`; local blocks are truncated, derived state restored from the newest snapshot at/below the ancestor and only `snapshot+1..ancestor` replayed — no operator action | only the minority tail beyond the ancestor |
 | Split without quorum proof, or no common ancestor inside the bound | **fail closed**: log `CHAIN DIVERGENCE`, emit `chain-divergence`, keep the local chain; `auto_resolve_halt.sh` remains a last-resort manual tool and refuses repeated truncation | none (automatic); per script if forced |
 
 Automatic rollback is a **fork-choice** mechanism, not a validation change: a signed
-PRECOMMIT quorum (`t:6`, round 0) carried in peer `NODE_STATUS.headVoteProof` is verified
-against the eligible set of the contested height before anything is touched. The node
-then truncates blocks (BSON index first, so a crash cannot expose a half-fork), resets
-derived Mongo state, replays from genesis and resumes forward recovery. `AUTO_ROLLBACK=0`
-disables it for emergency operator control; `MAX_REORG_DEPTH` bounds the walk. Tests:
-`test/divergence-rollback.js`, `test/p2p-rollback-integration.js`.
+**COMMIT** quorum (`t:6, d.r === COMMIT`, finality phase) carried in peer
+`NODE_STATUS.headVoteProof` is verified against the eligible set and `blockQuorum()` of the
+**proof's own height** (the contested block height), read from chain config at that height —
+never against the local head's adaptive eligibility. PRECOMMIT proofs are rejected because
+two competing blocks at the same height can gather precommit quorums across rounds.
+
+A node never rolls back below the last block it finalized itself with a valid COMMIT quorum
+(the local finality floor; on restart it falls back to the conservative current head). A
+locally finalized head is never replaced by a peer proof, regardless of the peer's claimed
+height. A block already in our store with the **same hash** is a duplicate delivery and is
+ignored — divergence requires a different hash at that height.
+
+The node then truncates blocks (BSON index first, so a crash cannot expose a half-fork),
+restores the newest Mongo state snapshot at/below the ancestor, replays only
+`snapshot+1..ancestor` and resumes forward recovery. The database is never dropped; without a
+usable snapshot the node fails closed. `AUTO_ROLLBACK=0` is the safe default; set it to `1`
+to enable. `config.maxReorgDepth` (chain config, default `10`) bounds the walk. Tests:
+`test/divergence-rollback.js`, `test/state-snapshot.js`, `test/p2p-rollback-integration.js`.
 
 Because Layer H is height-gated and its gate is evaluated before the release ships, the
 "rollback after activation" case is an operational failure, not an expected path. The

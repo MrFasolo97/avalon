@@ -4,6 +4,16 @@
 // that never changed, which made the census unable to tell two releases apart.
 // Informational only: no handshake rejects on it.
 const version = require('../package.json').version
+let commitHash = process.env.GIT_COMMIT || process.env.AVALON_COMMIT || ''
+try {
+    if (!commitHash)
+        commitHash = require('child_process').execSync('git rev-parse --short HEAD', {
+            cwd: require('path').join(__dirname, '..'),
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore']
+        }).trim()
+} catch (e) { commitHash = 'unknown' }
+if (!commitHash) commitHash = 'unknown' 
 const default_port = 6001
 const replay_interval = 1500
 const discovery_interval = 60000
@@ -87,6 +97,19 @@ let p2p = {
             if (cands[i] && cands[i].block && cands[i].block._id > head)
                 head = cands[i].block._id
         return head
+    },
+    // Hash of the local block stored at `height`, or null when we cannot verify
+    // it (not in the in-memory window and not readable from the block store).
+    // Used to tell a duplicate delivery apart from a real conflicting block
+    // BEFORE any divergence event or rollback is considered.
+    localHashAt: (height) => {
+        if (!Number.isInteger(height) || height < 0) return null
+        const recent = chain.recentBlocks || []
+        for (let i = recent.length - 1; i >= 0; i--)
+            if (recent[i] && recent[i]._id === height)
+                return recent[i].hash || null
+        try { return blocks.isOpen ? (blocks.read(height).hash || null) : null }
+        catch (e) { return null }
     },
     init: () => {
         p2p.generateNodeId()
@@ -345,13 +368,14 @@ let p2p = {
                     head_block_hash: chain.getLatestBlock().hash,
                     previous_block_hash: chain.getLatestBlock().phash,
                     pending_head: p2p.pendingHead(),
-                    // Transferable PRECOMMIT proof for our head. Lets a diverged
-                    // peer prove its branch has quorum votes (fork choice).
+                    // Transferable COMMIT proof for our head: finality evidence
+                    // a diverged peer can verify before considering a rollback.
                     headVoteProof: consensus.getVoteProof
                         ? consensus.getVoteProof(chain.getLatestBlock()._id, chain.getLatestBlock().hash)
                         : [],
                     nodeId: p2p.nodeId.pub,
                     version: version,
+                    commit: commitHash,
                     sign: sign
                 }
                 p2p.sendJSON(ws, {t: MessageType.NODE_STATUS, d:d})
@@ -786,12 +810,35 @@ let p2p = {
     // compare verifiable vote proofs and roll back to the common ancestor only
     // if a peer proves a stronger chain. Fail closed on missing proof/ancestor.
     maybeRollback: (conflict) => {
-        if (process.env.AUTO_ROLLBACK === '0') return
+        // Opt-in for safety: default 0, a node only reorgs itself when an
+        // operator has explicitly enabled automatic rollback.
+        const autoRollback = String(process.env.AUTO_ROLLBACK || '0').toLowerCase()
+        if (autoRollback !== '1' && autoRollback !== 'true') return
         if (p2p._rollbackPending || !conflict || !Number.isInteger(conflict.height)) return
         const head = chain.getLatestBlock()
         if (!head || !head.hash) return
-        const eligible = (consensus.eligibleLeaders && consensus.eligibleLeaders(head._id)) || []
-        const quorum = consensusQuorum.blockQuorum(eligible.length, config.quorumMin || 3)
+        if (conflict.height <= head._id) {
+            const localHash = p2p.localHashAt(conflict.height)
+            // Exact same hash => the block was already applied by the serialized
+            // application path (a normal duplicate). Missing local hash => we
+            // cannot prove a conflict, so fail closed. Only a *different* block
+            // at the contested height can justify a rollback.
+            if (!localHash || (conflict.hash && localHash === conflict.hash)) return
+        }
+        // Fork choice resolves the eligible set and quorum at EACH proof's own
+        // height. Using consensus.eligibleLeaders(head._id) here inherited the
+        // local head's adaptive schedule/turn state and allowed a peer to be
+        // verified against the wrong denominator.
+        const configAt = (h) => (typeof config.read === 'function' ? config.read(h) : config)
+        const eligibleAt = (h) => {
+            const c = configAt(h)
+            if (consensus.eligibleLeadersAt) return consensus.eligibleLeadersAt(h, c) || []
+            return (consensus.eligibleLeaders && consensus.eligibleLeaders(h)) || []
+        }
+        const quorumAt = (h, eligible) => {
+            const c = configAt(h) || {}
+            return consensusQuorum.blockQuorum(eligible.length, c.quorumMin || 3)
+        }
         const verify = (msg, cb) => consensus.verifySignature(msg, cb)
         const local = {
             height: head._id, hash: head.hash,
@@ -802,19 +849,32 @@ let p2p = {
             && Number.isInteger(s.head_block) && typeof s.head_block_hash === 'string'
         ).map(s => ({ height: s.head_block, hash: s.head_block_hash, proof: s.headVoteProof || [] }))
 
-        const decision = divergence.evaluate({ local, peers, quorum, eligible, verifySignature: verify })
+        const decision = divergence.evaluate({
+            local, peers, eligibleAt, quorumAt,
+            contestedHeight: conflict.height, verifySignature: verify
+        })
         if (!decision) return
-        const localHashAt = (h) => {
-            for (let i = chain.recentBlocks.length - 1; i >= 0; i--)
-                if (chain.recentBlocks[i]._id === h) return chain.recentBlocks[i].hash
-            try { return blocks.isOpen ? blocks.read(h).hash : null } catch (e) { return null }
-        }
+        const contestedConfig = configAt(conflict.height) || {}
+        const maxReorg = Number.isInteger(contestedConfig.maxReorgDepth)
+            ? contestedConfig.maxReorgDepth : 10
         const ancestor = divergence.findAncestor({
-            height: conflict.height, phash: conflict.phash, localHashAt: localHashAt
+            height: conflict.height, phash: conflict.phash,
+            hash: conflict.hash, localHashAt: p2p.localHashAt,
+            maxReorg: maxReorg
         })
         if (ancestor === null) {
             logr.warn('CHAIN DIVERGENCE: proven peer found but no common ancestor within '
-                + (process.env.MAX_REORG_DEPTH || 100) + ' blocks — refusing rollback')
+                + maxReorg + ' chain-configured blocks — refusing rollback')
+            return
+        }
+        // Hard safety floor: never truncate a block this node finalized itself
+        // with a valid COMMIT quorum. The floor falls back to the current head
+        // on a fresh process, which is conservative (it may forbid reorging a
+        // recovery-appended tail, but can never revert a finalized prefix).
+        const floor = consensus.localFinality ? consensus.localFinality() : { height: head._id }
+        if (!Number.isInteger(floor.height) || ancestor < floor.height) {
+            logr.warn('CHAIN DIVERGENCE: ancestor #' + ancestor + ' is below local finality floor #'
+                + floor.height + ' — refusing rollback')
             return
         }
         decision.ancestor = ancestor
@@ -839,8 +899,15 @@ let p2p = {
         const leaderHealth = require('./leaderHealth')
         const leaderStats = require('./leaderStats')
         const transaction = require('./transaction')
+        // Set by resetState() to the height of the snapshot that was actually
+        // restored. Replay starts from there, never from genesis.
+        let snapshotHeight = null
         const deps = {
             logr, events,
+            // Refuse to truncate the block store if no snapshot can restore the
+            // state at/below the ancestor.
+            hasSnapshot: (h) => mongo.hasStateSnapshotAtOrBelow
+                ? mongo.hasStateSnapshotAtOrBelow(h) : Promise.resolve(true),
             pause: () => {
                 p2p.recovering = head._id
                 if (chain.worker) clearTimeout(chain.worker)
@@ -848,9 +915,21 @@ let p2p = {
                 cache.rollback()
             },
             truncateBlocks: (h) => blocks.isOpen ? blocks.truncate(h) : mongo.truncateBlocks(h),
-            resetState: (h) => mongo.resetDerivedState(h),
+            // Restores the newest snapshot at/below the ancestor instead of
+            // dropping the database. The resolved height tells rebuildState()
+            // where the deterministic replay has to start.
+            resetState: (h) => mongo.resetDerivedState(h).then(s => {
+                if (Number.isInteger(s)) snapshotHeight = s
+                return true
+            }),
             resetRuntime: () => {
                 cache.clear()
+                // Drop warmed RAM copies as well: after the snapshot restore they
+                // describe the discarded tail. rebuildState() rewarms them.
+                cache.accounts = {}
+                cache.contents = {}
+                cache.leaders = {}
+                for (const c in cache.copy) cache.copy[c] = {}
                 dao.resetID()
                 daoMaster.resetID()
                 voteState.reset()
@@ -876,9 +955,35 @@ let p2p = {
                 if (process.env.LEADER_STATS === '1' && leaderStats.reset) leaderStats.reset()
             },
             rebuildState: () => new Promise((rs, rj) => {
-                chain.rebuildState(0, (e, builtTo) => e ? rj(e) : rs(builtTo))
+                // Replay only the retained canonical prefix: snapshot+1 .. ancestor.
+                // Blocks beyond the ancestor were truncated above, so there is
+                // nothing after the ancestor to re-execute here.
+                const from = Number.isInteger(snapshotHeight)
+                    ? Math.min(snapshotHeight + 1, decision.ancestor + 1)
+                    : decision.ancestor + 1
+                const invoke = () => chain.rebuildState(from, (e, builtTo) => {
+                    if (e) return rj(e)
+                    // Warm RAM caches no longer describe the restored state.
+                    Promise.all([
+                        cache.warmup ? cache.warmup('accounts', parseInt(process.env.WARMUP_ACCOUNTS)) : null,
+                        cache.warmup ? cache.warmup('contents', parseInt(process.env.WARMUP_CONTENTS)) : null,
+                        cache.warmupLeaders ? cache.warmupLeaders() : null
+                    ]).then(() => rs(builtTo), rj)
+                })
+                // Prime the in-memory block window for validation of the replayed
+                // blocks (same as a normal startup after a restart).
+                if (from > 0 && blocks.isOpen && blocks.fd && blocks.fillInMemoryBlocks)
+                    try { blocks.fillInMemoryBlocks(from) } catch (e) { return rj(e) }
+                if (from > 0 && !blocks.isOpen && mongo.fillInMemoryBlocks)
+                    mongo.fillInMemoryBlocks(invoke, from)
+                else invoke()
             }),
-            resume: (h) => {
+            resume: async (h) => {
+                // Swap the rebuilt temp DB into the original only after the
+                // replay succeeded. If swap fails, throw so divergence rejects
+                // and the catch path discards the temp DB.
+                if (mongo.finalizeRebuildSwap)
+                    await mongo.finalizeRebuildSwap()
                 p2p.recovering = h
                 p2p.recoverAttempt = 0
                 p2p.recoveredBlocks = {}
@@ -897,8 +1002,13 @@ let p2p = {
                 setTimeout(() => p2p.recover(), 100)
             }
         }
-        divergence.rollback(decision, deps).catch(e => {
+        divergence.rollback(decision, deps).catch(async (e) => {
             p2p._rollbackPending = false
+            try {
+                if (mongo.discardRebuildTemp) await mongo.discardRebuildTemp()
+            } catch (discardErr) {
+                logr.error('CHAIN ROLLBACK temp DB discard failed: ' + discardErr.message)
+            }
             logr.error('CHAIN ROLLBACK failed: ' + e.message)
             events.emit('recover-giveup', 'error', { rollback: true, error: e.message })
         })
@@ -907,25 +1017,51 @@ let p2p = {
         chain.validateAndAddBlock(block, true, function(err, newBlock) {
             if (err) {
                 // Divergence detection (F8): the fetched block does not extend our
-                // chain — it is at/below our head, or it is head+1 but its parent
-                // hash is not our head (a different chain). A forward-only recover
-                // cannot heal this; surface it as a loud event/log so an operator
-                // sees it instead of an endless "invalid phash" loop. Detection
-                // only: recover still tries other peers.
+                // chain — it is head+1 with the wrong parent hash, OR it is a block
+                // at/below our head with a DIFFERENT hash (a real fork). A block at
+                // or below our head with the SAME hash is just a duplicate delivery:
+                // block application is serialized, so a second peer can deliver the
+                // same height after the first copy has already been applied.
                 const head = chain.getLatestBlock()
                 const bid = block && block._id
-                if (Number.isInteger(bid)) {
+                if (Number.isInteger(bid) && head) {
+                    let duplicate = false
+                    let alreadyHave = false
+                    if (bid <= head._id) {
+                        const localHash = p2p.localHashAt(bid)
+                        if (localHash && block.hash && localHash === block.hash) duplicate = true
+                        // Without a readable local block we cannot prove a fork;
+                        // fail closed instead of accusing a healthy node.
+                        else if (localHash && block.hash && localHash !== block.hash) alreadyHave = true
+                    }
+                    if (duplicate) {
+                        // Completely ignore identical duplicates: no divergence
+                        // event, no rollback, no failed-recovery counter. Just let
+                        // recovery continue from the height we already hold.
+                        logr.debug('Ignoring duplicate block #' + bid + ' (already applied)')
+                        delete p2p.recoveredBlocks[bid]
+                        p2p.recoverAttempt = 0
+                        p2p.recover()
+                        return
+                    }
                     const phashMismatch = bid === head._id + 1 && block.phash && block.phash !== head.hash
-                    const alreadyHave = bid <= head._id
                     if ((phashMismatch || alreadyHave) && p2p.lastDivergenceHeight !== bid) {
                         p2p.lastDivergenceHeight = bid
                         events.emit('chain-divergence', 'error', {
                             head: head._id, ourHash: head.hash, blockHeight: bid,
+                            localBlockHash: p2p.localHashAt(bid),
                             blockHash: block.hash, blockPhash: block.phash
                         })
                         logr.error('CHAIN DIVERGENCE suspected at #' + bid + ' (our head #'
                             + head._id + '): fetched block does not extend our chain')
-                        p2p.maybeRollback({ height: bid, phash: block.phash, hash: block.hash })
+                        // For an already-have conflict the hash is verified above;
+                        // for head+1 there is no local block at that height, so the
+                        // parent-hash mismatch is the evidence and findAncestor()
+                        // must not apply the same-hash check.
+                        p2p.maybeRollback({
+                            height: bid, phash: block.phash,
+                            hash: alreadyHave ? block.hash : null
+                        })
                         // The rollback owns state/reset/recovery from here; the
                         // normal "try another peer" path must not race with it.
                         if (p2p._rollbackPending) return

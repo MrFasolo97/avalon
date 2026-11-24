@@ -222,8 +222,10 @@ In addition to the v2.0.3 set (`CORS_ORIGIN`, `HTTP_HOST`, `TRUST_PROXY`, `ADMIN
 | `QC_SHADOW` | off | `1` recommended | enables the read-only vote-ledger observer (logs `QC-*`, refuses nothing) |
 | `VOTE_STATE_PATH` | `./state/vote_state.json` | leave default | crash-safe vote record (local file, never chain data) |
 | `SCHEDULE_PERSIST_PATH` | `./state/schedule.json` | leave default | persisted epoch schedule (fixes F7 restart divergence) |
-| `AUTO_ROLLBACK` | on | leave unset | set to `0` only on explicit operator instruction to disable proof-gated automatic rollback on `CHAIN DIVERGENCE` |
-| `MAX_REORG_DEPTH` | `100` | leave default | maximum number of blocks walked back to find a common ancestor; deeper forks fail closed |
+| `AUTO_ROLLBACK` | **off (`0`)** | leave unset | opt-in only: set to `1` to enable proof-gated automatic rollback on `CHAIN DIVERGENCE` |
+| `MAX_REORG_DEPTH` | *(env removed)* | do not set | **Chain config** (`config.maxReorgDepth`, default `10` at genesis). Reorg depth is consensus-relevant fork-choice data: a per-node env var would let two nodes make different rollback decisions on the same fork. |
+| `STATE_SNAPSHOT_INTERVAL` | `10000` | leave default | block interval for the derived-state snapshots used to restore on rollback; `0` disables new snapshots (rollback then fails closed) |
+| `STATE_SNAPSHOT_KEEP` | `3` | leave default | number of recent state snapshots retained |
 | `LEADER_STATS` | off | `1` optional | per-leader produced/missed/jail counters |
 
 `QC_SHADOW=1` is the intended posture during the S→H observation window: it certifies the
@@ -330,37 +332,96 @@ the standby heights — must be settled before the artifact is published (§4/§
 
 ## 11.1 Automatic rollback on `CHAIN DIVERGENCE` (v2.2)
 
-A node that detects a fetched block not extending its head no longer stays stuck in a
-forward-only recovery loop. It compares its own head vote proof with the proofs advertised
-by peers in `NODE_STATUS.headVoteProof`. A rollback happens **only** when a competing chain
-is both (a) at least as high and backed by a verifiable quorum of signed round-0 PRECOMMITs
-from the eligible set, and (b) shares a common ancestor with the local store within
-`MAX_REORG_DEPTH`. Otherwise the node fails closed: it keeps its chain, logs
-`CHAIN DIVERGENCE`, and emits `chain-divergence`.
+Automatic rollback is **disabled by default** (`AUTO_ROLLBACK=0`). A node that detects a
+fetched block at/below its head must first verify that its local block at that height exists
+**and has a different hash**: block application is serialized, so an identical block arriving
+from a second peer is a normal duplicate and is ignored without any divergence event or
+rollback. Only a genuinely conflicting block (or a head+1 block with the wrong parent hash)
+is considered. With `AUTO_ROLLBACK=1`, the node compares its own head vote proof with the
+proofs advertised by peers in `NODE_STATUS.headVoteProof`. A rollback happens **only** when:
+
+- the competing block is backed by a verifiable quorum of signed **COMMIT** votes
+  (`t:6, d.r === COMMIT`, finality phase), not PRECOMMITs. PRECOMMIT is a round-0 poll;
+  two different blocks at the same height can gather precommit quorums across rounds, so
+  a PRECOMMIT proof is not finality evidence;
+- the proof is verified against the eligible leader set and `blockQuorum()` of the
+  **proof's own height** (the contested block height), read from chain config at that
+  height — never against the local head's adaptive eligibility;
+- the local node has no valid COMMIT finality proof of its own head. A locally finalized
+  block is never replaced by a peer proof, regardless of the peer's claimed height;
+- the competing chain shares a common ancestor with the local store within the
+  chain-configured `config.maxReorgDepth` (default `10`); and
+- the ancestor is at or above the **local finality floor**: the last block this node
+  finalized itself with a valid COMMIT quorum. On restart the floor falls back to the
+  current head, which is conservative.
+
+Otherwise the node fails closed: it keeps its chain, logs `CHAIN DIVERGENCE`, and emits
+`chain-divergence`.
+
+**Block-application flush safety (v2.3+):** `chain.addBlock()` only advances the in-memory
+head (`recentBlocks`), miner worker and output after a successful MongoDB state flush. If the
+flush fails, the schedule change is rolled back, the in-memory head is not advanced, and the
+error is surfaced to the caller so the process can reconcile on restart instead of mining on
+a non-persisted head.
 
 When it does fire, the sequence is:
 
-1. `chain-rollback-start` event + warning log with ancestor/target heights and signers;
+1. `chain-rollback-start` event + warning log with ancestor/target heights and signers, after a
+   preflight that refuses to proceed when no snapshot at/below the ancestor exists;
 2. mining paused, BSON block index/file truncated (index first), or Mongo `blocks` tail deleted;
-3. derived Mongo state reset to genesis and all RAM state (cache, DAOs, vote ledger, schedule,
-   anti-replay `recentTxs`, tx-history queue, jail/stats indexes, pending consensus votes) cleared —
-   no in-place mutation of a corrupt state;
-4. deterministic rebuild from genesis over the remaining blocks: balances, nonces, leader
-   schedule, jail state and the `txs` index are re-derived **only from blocks ≤ ancestor**;
-5. `chain-rollback` event, `recovering` set to the ancestor and forward `recover()` resumed.
+3. derived Mongo state restored from the newest snapshot at/below the ancestor into a **fresh
+   temporary database** (`<db_name>_rebuild_tmp`), never by dropping the active database; RAM
+   state (cache, DAOs, vote ledger, schedule, anti-replay `recentTxs`, tx-history queue,
+   jail/stats indexes, pending consensus votes) is cleared;
+4. deterministic replay **only** from `snapshot+1` to the ancestor over the retained canonical
+   blocks runs against the temp database — balances, nonces, leader schedule, jail state and the
+   `txs` index are re-derived without touching genesis or the discarded tail. With no usable
+   snapshot the rollback fails closed instead of falling back to a full rebuild;
+5. on replay success, derived collections are swapped from the temp database into the original
+   database, the temp database is dropped, and `chain-rollback` is emitted before forward
+   `recover()` resumes.
 
-**Transactions from the orphaned tail:** their effects on accounts/contracts are gone (the
-derived DB was dropped and replayed without them). Their hashes are also removed from
-`recentTxs`, so a resubmission is accepted again. Before truncating, the node saves those txs
-and re-offers them to the mempool *after* the rebuild, but only if they are still valid under
-the canonical state; if the majority chain already contains them, normal sync removes them
-from the pool again. No half-applied transaction survives.
+**Failure behavior:** if any rollback step fails (snapshot restore, replay, or swap), the temp
+database is discarded and the original database remains active. The rollback fails closed with a
+`recover-giveup` (`rollback:true`) event; the operator must investigate before resuming. This
+avoids leaving the node with an empty active database after a failed rebuild.
+
+**Transactions from the orphaned tail:** their effects on accounts/contracts are gone (their
+state was never restored from the snapshot). Their hashes are also removed from `recentTxs`,
+so a resubmission is accepted again. Before truncating, the node saves those txs and re-offers
+them to the mempool *after* the replay, but only if they are still valid under the canonical
+state; if the majority chain already contains them, normal sync removes them from the pool
+again. No half-applied transaction survives.
 
 Observe it with `curl -s localhost:3001/events | jq`. A clean drill shows
 `chain-divergence → chain-rollback-start → chain-rollback → recover-start`. A
-`recover-giveup` event with `rollback:true` means the rollback stopped before dropping
-state and requires operator investigation. Unit/integration proof:
-`node test/divergence-rollback.js` and `node test/p2p-rollback-integration.js`.
+`recover-giveup` event with `rollback:true` means the rollback failed closed; the temp rebuild
+database is discarded and the original derived database remains active, but the operator must
+investigate (the block store may already have been truncated to the ancestor). Unit/integration proof:
+`node test/divergence-rollback.js`, `node test/state-snapshot.js` and
+`node test/p2p-rollback-integration.js`.
+
+### 11.2 Confirmation depth (exchanges / bridges)
+
+Avalon does not emit BFT finality for blocks applied by recovery replay: a node that
+restarts or catches up may append blocks without having produced a local COMMIT quorum.
+`config.maxReorgDepth` (default `10`, chain config) bounds the *proof-gated* automatic
+rollback walker, but it is **not** a finality guarantee by itself.
+
+External systems that credit deposits, mint wrapped assets, or release bridge funds
+**MUST** wait for a confirmation depth derived from that bound:
+
+- **Minimum confirmation depth:** `2 * config.maxReorgDepth` blocks (default `20`).
+- **Recommended for exchanges/bridges:** wait for the higher of `2 * config.maxReorgDepth`
+  blocks and the normal deposit-confirmation SLA used for this asset, and confirm the
+  block hash is on the same canonical head seen by at least two independent Avalon nodes.
+- **Never credit on a proofless reorg target:** only blocks at or below the local finality
+  floor (`consensus.localFinality()`) have been finalized by this node with a COMMIT quorum.
+  Recovery-appended blocks above that floor may still be reorganizable until this node
+  finalizes them.
+
+Treat `maxReorgDepth` as a chain-wide safety parameter. Raising it increases the maximum
+proof-gated rollback window and therefore increases the required confirmation depth.
 
 ---
 

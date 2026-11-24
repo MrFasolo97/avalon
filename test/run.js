@@ -39,6 +39,7 @@ const tests = [
     'competing-candidate-finalize.js',
     'single-vote-handover.js',
     'divergence-rollback.js',
+    'state-snapshot.js',
     'p2p-rollback-integration.js',
     'vote-proof-wiring.js'
 ]

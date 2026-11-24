@@ -2,11 +2,14 @@
 // node test/p2p-rollback-integration.js
 //
 // Loads the REAL p2p.js with stubbed globals, feeds it peer NODE_STATUS records
-// carrying valid signed PRECOMMIT proofs and verifies that a diverged minority
+// carrying valid signed COMMIT (finality) proofs and verifies that a diverged minority
 // node rolls back to the common ancestor and resumes forward recovery without
 // manual intervention. Also checks the fail-closed paths.
 
 const assert = require('assert')
+
+// Automatic rollback is opt-in (AUTO_ROLLBACK=0 is the safe default).
+process.env.AUTO_ROLLBACK = '1'
 
 let passed = 0
 let failed = 0
@@ -16,6 +19,7 @@ function test(name, fn) {
         passed++
     }).catch(e => {
         console.log('  FAIL: ' + name + ' — ' + e.message)
+        if (process.env.DEBUG_TESTS) console.error(e)
         failed++
     })
 }
@@ -30,7 +34,7 @@ global.config = {
     b58Alphabet: '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz',
     leaders: 5, consensusRounds: 2, blockTime: 3000, quorumMin: 3,
     originHash: 'origin', forceFinalize: false, forceFinalizeFallback: false,
-    singleVote: true, qcEnforce: false, read: () => global.config
+    singleVote: true, qcEnforce: false, maxReorgDepth: 10, read: () => global.config
 }
 global.logr = {
     info: m => logs.push(['info', String(m)]),
@@ -67,7 +71,10 @@ blocks.truncate = (h) => { calls.push('truncate-blocks:' + h); return h }
 blocks.read = (h) => ({ _id: h, hash: 'h' + h, txs: [{ id: 'tx' + h }] })
 const mongo = require('../src/mongo')
 mongo.truncateBlocks = (h) => { calls.push('mongo-truncate:' + h); return Promise.resolve(h) }
-mongo.resetDerivedState = (h) => { calls.push('reset-state:' + h); return Promise.resolve(true) }
+mongo.hasStateSnapshotAtOrBelow = () => Promise.resolve(true)
+mongo.resetDerivedState = (h) => { calls.push('reset-state:' + h); return Promise.resolve(5) }
+mongo.finalizeRebuildSwap = () => { calls.push('finalize-swap'); return Promise.resolve(true) }
+mongo.discardRebuildTemp = () => { calls.push('discard-temp'); return Promise.resolve(true) }
 const voteState = require('../src/voteState')
 voteState.reset = () => calls.push('voteState-reset')
 require.cache[require.resolve('../src/voteState')] = { exports: voteState }
@@ -83,10 +90,12 @@ transaction.addToPool = (txs) => calls.push('tx-requeued:' + txs[0].id)
 // verifier: signature is the literal string "sig:<name>"
 global.consensus = {
     eligibleLeaders: () => leaderNames.slice(),
+    eligibleLeadersAt: () => leaderNames.slice(),
     verifySignature: (msg, cb) => cb(String(msg.s.s).startsWith('sig:' + msg.s.n)),
     getVoteProof: () => global.__localProof || [],
     resetVoteProofs: () => calls.push('reset-proof'),
     cancelForceFinalize: () => calls.push('cancel-ff'),
+    localFinality: () => ({ height: 5, hash: 'h5' }), // floor: protects finalized prefix
     voteLedger: { singleVote: false }
 }
 
@@ -101,7 +110,7 @@ p2p.recoverAttempt = 0
 
 function proof(height, hash, names) {
     return names.map(n => ({
-        t: 6, d: { r: 0, h: height, b: { hash } },
+        t: 6, d: { r: 1, h: height, b: { hash } }, // COMMIT = finality
         s: { n, s: 'sig:' + n, v: 2 }
     }))
 }
@@ -125,6 +134,111 @@ async function main() {
         assert.strictEqual(status.headVoteProof.length, 4)
         assert.strictEqual(status.headVoteProof[0].d.b.hash, 'local-head')
         p2p.sendJSON = orig
+    })
+
+    await test('an exact duplicate block while a peer is one block ahead never rolls back', async () => {
+        calls.length = 0
+        events.length = 0
+        const originalBlocks = chain.recentBlocks.slice()
+        const originalValidate = chain.validateAndAddBlock
+        const originalLatest = chain.getLatestBlock
+        // Peer is one block ahead. Both deliveries carry the SAME block #9.
+        const duplicate = { _id: localHead + 1, hash: 'same-block', phash: 'local-head', txs: [] }
+        p2p.sockets = [{
+            node_status: {
+                origin_block: 'origin', head_block: duplicate._id,
+                head_block_hash: duplicate.hash,
+                headVoteProof: proof(duplicate._id, duplicate.hash, leaderNames.slice(0, 4))
+            }
+        }]
+        p2p.lastDivergenceHeight = null
+        p2p._rollbackPending = false
+        let applied = false
+        chain.getLatestBlock = () => chain.recentBlocks[chain.recentBlocks.length - 1]
+        chain.validateAndAddBlock = (blk, revalidate, cb) => {
+            if (!applied) {
+                applied = true
+                chain.recentBlocks.push({ _id: blk._id, hash: blk.hash, phash: blk.phash })
+                cb(null, blk)
+            } else
+                // Serialized application stored the first copy; the second one
+                // fails with the usual "invalid index" / alreadyHave error.
+                cb(new Error('invalid block #' + blk._id))
+        }
+        try {
+            p2p.addRecursive(duplicate)
+            await wait(20)
+            p2p.addRecursive(duplicate)
+            await wait(40)
+            assert.strictEqual(applied, true)
+            assert.strictEqual(p2p.lastDivergenceHeight, null)
+            assert.strictEqual(p2p._rollbackPending, false)
+            assert.strictEqual(events.some(e => e.name === 'chain-divergence'), false)
+            assert.strictEqual(events.some(e => e.name === 'chain-rollback-start'), false)
+            assert.strictEqual(events.some(e => e.name === 'chain-rollback'), false)
+            assert.strictEqual(calls.some(c => /^(truncate-blocks|reset-state|rebuild):/.test(c)), false)
+        } finally {
+            chain.validateAndAddBlock = originalValidate
+            chain.getLatestBlock = originalLatest
+            chain.recentBlocks = originalBlocks
+            p2p.sockets = []
+        }
+    })
+
+    await test('a different block at the same height is still treated as a real fork', async () => {
+        calls.length = 0
+        events.length = 0
+        const originalValidate = chain.validateAndAddBlock
+        p2p.sockets = [{
+            node_status: {
+                origin_block: 'origin', head_block: 10, head_block_hash: 'majority-head',
+                headVoteProof: proof(10, 'majority-head', leaderNames.slice(0, 4))
+            }
+        }]
+        p2p.lastDivergenceHeight = null
+        p2p._rollbackPending = false
+        const previousRollback = process.env.AUTO_ROLLBACK
+        process.env.AUTO_ROLLBACK = '0' // detection only; keep this test isolated
+        chain.validateAndAddBlock = (blk, revalidate, cb) => cb(new Error('invalid block #' + blk._id), blk)
+        try {
+            // #8 exists locally as 'local-head'; this competing copy has a
+            // different hash, so it must still surface as CHAIN DIVERGENCE.
+            p2p.addRecursive({ _id: localHead, hash: 'other-8', phash: 'h7' })
+            await wait(20)
+            assert.strictEqual(p2p.lastDivergenceHeight, localHead)
+            assert.ok(events.some(e => e.name === 'chain-divergence'))
+            assert.strictEqual(events.some(e => e.name === 'chain-rollback-start'), false)
+        } finally {
+            if (previousRollback === undefined) delete process.env.AUTO_ROLLBACK
+            else process.env.AUTO_ROLLBACK = previousRollback
+            chain.validateAndAddBlock = originalValidate
+            p2p.sockets = []
+        }
+    })
+
+    await test('automatic rollback stays disabled unless explicitly opted in', async () => {
+        calls.length = 0
+        events.length = 0
+        const previous = process.env.AUTO_ROLLBACK
+        delete process.env.AUTO_ROLLBACK
+        try {
+            p2p.sockets = [{
+                node_status: {
+                    origin_block: 'origin', head_block: 10, head_block_hash: 'majority-head',
+                    headVoteProof: proof(10, 'majority-head', leaderNames.slice(0, 4))
+                }
+            }]
+            p2p._rollbackPending = false
+            p2p.maybeRollback({ height: 6, phash: 'h5', hash: 'majority-6' })
+            await wait(40)
+            assert.strictEqual(calls.length, 0)
+            assert.strictEqual(events.length, 0)
+            assert.strictEqual(p2p._rollbackPending, false)
+        } finally {
+            if (previous === undefined) delete process.env.AUTO_ROLLBACK
+            else process.env.AUTO_ROLLBACK = previous
+            p2p.sockets = []
+        }
     })
 
     await test('a proven competing branch triggers a full automatic rollback and recovery', async () => {
@@ -159,7 +273,7 @@ async function main() {
         assert.deepStrictEqual(calls, [
             'cache-rollback', 'truncate-blocks:5', 'reset-state:5',
             'cache-clear', 'dao-reset', 'daoMaster-reset', 'voteState-reset', 'reset-proof',
-            'cancel-ff', 'leaderStats-reset', 'rebuild:0',
+            'cancel-ff', 'leaderStats-reset', 'rebuild:6', 'finalize-swap',
             'tx-requeued:tx6', 'tx-requeued:tx7', 'tx-requeued:tx8', 'recover'
         ])
         assert.deepStrictEqual(chain.recentTxs, {})
@@ -203,6 +317,54 @@ async function main() {
         await wait(40)
         assert.strictEqual(calls.length, 0)
         assert.ok(logs.some(l => l[0] === 'warn' && String(l[1]).includes('no common ancestor')))
+    })
+
+    await test('fail closed when the ancestor is below the local finality floor', async () => {
+        calls.length = 0
+        events.length = 0
+        p2p._rollbackPending = false
+        const prev = global.consensus.localFinality
+        global.consensus.localFinality = () => ({ height: 7, hash: 'h7' })
+        p2p.sockets = [{
+            node_status: {
+                origin_block: 'origin', head_block: 10, head_block_hash: 'majority-head',
+                headVoteProof: proof(10, 'majority-head', leaderNames.slice(0, 4))
+            }
+        }]
+        try {
+            // conflict at #6, ancestor #5, but local finality floor is #7
+            p2p.maybeRollback({ height: 6, phash: 'h5', hash: 'majority-6' })
+            await wait(40)
+            assert.strictEqual(calls.length, 0)
+            assert.ok(logs.some(l => l[0] === 'warn' && String(l[1]).includes('local finality floor')))
+        } finally {
+            global.consensus.localFinality = prev
+        }
+    })
+
+    await test('rollback discards temp rebuild DB on failure and never swaps', async () => {
+        calls.length = 0
+        events.length = 0
+        p2p._rollbackPending = false
+        const prevReset = mongo.resetDerivedState
+        mongo.resetDerivedState = (h) => { calls.push('reset-state:' + h); return Promise.reject(new Error('simulated restore failure')) }
+        p2p.sockets = [{
+            node_status: {
+                origin_block: 'origin', head_block: 10, head_block_hash: 'majority-head',
+                headVoteProof: proof(10, 'majority-head', leaderNames.slice(0, 4))
+            }
+        }]
+        try {
+            p2p.maybeRollback({ height: 6, phash: 'h5', hash: 'majority-6' })
+            await wait(200)
+            assert.ok(calls.includes('discard-temp'), 'temp rebuild DB must be discarded on failure')
+            assert.ok(!calls.includes('finalize-swap'), 'failed rollback must not swap temp DB in')
+            assert.strictEqual(p2p._rollbackPending, false)
+            assert.ok(logs.some(l => l[0] === 'error' && String(l[1]).includes('CHAIN ROLLBACK failed')))
+        } finally {
+            mongo.resetDerivedState = prevReset
+            p2p.sockets = []
+        }
     })
 
     console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED') + ' (' + passed + ' passed, ' + failed + ' failed)')

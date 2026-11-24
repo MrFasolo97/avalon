@@ -54,19 +54,24 @@ require_running() {
     # rotation once 5 real leaders exist). activeLeaders() is a rolling window
     # though, so it can momentarily hold 4 of them — requiring all 5 (in
     # particular "miner5") made the drills abort intermittently. Require the
-    # master to be gone and at least 3 leaders present instead.
-    local active
-    active=$(json_extract "$(api_get "$BOOTSTRAP" "/consensus")" ".activeLeaders.map(l => l.name || l).join(',')" 2>/dev/null || echo "")
-    if [ -n "$active" ]; then
+    # master to be gone and at least 3 leaders present instead. Retry briefly:
+    # after partition/restart turbulence the rolling activeLeaders view can lag.
+    local active="" count=0 attempt
+    for attempt in $(seq 1 30); do
+        active=$(json_extract "$(api_get "$BOOTSTRAP" "/consensus")" ".activeLeaders.map(l => l.name || l).join(',')" 2>/dev/null || echo "")
+        if [ -z "$active" ]; then
+            sleep 2; continue
+        fi
         if echo "$active" | grep -q "dtube"; then
             fail "Master 'dtube' is still in the rotation [$active]; the drills need the miner set"
         fi
-        local count
         count=$(echo "$active" | tr ',' '\n' | grep -c .)
-        if [ "$count" -lt 3 ]; then
-            fail "Active leader set [$active] has fewer than 3 leaders"
+        if [ "$count" -ge 3 ]; then
+            return 0
         fi
-    fi
+        sleep 2
+    done
+    fail "Active leader set [$active] has fewer than 3 leaders after retries"
 }
 
 # GET an API path from inside a container, return body
@@ -355,6 +360,7 @@ clear_all_delays() {
 # A mismatch is a hard failure (unlike the historical WARN-only helper).
 require_exact_statehash() {
     local containers=("$@")
+    local mismatch_seen=0
     verify_chain_agreement "${containers[@]}"
 
     local attempts="${STATEHASH_ATTEMPTS:-60}"
@@ -383,13 +389,20 @@ require_exact_statehash() {
                 pass "Exact state hash converges on ${#containers[@]} node(s) at height $first: ${hashes[0]}"
                 return 0
             fi
-            log "[FAIL] State hash mismatch at height $first:"
+            # Derived state can lag briefly on a just-restarted/caught-up node
+            # (leaderHealth rebuild, schedule reload) even when block hashes
+            # agree. Retry until attempts are exhausted before failing; a real
+            # persistent mismatch will still fail at the end.
+            mismatch_seen=1
+            log "WARN: state hash mismatch at height $first (attempt $a/$attempts), retrying..."
             for i in "${!containers[@]}"; do
                 log "  ${containers[$i]} -> ${hashes[$i]:-<none>}"
             done
-            fail "state hash mismatch on $mismatch"
         fi
         sleep 1
     done
+    if [ "$mismatch_seen" -eq 1 ]; then
+        fail "state hash never converged within ${attempts}s"
+    fi
     fail "heights never aligned within ${attempts}s; cannot verify exact state hash"
 }

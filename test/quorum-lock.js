@@ -188,6 +188,59 @@ test('an exact duplicate is accepted idempotently', () => {
     assert.strictEqual(res.reason, 'duplicate')
 })
 
+console.log('\n--- QC-justified unlock (view-change) ---')
+
+test('precommit lock cannot move to a higher round with a different hash without QC justification', () => {
+    const ledger = q.createLedger()
+    assert.strictEqual(q.recordVote(ledger, { h: 20, r: q.PRECOMMIT, hash: 'A', signer: 'self', round: 0 }).accepted, true)
+    const res = q.recordVote(ledger, { h: 20, r: q.PRECOMMIT, hash: 'B', signer: 'self', round: 1 })
+    assert.strictEqual(res.accepted, false)
+    assert.strictEqual(res.reason, 'lock-conflict')
+    assert.strictEqual(q.lockedOn(ledger, 20), 'A')
+})
+
+test('precommit lock can move to a higher round with a different hash when QC-justified', () => {
+    const ledger = q.createLedger()
+    assert.strictEqual(q.recordVote(ledger, { h: 21, r: q.PRECOMMIT, hash: 'A', signer: 'self', round: 0 }).accepted, true)
+    const res = q.recordVote(ledger, { h: 21, r: q.PRECOMMIT, hash: 'B', signer: 'self', round: 1, justified: true })
+    assert.strictEqual(res.accepted, true)
+    assert.strictEqual(q.lockedOn(ledger, 21), 'B')
+})
+
+test('higher-round move without justification is refused even across multiple rounds', () => {
+    const ledger = q.createLedger()
+    q.recordVote(ledger, { h: 22, r: q.PRECOMMIT, hash: 'A', signer: 'self', round: 1 })
+    for (const round of [2, 3, 5, 10]) {
+        const res = q.recordVote(ledger, { h: 22, r: q.PRECOMMIT, hash: 'B', signer: 'self', round })
+        assert.strictEqual(res.accepted, false, 'round ' + round + ' should be refused without justification')
+        assert.strictEqual(res.reason, 'lock-conflict')
+    }
+    assert.strictEqual(q.lockedOn(ledger, 22), 'A')
+})
+
+test('QC-justified unlock advances the lock round and blocks same/lower round moves', () => {
+    const ledger = q.createLedger()
+    q.recordVote(ledger, { h: 23, r: q.PRECOMMIT, hash: 'A', signer: 'self', round: 0 })
+    assert.strictEqual(q.recordVote(ledger, { h: 23, r: q.PRECOMMIT, hash: 'B', signer: 'self', round: 2, justified: true }).accepted, true)
+    assert.strictEqual(q.lockedOn(ledger, 23), 'B')
+    // same round as new lock, different hash - refused even if justified flag present
+    const sameRound = q.recordVote(ledger, { h: 23, r: q.PRECOMMIT, hash: 'C', signer: 'self', round: 2, justified: true })
+    assert.strictEqual(sameRound.accepted, false)
+    assert.strictEqual(sameRound.reason, 'lock-conflict')
+    // lower round - refused
+    const lowerRound = q.recordVote(ledger, { h: 23, r: q.PRECOMMIT, hash: 'C', signer: 'self', round: 1, justified: true })
+    assert.strictEqual(lowerRound.accepted, false)
+    assert.strictEqual(lowerRound.reason, 'lock-conflict')
+})
+
+test('higher round with same hash does not require justification', () => {
+    const ledger = q.createLedger()
+    q.recordVote(ledger, { h: 24, r: q.PRECOMMIT, hash: 'A', signer: 'self', round: 0 })
+    const res = q.recordVote(ledger, { h: 24, r: q.PRECOMMIT, hash: 'A', signer: 'self', round: 5 })
+    assert.strictEqual(res.accepted, true)
+    assert.strictEqual(q.lockedOn(ledger, 24), 'A')
+})
+
 console.log('\n--- malformed input ---')
 
 test('rejects non-integer heights, unknown phases and empty hashes', () => {

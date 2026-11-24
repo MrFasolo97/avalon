@@ -116,15 +116,20 @@ function recordVote(ledger, vote) {
     const enforce = ledger.singleVote
     let conflict = null
 
-    // Lock (view-aware): a precommit locks its hash AT A ROUND. A HIGHER round may
-    // move to a different hash (the round changed — the previous proposer was
-    // silent); the same or a lower round may not (INV-1 within a round + no
-    // oscillation between rounds). The lock entry is { hash, round }.
+    // Lock (view-aware): a precommit locks its hash AT A ROUND. A same or lower
+    // round may not move to a different hash (INV-1 within a round + no
+    // oscillation between rounds). A HIGHER round may move to a different hash
+    // only when justified by a valid QC from an earlier round (QC-justified
+    // unlock); moving on a higher round alone, without QC justification, is
+    // refused. The lock entry is { hash, round }.
     if (r === PRECOMMIT) {
         const lock = ledger.locks.get(h)
-        if (lock && lock.hash !== hash && round <= (lock.round || 0)) {
-            conflict = { reason: 'lock-conflict', locked: lock.hash }
-            if (enforce) return { accepted: false, reason: 'lock-conflict', locked: lock.hash }
+        if (lock && lock.hash !== hash) {
+            const justified = vote && vote.justified === true
+            if (round <= (lock.round || 0) || !justified) {
+                conflict = { reason: 'lock-conflict', locked: lock.hash }
+                if (enforce) return { accepted: false, reason: 'lock-conflict', locked: lock.hash }
+            }
         }
     }
 

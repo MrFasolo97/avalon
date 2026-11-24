@@ -30,18 +30,32 @@ const VOTE_STATE_PATH = process.env.VOTE_STATE_PATH || './state/vote_state.json'
 // S1' single-vote (INV-1, doc/consensus-single-quorum-and-locks §2.3): a node
 // casts at most ONE hash per (height, phase), for the deterministic best-ranked
 // candidate it knows. A conflicting vote is refused — halt rather than fork.
-// Not shippable yet (it needs the view-change round election), so it stays OFF.
 //
-// A per-node env switch would let one node refuse its own votes and diverge, so
-// this is CHAIN config: set `singleVote` in config.history (or the testnet
-// CONFIG_OVERLAY). The CONSENSUS_SINGLE_VOTE env is not read.
-const SINGLE_VOTE = typeof config !== 'undefined' && config.singleVote === true
+// This is CHAIN config, height-gated in config.history so activation is
+// deterministic across nodes. Read dynamically per block height (not startup-only).
+// The legacy CONSENSUS_SINGLE_VOTE env is not read.
+function singleVoteAt(h) {
+    try {
+        const height = Number.isInteger(h) ? h : (chain && chain.getLatestBlock ? chain.getLatestBlock()._id + 1 : 0)
+        const cfg = (typeof config.read === 'function')
+            ? config.read(height)
+            : require('./config.js').read(height)
+        return cfg && cfg.singleVote === true
+    } catch (e) {
+        return false
+    }
+}
 
 let consensus = {
     observer: false,
-    singleVoteEnabled: SINGLE_VOTE,
+    // Dynamic: reflects the next block height by default; use singleVoteAt(h) for
+    // height-specific checks.
+    get singleVoteEnabled() {
+        return singleVoteAt(chain && chain.getLatestBlock ? chain.getLatestBlock()._id + 1 : 0)
+    },
+    singleVoteAt,
     // Production ledger for our OWN votes. singleVote:true so the rule is
-    // enforced by recordVote(); only consulted when SINGLE_VOTE is on.
+    // enforced by recordVote(); only consulted when singleVote is active at height.
     voteLedger: consensusQuorum.createLedger({ singleVote: true }),
     // Signed PRECOMMITs retained as a transferable fork proof for NODE_STATUS.
     // Top-level (not inside `qc`) because it must exist with QC_SHADOW off.
@@ -162,6 +176,27 @@ let consensus = {
         if (eligible.length === 0) return base
         return eligible
     },
+    // Canonical eligible set for an arbitrary height, used by rollback proof
+    // verification. Unlike eligibleLeaders() (the live voter view, derived from
+    // the local head's schedule), this resolves the config and leader-health
+    // gates AT `h` and uses the chain-derived leader set for that height. The
+    // consensus path keeps its own head-relative behaviour; fork choice must not
+    // inherit an adaptive denominator from the node that is trying to reorg.
+    eligibleLeadersAt: (h, cfgAtHeight) => {
+        const c = cfgAtHeight || (typeof config.read === 'function' ? config.read(h) : config)
+        const active = consensus.activeLeaders()
+        if (!c || c.quorumEligibility !== 'lastTurn')
+            return consensusQuorum.canonicalEligible(active)
+
+        let base = active
+        if (typeof chain.activeLeaderSet === 'function') {
+            const set = chain.activeLeaderSet(h).map(l => l.name || l)
+            if (set.length) base = set
+        }
+        const eligible = base.filter(name => leaderHealth.isEligible(name, h))
+        if (!eligible.length) return consensusQuorum.canonicalEligible(base)
+        return consensusQuorum.canonicalEligible(eligible)
+    },
     // Observes votes and compares the ledger verdict with the production one.
     // Nothing here can refuse, delay or alter a block: read the counters, act
     // on them, then ship S1'.
@@ -253,14 +288,13 @@ let consensus = {
         } else if (res.reason === 'lock-conflict')
             logr.debug('QC-LOCK-CONFLICT height '+h+' by '+signer+' (locked on '+(res.locked||'?').substr(0,8)+')')
     },
-    // S0': retain the signed round-0 votes we observed so a round-1 vote can
-    // carry the round-0 QC as a `justify` a peer can verify without having been
-    // online for round 0 (doc §2.5). Only compact (hash-only) votes are kept: a
-    // miner's own round-0 vote carries the whole block and the block itself is
-    // already on the wire, so it is not needed to prove the QC.
-    // Retain a signed PRECOMMIT as a transferable proof of the chain we follow.
+    // Transferable FORK proof: retain signed COMMIT votes (the finality phase),
+    // not PRECOMMITs. Round-0 votes are still observed for `justify` via
+    // qcRememberVote(), but they cannot prove finality to a diverged peer.
+    // Only compact (hash-only) votes are kept: a miner's own round-0 vote
+    // carries the whole block, and that block is already on the wire.
     rememberVoteProof: (h, round, hash, message) => {
-        if (round !== consensusQuorum.PRECOMMIT) return
+        if (round !== consensusQuorum.COMMIT) return
         if (!Number.isInteger(h) || h < 0 || typeof hash !== 'string' || !hash) return
         if (!message || !message.s || !message.s.n || !message.s.s) return
         let byHash = consensus.voteProofs.get(h)
@@ -282,6 +316,32 @@ let consensus = {
         return Array.from(bySigner.values())
     },
     resetVoteProofs: () => { consensus.voteProofs.clear() },
+
+    // === Local finality floor (rollback safety) ===
+    // A proof-gated reorg may only discard blocks ABOVE the last height this
+    // node itself finalized with a COMMIT quorum. Recovery can append blocks
+    // without a local COMMIT quorum (p2p.addRecursive -> validateAndAddBlock),
+    // so the chain head is not always a locally finalized height.
+    //
+    // The floor is monotonic in memory. On restart no record exists, so it
+    // falls back to the current head: conservative (never revert a block that
+    // might have been finalized by the previous process) and automatically
+    // advances as new blocks are finalized. It is deliberately NOT reset by
+    // resetVoteProofs() or rollback cleanup.
+    _localFinalizedHeight: null,
+    _localFinalizedHash: null,
+    localFinality: () => {
+        if (Number.isInteger(consensus._localFinalizedHeight))
+            return { height: consensus._localFinalizedHeight, hash: consensus._localFinalizedHash }
+        const head = chain.getLatestBlock ? chain.getLatestBlock() : null
+        return { height: head && head._id, hash: head && head.hash }
+    },
+    recordLocalFinalized: (h, hash) => {
+        if (!Number.isInteger(h) || h < 0) return
+        if (consensus._localFinalizedHeight !== null && h < consensus._localFinalizedHeight) return
+        consensus._localFinalizedHeight = h
+        consensus._localFinalizedHash = hash
+    },
     qcRememberVote: (h, round, hash, signer, message) => {
         if (!consensus.qc.enabled) return
         if (!Number.isInteger(h) || h < 0) return
@@ -303,8 +363,11 @@ let consensus = {
             bySigner = new Map()
             byHash.set(hash, bySigner)
         }
-        if (!bySigner.has(signer))
-            bySigner.set(signer, { n: signer, s: message.s.s, ts: message.d.ts })
+        if (!bySigner.has(signer)) {
+            const entry = { n: signer, s: message.s.s, ts: message.d.ts }
+            if (Number.isInteger(message.d.vr)) entry.vr = message.d.vr
+            bySigner.set(signer, entry)
+        }
     },
     qcBuildJustify: (h, round, hash) => {
         const byHash = consensus.qc.qcVotes.get(h + ':' + round)
@@ -342,9 +405,11 @@ let consensus = {
                 continue
             }
             seen.add(entry.n)
+            const rebuiltD = { r: phase, b: { hash: hash }, ts: entry.ts, h: h }
+            if (Number.isInteger(entry.vr)) rebuiltD.vr = entry.vr
             const rebuilt = {
                 t: 6,
-                d: { r: phase, b: { hash: hash }, ts: entry.ts, h: h },
+                d: rebuiltD,
                 s: { n: entry.n, s: entry.s, v: config.consensusSigVersion || 1 }
             }
             let ok = false
@@ -582,9 +647,9 @@ let consensus = {
                 // is arrival-order dependent: different nodes would finalise
                 // different blocks. Wait for the round window to settle, then
                 // apply only the deterministic best-ranked candidate. The
-                // SINGLE_VOTE path already does this inside castVote().
+                // singleVote path already does this inside castVote().
                 const h = possBlock.block._id
-                if (!SINGLE_VOTE && Number.isInteger(h) && h === nextHeight
+                if (!singleVoteAt(h) && Number.isInteger(h) && h === nextHeight
                 && possBlocksById[h] && possBlocksById[h].length > 1) {
                     if (!consensus.heightSeen[h]) consensus.heightSeen[h] = Date.now()
                     if (Date.now() < consensus.heightSeen[h] + settleMs) {
@@ -652,6 +717,10 @@ let consensus = {
                                     clearTimeout(consensus.commitRetry[k])
                                     delete consensus.commitRetry[k]
                                 }
+                            // This node finalized the block with a valid COMMIT
+                            // quorum: raise the rollback floor. Recovery-applied
+                            // blocks never call this, so they remain reorg-able.
+                            consensus.recordLocalFinalized(possBlock.block._id, possBlock.block.hash)
                             if (config.forceFinalize)
                                 consensus.cancelForceFinalize()
                         } catch (e) {
@@ -890,9 +959,20 @@ let consensus = {
                 logr.debug('view-change: precommit skipped at ' + h + ' (not the best known in round ' + vr + ')')
                 return false
             }
+            // QC-justified unlock: moving a precommit lock to a higher round on a
+            // different hash requires a valid QC from an earlier round.
+            let justified = false
+            const lock = consensus.voteLedger.locks.get(h)
+            if (lock && lock.hash !== block.hash && vr > (lock.round || 0)) {
+                const eligible = consensus.eligibleLeaders(h)
+                for (let jr = 0; jr < vr; jr++) {
+                    const qc = consensusQuorum.qcHash(consensus.voteLedger, h, consensusQuorum.PRECOMMIT, eligible, jr)
+                    if (qc && qc.hash) { justified = true; break }
+                }
+            }
             const rec = consensusQuorum.recordVote(consensus.voteLedger, {
                 h: h, r: consensusQuorum.PRECOMMIT, hash: block.hash,
-                signer: process.env.NODE_OWNER, round: vr
+                signer: process.env.NODE_OWNER, round: vr, justified: justified
             })
             if (!rec.accepted) {
                 logr.debug('view-change: precommit refused at ' + h + '#' + vr + ' (' + rec.reason + ')')
@@ -951,7 +1031,8 @@ let consensus = {
     endRound: (round, block) => {
         // S1' "one candidate per round": only an active (voting) node is gated;
         // observers just follow. See castVote().
-        if (SINGLE_VOTE && consensus.isActive() && !consensus.castVote(round, block)) {
+        const svH = Number.isInteger(block && block._id) ? block._id : (chain.getLatestBlock()._id + 1)
+        if (singleVoteAt(svH) && consensus.isActive() && !consensus.castVote(round, block)) {
             consensus.tryNextStep()
             return
         }
@@ -993,9 +1074,15 @@ let consensus = {
             // `h` is sent even with QC_SHADOW off: it is part of the transferable
             // fork proof (NODE_STATUS.headVoteProof) and old nodes simply treat
             // the extra signed field as opaque, so this is wire-compatible.
+            // `vr` carries the consensus view round number for this block/candidate.
+            const voteHeight = Number.isInteger(block._id) ? block._id : qcH
+            const viewRound = chain.roundFor
+                ? chain.roundFor(voteHeight, block.miner)
+                : 0
             let msgD = {
                 r: round, b: onlyBlockHash, ts: new Date().getTime(),
-                h: Number.isInteger(block._id) ? block._id : qcH
+                h: voteHeight,
+                vr: Number.isInteger(viewRound) ? viewRound : 0
             }
             if (consensus.qc.enabled) {
                 msgD.h = qcH
@@ -1010,9 +1097,9 @@ let consensus = {
                     consensus.qcRememberVote(qcH, round, block.hash, process.env.NODE_OWNER, signed)
                 })
             p2p.broadcast(signed)
-            // Transferable fork proof: keep our own signed PRECOMMIT regardless
-            // of QC_SHADOW, so peers can verify the chain we consider decided.
-            if (round === consensusQuorum.PRECOMMIT)
+            // Transferable fork proof: keep our own signed COMMIT regardless of
+            // QC_SHADOW, so peers can verify the block we actually finalized.
+            if (round === consensusQuorum.COMMIT)
                 consensus.rememberVoteProof(block._id, round, block.hash, signed)
         }
 
@@ -1046,10 +1133,10 @@ let consensus = {
                     if (round === consensusQuorum.PRECOMMIT)
                         consensus.qcRememberVote(qcH, round, block.hash, leader, message)
                 })
-                // Fork proof is production data, not observability: retain it even
-                // when QC_SHADOW is off. Old peers without d.h are indexed by the
-                // possBlock height, which is the same value.
-                if (round === consensusQuorum.PRECOMMIT)
+                // Fork proof is production data, not observability: retain the
+                // signed COMMIT even when QC_SHADOW is off. Old peers without d.h
+                // are indexed by the possBlock height, which is the same value.
+                if (round === consensusQuorum.COMMIT)
                     consensus.rememberVoteProof(Number.isInteger(message.d.h) ? message.d.h : qcH,
                         round, block.hash, message)
                 if (consensus.qc.enforce && !remoteJustifyOk) {

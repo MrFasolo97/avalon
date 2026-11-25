@@ -1,3 +1,4 @@
+/* eslint-disable no-magic-numbers */
 // == Single-vote default + round handover (M1/M2) ==
 // node test/single-vote-handover.js
 //
@@ -173,12 +174,12 @@ test('view-change: peer precommit votes in voteLedger allow justified unlock to 
     assert.strictEqual(consensusQuorum.lockedOn(consensus.voteLedger, h), 'leader-hash')
 
     // Peer precommits for leader arrive over the network; ledger must record them.
-    for (const signer of ['l1', 'l2', 'l3', 'l4']) {
+    for (const signer of ['l1', 'l2', 'l3', 'l4']) 
         consensus.remoteRoundConfirm({
             d: { r: PRE, b: { hash: leader.block.hash }, h, vr: 0 },
             s: { n: signer }
         })
-    }
+    
     const qc = consensusQuorum.qcHash(consensus.voteLedger, h, PRE, ladder, 0)
     assert.strictEqual(qc.hash, 'leader-hash')
 

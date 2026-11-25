@@ -218,7 +218,7 @@ async function main() {
         }
     })
 
-    await test('rollback: truncates, resets state, rebuilds, resumes and emits events', async () => {
+    await test('rollback: rebuilds and swaps state before truncating blocks, emits events', async () => {
         const calls = []
         const events = []
         const d = {
@@ -228,14 +228,19 @@ async function main() {
         await divergence.rollback(d, {
             logr: global.logr,
             events: { emit: (n) => events.push(n) },
+            preflightSnapshot: (h) => { calls.push('preflight:' + h); return true },
+            markRollback: () => calls.push('mark'),
             pause: () => calls.push('pause'),
-            truncateBlocks: (h) => { calls.push('truncate:' + h); return h },
             resetState: (h) => calls.push('state:' + h),
             resetRuntime: (h) => calls.push('runtime:' + h),
             rebuildState: (h) => { calls.push('rebuild:' + h); return Promise.resolve(h) },
-            resume: (h) => calls.push('resume:' + h)
+            finalizeState: (h) => calls.push('finalize:' + h),
+            markSwapped: () => calls.push('markSwapped'),
+            truncateBlocks: (h) => { calls.push('truncate:' + h); return h },
+            resume: (h) => calls.push('resume:' + h),
+            clearRollbackMarker: () => calls.push('clearMarker')
         })
-        assert.deepStrictEqual(calls, ['pause', 'truncate:9', 'state:9', 'runtime:9', 'rebuild:9', 'resume:9'])
+        assert.deepStrictEqual(calls, ['preflight:9', 'mark', 'pause', 'state:9', 'runtime:9', 'rebuild:9', 'finalize:9', 'markSwapped', 'truncate:9', 'resume:9', 'clearMarker'])
         assert.deepStrictEqual(events, ['chain-rollback-start', 'chain-rollback'])
     })
 
@@ -261,17 +266,48 @@ async function main() {
         assert.deepStrictEqual(calls, [])
     })
 
-    await test('rollback: a truncation failure stops before state is dropped', async () => {
+    await test('rollback: mid-failure after swap leaves recovery marker and does not clear it', async () => {
         const calls = []
+        let markerPhase = null
         await assert.rejects(() => divergence.rollback({
             shouldRollback: true, fromHeight: 5, ancestor: 3, height: 6, hash: 'x'
         }, {
             logr: global.logr, events: { emit: () => {} },
-            truncateBlocks: () => { throw new Error('disk failure') },
+            preflightSnapshot: () => true,
+            markRollback: () => { markerPhase = 'started'; calls.push('mark') },
+            pause: () => calls.push('pause'),
             resetState: () => calls.push('state'),
-            rebuildState: () => calls.push('rebuild')
+            resetRuntime: () => calls.push('runtime'),
+            rebuildState: () => calls.push('rebuild'),
+            finalizeState: () => calls.push('finalize'),
+            markSwapped: () => { markerPhase = 'swapped'; calls.push('markSwapped') },
+            truncateBlocks: () => { throw new Error('disk failure') },
+            resume: () => calls.push('resume'),
+            clearRollbackMarker: () => { markerPhase = null; calls.push('clear') }
         }), /disk failure/)
-        assert.deepStrictEqual(calls, [])
+        assert.deepStrictEqual(calls, ['mark', 'pause', 'state', 'runtime', 'rebuild', 'finalize', 'markSwapped'])
+        assert.strictEqual(markerPhase, 'swapped')
+    })
+
+    await test('rollback: failure before swap keeps live blocks untouched', async () => {
+        const calls = []
+        let markerPhase = null
+        await assert.rejects(() => divergence.rollback({
+            shouldRollback: true, fromHeight: 5, ancestor: 3, height: 6, hash: 'x'
+        }, {
+            logr: global.logr, events: { emit: () => {} },
+            preflightSnapshot: () => true,
+            markRollback: () => { markerPhase = 'started'; calls.push('mark') },
+            pause: () => calls.push('pause'),
+            resetState: () => calls.push('state'),
+            resetRuntime: () => calls.push('runtime'),
+            rebuildState: () => { throw new Error('rebuild failed') },
+            finalizeState: () => calls.push('finalize'),
+            truncateBlocks: () => calls.push('truncate'),
+            clearRollbackMarker: () => { markerPhase = null; calls.push('clear') }
+        }), /rebuild failed/)
+        assert.deepStrictEqual(calls, ['mark', 'pause', 'state', 'runtime'])
+        assert.strictEqual(markerPhase, 'started')
     })
 
     await test('BSON store truncation keeps the ancestor readable and drops the fork', () => {

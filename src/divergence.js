@@ -137,6 +137,10 @@ let divergence = {
 
     // Execute the rollback. Every destructive step is injected; a failure at
     // any step rejects and p2p.js keeps the node in recovery mode.
+    //
+    // Safety order: preflight and persistent marker BEFORE any mutation; rebuild
+    // derived state in a temp target and swap it in; truncate blocks LAST so a
+    // mid-rollback failure never leaves live blocks and derived state out of sync.
     rollback: (decision, deps) => {
         return new Promise((resolve, reject) => {
             if (!decision || decision.shouldRollback !== true
@@ -166,36 +170,67 @@ let divergence = {
                     + ' -> ancestor #' + decision.ancestor + ' (syncing to proven #'
                     + decision.height + '#' + String(decision.hash).substr(0, 8) + ')')
 
-                // Check this BEFORE truncating anything: without a snapshot at or
-                // below the ancestor there is no safe way to rebuild the state.
+                // Pre-flight BEFORE any mutation: snapshot must exist, be complete
+                // and match the requested height. Never truncate live state first.
                 await step('preflight-snapshot', () => {
-                    if (!io.hasSnapshot) return true
-                    return Promise.resolve(io.hasSnapshot(decision.ancestor)).then(ok => {
+                    const check = io.preflightSnapshot || io.hasSnapshot
+                    if (!check) return true
+                    return Promise.resolve(check(decision.ancestor)).then(ok => {
                         if (!ok) throw new Error('no usable state snapshot at or below ancestor '
                             + decision.ancestor)
                     })
                 })
-                await step('pause-mining', () => {
-                    if (io.pause) return io.pause()
+
+                let markerWritten = false
+                await step('mark-rollback', () => {
+                    if (!io.markRollback) return
+                    return Promise.resolve(io.markRollback(decision)).then(() => { markerWritten = true })
                 })
-                await step('truncate-blocks', () => {
-                    if (!io.truncateBlocks) throw new Error('no block truncation primitive')
-                    return io.truncateBlocks(decision.ancestor)
-                })
-                await step('reset-state', () => {
-                    if (!io.resetState) throw new Error('no state reset primitive')
-                    return io.resetState(decision.ancestor)
-                })
-                await step('reset-runtime', () => {
-                    if (io.resetRuntime) return io.resetRuntime(decision.ancestor)
-                })
-                await step('rebuild-state', () => {
-                    if (!io.rebuildState) throw new Error('no state rebuild primitive')
-                    return io.rebuildState(decision.ancestor)
-                })
-                await step('resume', () => {
-                    if (io.resume) return io.resume(decision.ancestor)
-                })
+
+                let paused = false
+                try {
+                    await step('pause-mining', () => {
+                        if (io.pause) return Promise.resolve(io.pause()).then(() => { paused = true })
+                    })
+                    await step('reset-state', () => {
+                        if (!io.resetState) throw new Error('no state reset primitive')
+                        return io.resetState(decision.ancestor)
+                    })
+                    await step('reset-runtime', () => {
+                        if (io.resetRuntime) return io.resetRuntime(decision.ancestor)
+                    })
+                    await step('rebuild-state', () => {
+                        if (!io.rebuildState) throw new Error('no state rebuild primitive')
+                        return io.rebuildState(decision.ancestor)
+                    })
+                    await step('finalize-state', () => {
+                        if (io.finalizeState) return io.finalizeState(decision.ancestor)
+                    })
+                    await step('mark-swapped', () => {
+                        if (io.markSwapped) return io.markSwapped(decision)
+                    })
+                    // Truncate blocks LAST: if anything above failed, live blocks and
+                    // derived state are still consistent. If swap already happened,
+                    // marker+startup recovery will finish truncation.
+                    await step('truncate-blocks', () => {
+                        if (!io.truncateBlocks) throw new Error('no block truncation primitive')
+                        return io.truncateBlocks(decision.ancestor)
+                    })
+                    await step('resume', () => {
+                        if (io.resume) return io.resume(decision.ancestor)
+                    })
+                    await step('clear-rollback-marker', () => {
+                        if (io.clearRollbackMarker) return io.clearRollbackMarker()
+                    })
+                } catch (e) {
+                    // Best-effort rollback cleanup. If we already paused, try to
+                    // resume so the node does not stay stuck. The marker remains
+                    // when clear did not happen, so startup can recover safely.
+                    if (paused && io.resumeOnFailure) {
+                        try { await io.resumeOnFailure(e) } catch (_) {}
+                    }
+                    throw e
+                }
 
                 divergence.rollbacks++
                 emit('chain-rollback', 'info', {

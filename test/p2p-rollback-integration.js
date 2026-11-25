@@ -72,9 +72,13 @@ blocks.read = (h) => ({ _id: h, hash: 'h' + h, txs: [{ id: 'tx' + h }] })
 const mongo = require('../src/mongo')
 mongo.truncateBlocks = (h) => { calls.push('mongo-truncate:' + h); return Promise.resolve(h) }
 mongo.hasStateSnapshotAtOrBelow = () => Promise.resolve(true)
+mongo.preflightStateSnapshotAtOrBelow = (h) => { calls.push('preflight-snapshot:' + h); return Promise.resolve(true) }
 mongo.resetDerivedState = (h) => { calls.push('reset-state:' + h); return Promise.resolve(5) }
 mongo.finalizeRebuildSwap = () => { calls.push('finalize-swap'); return Promise.resolve(true) }
 mongo.discardRebuildTemp = () => { calls.push('discard-temp'); return Promise.resolve(true) }
+mongo.setRollbackMarker = (m) => { calls.push(m && m.phase === 'swapped' ? 'mark-swapped' : 'mark-rollback'); return Promise.resolve(true) }
+mongo.clearRollbackMarker = () => { calls.push('clear-marker'); return Promise.resolve(true) }
+mongo.getRollbackMarker = () => Promise.resolve(null)
 const voteState = require('../src/voteState')
 voteState.reset = () => calls.push('voteState-reset')
 require.cache[require.resolve('../src/voteState')] = { exports: voteState }
@@ -271,10 +275,11 @@ async function main() {
         assert.strictEqual(start.payload.ancestor, 5)
         assert.strictEqual(start.payload.target, 10)
         assert.deepStrictEqual(calls, [
-            'cache-rollback', 'truncate-blocks:5', 'reset-state:5',
+            'preflight-snapshot:5', 'mark-rollback', 'cache-rollback', 'reset-state:5',
             'cache-clear', 'dao-reset', 'daoMaster-reset', 'voteState-reset', 'reset-proof',
-            'cancel-ff', 'leaderStats-reset', 'rebuild:6', 'finalize-swap',
-            'tx-requeued:tx6', 'tx-requeued:tx7', 'tx-requeued:tx8', 'recover'
+            'cancel-ff', 'leaderStats-reset', 'rebuild:6', 'finalize-swap', 'mark-swapped',
+            'truncate-blocks:5', 'tx-requeued:tx6', 'tx-requeued:tx7', 'tx-requeued:tx8',
+            'clear-marker', 'recover'
         ])
         assert.deepStrictEqual(chain.recentTxs, {})
         assert.deepStrictEqual(txHistory.indexQueue, [])
@@ -342,12 +347,17 @@ async function main() {
         }
     })
 
-    await test('rollback discards temp rebuild DB on failure and never swaps', async () => {
+    await test('rollback discards temp rebuild DB on failure, never swaps, and halts with recovery error', async () => {
         calls.length = 0
         events.length = 0
         p2p._rollbackPending = false
         const prevReset = mongo.resetDerivedState
+        const prevGetMarker = mongo.getRollbackMarker
+        const prevExit = process.exit
+        const exits = []
         mongo.resetDerivedState = (h) => { calls.push('reset-state:' + h); return Promise.reject(new Error('simulated restore failure')) }
+        mongo.getRollbackMarker = () => Promise.resolve({ phase: 'started', ancestor: 5 })
+        process.exit = (code) => { exits.push(code) }
         p2p.sockets = [{
             node_status: {
                 origin_block: 'origin', head_block: 10, head_block_hash: 'majority-head',
@@ -361,8 +371,11 @@ async function main() {
             assert.ok(!calls.includes('finalize-swap'), 'failed rollback must not swap temp DB in')
             assert.strictEqual(p2p._rollbackPending, false)
             assert.ok(logs.some(l => l[0] === 'error' && String(l[1]).includes('CHAIN ROLLBACK failed')))
+            assert.deepStrictEqual(exits, [1], 'node must halt with actionable recovery error')
         } finally {
             mongo.resetDerivedState = prevReset
+            mongo.getRollbackMarker = prevGetMarker
+            process.exit = prevExit
             p2p.sockets = []
         }
     })

@@ -103,11 +103,44 @@ mongo.init(async function(state) {
     }
     logr.info('#' + block._id + ' is the latest block in our db')
     config = require('./config.js').read(block._id)
-    if (blocks.isOpen) {
-        blocks.fillInMemoryBlocks()
-        startDaemon()
-    } else
-        mongo.fillInMemoryBlocks(startDaemon)
+
+    const startAfterRecovery = () => {
+        if (blocks.isOpen) {
+            blocks.fillInMemoryBlocks()
+            startDaemon()
+        } else
+            mongo.fillInMemoryBlocks(startDaemon)
+    }
+
+    ;(async () => {
+        if (!mongo.getRollbackMarker) return
+        const marker = await mongo.getRollbackMarker()
+        if (!marker) return
+        logr.warn('Incomplete rollback marker found at startup', marker)
+        if (marker.phase === 'started') {
+            if (mongo.discardRebuildTemp) await mongo.discardRebuildTemp()
+            if (mongo.clearRollbackMarker) await mongo.clearRollbackMarker()
+            logr.info('Rollback marker (started) cleared; original DB/blocks were not swapped')
+            return
+        }
+        if (marker.phase === 'swapped') {
+            const ancestor = Number.isInteger(marker.ancestor) ? marker.ancestor : null
+            if (ancestor === null) throw new Error('rollback marker missing ancestor')
+            if (blocks.isOpen) blocks.truncate(ancestor)
+            else if (mongo.truncateBlocks) await mongo.truncateBlocks(ancestor)
+            else throw new Error('no block truncation primitive available for rollback recovery')
+            if (mongo.clearRollbackMarker) await mongo.clearRollbackMarker()
+            // Reload head after truncation so startup continues from consistent state.
+            block = blocks.isOpen ? blocks.lastBlock() : await mongo.lastBlock()
+            config = require('./config.js').read(block._id)
+            logr.info('Recovered swapped rollback by truncating blocks to #' + ancestor + '; head is now #' + block._id)
+            return
+        }
+        throw new Error('Unknown rollback marker phase: ' + marker.phase)
+    })().then(startAfterRecovery).catch(e => {
+        logr.fatal('Incomplete rollback recovery failed; refusing to start with possibly inconsistent state: ' + (e && e.message ? e.message : e))
+        process.exit(1)
+    })
 })
 
 function startRebuild(startBlock) {

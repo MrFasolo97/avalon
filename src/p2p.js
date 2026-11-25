@@ -904,28 +904,32 @@ let p2p = {
         let snapshotHeight = null
         const deps = {
             logr, events,
-            // Refuse to truncate the block store if no snapshot can restore the
-            // state at/below the ancestor.
+            preflightSnapshot: (h) => mongo.preflightStateSnapshotAtOrBelow
+                ? mongo.preflightStateSnapshotAtOrBelow(h)
+                : (mongo.hasStateSnapshotAtOrBelow ? mongo.hasStateSnapshotAtOrBelow(h) : Promise.resolve(false)),
             hasSnapshot: (h) => mongo.hasStateSnapshotAtOrBelow
-                ? mongo.hasStateSnapshotAtOrBelow(h) : Promise.resolve(true),
+                ? mongo.hasStateSnapshotAtOrBelow(h) : Promise.resolve(false),
+            markRollback: (d) => mongo.setRollbackMarker ? mongo.setRollbackMarker({
+                phase: 'started', ancestor: d.ancestor, fromHeight: d.fromHeight,
+                targetHeight: d.height, targetHash: d.hash
+            }) : Promise.resolve(false),
+            markSwapped: (d) => mongo.setRollbackMarker ? mongo.setRollbackMarker({
+                phase: 'swapped', ancestor: d.ancestor, fromHeight: d.fromHeight,
+                targetHeight: d.height, targetHash: d.hash
+            }) : Promise.resolve(false),
+            clearRollbackMarker: () => mongo.clearRollbackMarker ? mongo.clearRollbackMarker() : Promise.resolve(false),
             pause: () => {
                 p2p.recovering = head._id
                 if (chain.worker) clearTimeout(chain.worker)
                 chain.workerPending = false
                 cache.rollback()
             },
-            truncateBlocks: (h) => blocks.isOpen ? blocks.truncate(h) : mongo.truncateBlocks(h),
-            // Restores the newest snapshot at/below the ancestor instead of
-            // dropping the database. The resolved height tells rebuildState()
-            // where the deterministic replay has to start.
             resetState: (h) => mongo.resetDerivedState(h).then(s => {
                 if (Number.isInteger(s)) snapshotHeight = s
                 return true
             }),
             resetRuntime: () => {
                 cache.clear()
-                // Drop warmed RAM copies as well: after the snapshot restore they
-                // describe the discarded tail. rebuildState() rewarms them.
                 cache.accounts = {}
                 cache.contents = {}
                 cache.leaders = {}
@@ -935,9 +939,6 @@ let p2p = {
                 voteState.reset()
                 if (consensus.resetVoteProofs) consensus.resetVoteProofs()
                 consensus.voteLedger = consensusQuorum.createLedger({ singleVote: true })
-                // Derived RAM state from the discarded tail must not survive the
-                // rebuild: stale anti-replay hashes are the worst offender, since
-                // they make a resubmitted orphan tx look already used forever.
                 chain.blocksToRebuild = []
                 chain.recentBlocks = []
                 chain.recentTxs = {}
@@ -955,44 +956,35 @@ let p2p = {
                 if (process.env.LEADER_STATS === '1' && leaderStats.reset) leaderStats.reset()
             },
             rebuildState: () => new Promise((rs, rj) => {
-                // Replay only the retained canonical prefix: snapshot+1 .. ancestor.
-                // Blocks beyond the ancestor were truncated above, so there is
-                // nothing after the ancestor to re-execute here.
                 const from = Number.isInteger(snapshotHeight)
                     ? Math.min(snapshotHeight + 1, decision.ancestor + 1)
                     : decision.ancestor + 1
                 const invoke = () => chain.rebuildState(from, (e, builtTo) => {
                     if (e) return rj(e)
-                    // Warm RAM caches no longer describe the restored state.
                     Promise.all([
                         cache.warmup ? cache.warmup('accounts', parseInt(process.env.WARMUP_ACCOUNTS)) : null,
                         cache.warmup ? cache.warmup('contents', parseInt(process.env.WARMUP_CONTENTS)) : null,
                         cache.warmupLeaders ? cache.warmupLeaders() : null
                     ]).then(() => rs(builtTo), rj)
                 })
-                // Prime the in-memory block window for validation of the replayed
-                // blocks (same as a normal startup after a restart).
                 if (from > 0 && blocks.isOpen && blocks.fd && blocks.fillInMemoryBlocks)
                     try { blocks.fillInMemoryBlocks(from) } catch (e) { return rj(e) }
                 if (from > 0 && !blocks.isOpen && mongo.fillInMemoryBlocks)
                     mongo.fillInMemoryBlocks(invoke, from)
                 else invoke()
             }),
-            resume: async (h) => {
-                // Swap the rebuilt temp DB into the original only after the
-                // replay succeeded. If swap fails, throw so divergence rejects
-                // and the catch path discards the temp DB.
+            finalizeState: async () => {
                 if (mongo.finalizeRebuildSwap)
                     await mongo.finalizeRebuildSwap()
+            },
+            truncateBlocks: (h) => blocks.isOpen ? blocks.truncate(h) : mongo.truncateBlocks(h),
+            resume: async (h) => {
                 p2p.recovering = h
                 p2p.recoverAttempt = 0
                 p2p.recoveredBlocks = {}
                 p2p.recoveringBlocks = []
                 p2p.lastDivergenceHeight = null
                 p2p._rollbackPending = false
-                // Re-offer orphan txs only after the rebuilt state is back at the
-                // ancestor, so validity/nonce checks run against the canonical
-                // state rather than the one we just discarded.
                 for (const tx of decision.orphanTxs || [])
                     try {
                         transaction.isValid(tx, Date.now(), (ok) => {
@@ -1000,6 +992,9 @@ let p2p = {
                         })
                     } catch (e) { logr.debug('Orphan tx not re-queued: ' + e.message) }
                 setTimeout(() => p2p.recover(), 100)
+            },
+            resumeOnFailure: async (err) => {
+                logr.error('CHAIN ROLLBACK failed after mutation: ' + (err && err.message ? err.message : err))
             }
         }
         divergence.rollback(decision, deps).catch(async (e) => {
@@ -1011,6 +1006,18 @@ let p2p = {
             }
             logr.error('CHAIN ROLLBACK failed: ' + e.message)
             events.emit('recover-giveup', 'error', { rollback: true, error: e.message })
+            try {
+                const marker = mongo.getRollbackMarker ? await mongo.getRollbackMarker() : null
+                if (marker && marker.phase === 'swapped') {
+                    logr.fatal('CHAIN ROLLBACK left node in swapped-but-untruncated state; restart required for recovery', marker)
+                } else {
+                    if (mongo.clearRollbackMarker) await mongo.clearRollbackMarker()
+                    logr.fatal('CHAIN ROLLBACK failed before swap; node halted to avoid inconsistent in-memory state. Restart to resume from persisted state.')
+                }
+            } catch (markerErr) {
+                logr.fatal('CHAIN ROLLBACK marker inspection failed; manual intervention required: ' + markerErr.message)
+            }
+            process.exit(1)
         })
     },
     addRecursive: (block) => {

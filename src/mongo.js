@@ -199,6 +199,12 @@ let mongo = {
         const stateSnapshot = require('./stateSnapshot')
         return stateSnapshot.latestAtOrBelow(height).then(h => h !== null)
     },
+    preflightStateSnapshotAtOrBelow: (height) => {
+        const stateSnapshot = require('./stateSnapshot')
+        if (typeof stateSnapshot.preflightAtOrBelow === 'function')
+            return stateSnapshot.preflightAtOrBelow(height).then(h => h !== null)
+        return stateSnapshot.latestAtOrBelow(height).then(h => h !== null)
+    },
     resetDerivedState: (height) => (async () => {
         const stateSnapshot = require('./stateSnapshot')
         if (!mongo.client) throw new Error('mongo client not initialized')
@@ -297,6 +303,21 @@ let mongo = {
         try { await mongo.client.db(tempDbName).dropDatabase() } catch (e) {
             logr.warn('Could not drop rebuild temp DB ' + tempDbName + ': ' + e.message)
         }
+        return true
+    })(),
+    getRollbackMarker: () => (async () => {
+        const target = mongo._rebuildOriginalDb || db
+        return target.collection('state').findOne({ _id: 'rollback' })
+    })(),
+    setRollbackMarker: (marker) => (async () => {
+        const target = mongo._rebuildOriginalDb || db
+        const doc = Object.assign({ _id: 'rollback', ts: new Date().toISOString() }, marker || {})
+        await target.collection('state').replaceOne({ _id: 'rollback' }, doc, { upsert: true })
+        return true
+    })(),
+    clearRollbackMarker: () => (async () => {
+        const target = mongo._rebuildOriginalDb || db
+        await target.collection('state').deleteOne({ _id: 'rollback' })
         return true
     })(),
     restoreBlocks: (cb) => {

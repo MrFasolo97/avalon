@@ -47,8 +47,10 @@ if (typeof global.chain === 'undefined')
             if (a.ladderPos !== b.ladderPos) return a.ladderPos - b.ladderPos
             return String(a.hash).localeCompare(String(b.hash))
         },
-        validateAndAddBlock: () => {}
+        validateAndAddBlock: () => {},
+        schedule: { shuffle: [] }
     }
+if (!global.chain.schedule) global.chain.schedule = { shuffle: [] }
 if (typeof global.logr === 'undefined')
     global.logr = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, cons: () => {}, fatal: () => {}, econ: () => {} }
 if (typeof global.p2p === 'undefined')
@@ -69,6 +71,7 @@ function test(name, fn) {
         passed++
     } catch (e) {
         console.log('  FAIL: ' + name + ' — ' + e.message)
+        console.log(e.stack)
         failed++
     }
 }
@@ -78,6 +81,7 @@ function reset() {
     consensus.possBlocks = []
     consensus.heightSeen = {}
     consensus.commitRetry = {}
+    consensus.observer = false
 }
 
 function pb(hash, miner, timestamp, preVotes) {
@@ -157,6 +161,30 @@ test('M2: once locked, a node commits its own candidate when it is the best one'
     consensus.possBlocks = [a]
     assert.strictEqual(consensus.castVote(PRE, a.block), true)
     assert.strictEqual(consensus.castVote(COM, a.block), true)
+})
+
+test('view-change: peer precommit votes in voteLedger allow justified unlock to backup leader', () => {
+    reset()
+    const leader = pb('leader-hash', 'l1', 1000)
+    const backup = pb('backup-hash', 'l2', 2000)
+    consensus.possBlocks = [leader, backup]
+    // Node precommits leader block at round 0.
+    assert.strictEqual(consensus.castVote(PRE, leader.block), true)
+    assert.strictEqual(consensusQuorum.lockedOn(consensus.voteLedger, h), 'leader-hash')
+
+    // Peer precommits for leader arrive over the network; ledger must record them.
+    for (const signer of ['l1', 'l2', 'l3', 'l4']) {
+        consensus.remoteRoundConfirm({
+            d: { r: PRE, b: { hash: leader.block.hash }, h, vr: 0 },
+            s: { n: signer }
+        })
+    }
+    const qc = consensusQuorum.qcHash(consensus.voteLedger, h, PRE, ladder, 0)
+    assert.strictEqual(qc.hash, 'leader-hash')
+
+    // With a QC justifying the earlier round, node can switch to backup leader.
+    assert.strictEqual(consensus.castVote(PRE, backup.block), true)
+    assert.strictEqual(consensusQuorum.lockedOn(consensus.voteLedger, h), 'backup-hash')
 })
 
 console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED') + ' (' + passed + ' passed, ' + failed + ' failed)')

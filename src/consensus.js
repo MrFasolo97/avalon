@@ -1117,12 +1117,37 @@ let consensus = {
         
         for (let i = 0; i < consensus.possBlocks.length; i++) 
             if (block.hash === consensus.possBlocks[i].block.hash) {
+                const poss = consensus.possBlocks[i]
                 const qcH = Number.isInteger(message.d.h) ? message.d.h
-                    : (Number.isInteger(consensus.possBlocks[i].block._id) ? consensus.possBlocks[i].block._id : -1)
+                    : (Number.isInteger(poss.block._id) ? poss.block._id : -1)
+                // d.vr is the candidate view round; fall back to the candidate's
+                // deterministic round for old peers that don't send it.
+                const vr = Number.isInteger(message.d.vr) ? message.d.vr
+                    : (Number.isInteger(qcH) && qcH > 0 ? chain.roundFor(qcH, poss.block.miner) : 0)
                 // S0' shadow: count the remote vote before the duplicate early-exit
                 consensus.qcGuard('remote-vote', () => {
                     consensus.qcObserve(qcH, round, block.hash, leader)
                 })
+                // View-change ledger: record collected network/peer votes so
+                // QC-justified unlock and quorum checks see the real network view,
+                // not only this node's own votes (required at >=14000000).
+                if (singleVoteAt(qcH)) {
+                    let justified = false
+                    if (round === consensusQuorum.PRECOMMIT) {
+                        const lock = consensus.voteLedger.locks.get(qcH)
+                        if (lock && lock.hash !== block.hash && vr > (lock.round || 0)) {
+                            const eligible = consensus.eligibleLeaders(qcH)
+                            for (let jr = 0; jr < vr; jr++) {
+                                const qc = consensusQuorum.qcHash(consensus.voteLedger, qcH, consensusQuorum.PRECOMMIT, eligible, jr)
+                                if (qc && qc.hash) { justified = true; break }
+                            }
+                        }
+                    }
+                    const voteRound = round === consensusQuorum.PRECOMMIT ? vr : 0
+                    consensusQuorum.recordVote(consensus.voteLedger, {
+                        h: qcH, r: round, hash: block.hash, signer: leader, round: voteRound, justified
+                    })
+                }
                 // QC on the wire (doc §2.5): a commit vote may carry the round-0
                 // QC as `justify`; verify it and retain the signed vote.
                 let remoteJustifyOk = true
@@ -1145,12 +1170,12 @@ let consensus = {
                     break
                 }
 
-                if (!consensus.possBlocks[i][round] || consensus.possBlocks[i][round].indexOf(leader) !== -1)
+                if (!poss[round] || poss[round].indexOf(leader) !== -1)
                     break
                 
                 // Add the leader only to the round they actually confirmed
-                if (consensus.possBlocks[i][round])
-                    consensus.possBlocks[i][round].push(leader)
+                if (poss[round])
+                    poss[round].push(leader)
                 
                 consensus.tryNextStep()
                 break

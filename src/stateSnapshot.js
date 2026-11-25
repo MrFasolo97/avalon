@@ -42,12 +42,12 @@ async function copyCollection(source, target, batchSize = COPY_BATCH_SIZE) {
         count += batch.length
         batch = []
     }
-    if (cursor && typeof cursor[Symbol.asyncIterator] === 'function') {
+    if (cursor && typeof cursor[Symbol.asyncIterator] === 'function') 
         for await (const doc of cursor) {
             batch.push(doc)
             if (batch.length >= batchSize) await flush()
         }
-    } else {
+    else {
         const rows = cursor && typeof cursor.toArray === 'function' ? await cursor.toArray() : []
         for (const doc of rows) {
             batch.push(doc)

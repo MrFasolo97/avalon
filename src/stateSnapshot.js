@@ -30,8 +30,41 @@ const warn = (msg) => {
 
 let saving = false
 
+const COPY_BATCH_SIZE = 1000
+
+async function copyCollection(source, target, batchSize = COPY_BATCH_SIZE) {
+    const cursor = source.find({}, { batchSize })
+    let batch = []
+    let count = 0
+    const flush = async () => {
+        if (batch.length === 0) return
+        await target.insertMany(batch, { ordered: true })
+        count += batch.length
+        batch = []
+    }
+    if (cursor && typeof cursor[Symbol.asyncIterator] === 'function') {
+        for await (const doc of cursor) {
+            batch.push(doc)
+            if (batch.length >= batchSize) await flush()
+        }
+    } else {
+        const rows = cursor && typeof cursor.toArray === 'function' ? await cursor.toArray() : []
+        for (const doc of rows) {
+            batch.push(doc)
+            if (batch.length >= batchSize) await flush()
+        }
+    }
+    await flush()
+    return count
+}
+
 let stateSnapshot = {
     collections: COLLECTIONS,
+
+    enabled: () => {
+        const v = String(process.env.AUTO_ROLLBACK || '0').toLowerCase()
+        return v === '1' || v === 'true'
+    },
 
     interval: () => {
         const n = parseInt(process.env.STATE_SNAPSHOT_INTERVAL === undefined
@@ -47,18 +80,20 @@ let stateSnapshot = {
     // Snapshot the state as it stands at `height`. The metadata row is written
     // last (with ready:true) so an interrupted copy is never restoreable.
     save: async (height) => {
+        if (!stateSnapshot.enabled()) return false
         const database = getDb()
         if (!database || !Number.isInteger(height) || height < 0) return false
         const meta = database.collection(META_COLLECTION)
         if (await meta.findOne({ _id: height, ready: true })) return false
+        const collectionCounts = {}
         for (const name of COLLECTIONS) {
             const target = database.collection(snapshotCollection(height, name))
             await target.deleteMany({})
-            const docs = await database.collection(name).find({}).toArray()
-            if (docs.length) await target.insertMany(docs)
+            collectionCounts[name] = await copyCollection(database.collection(name), target)
         }
         await meta.replaceOne({ _id: height }, {
-            _id: height, height, ready: true, createdAt: new Date(), collections: COLLECTIONS
+            _id: height, height, ready: true, createdAt: new Date(),
+            collections: COLLECTIONS, collectionCounts
         }, { upsert: true })
         await stateSnapshot.prune()
         return true
@@ -67,6 +102,7 @@ let stateSnapshot = {
     // Bootstrap for a node that starts from an existing database with no
     // snapshots yet: capture its current head so a nearby reorg is possible.
     ensure: (height) => {
+        if (!stateSnapshot.enabled()) return Promise.resolve(false)
         if (!getDb() || !Number.isInteger(height)) return Promise.resolve(false)
         return stateSnapshot.latestAtOrBelow(height).then(latest => {
             if (latest !== null) return false
@@ -77,9 +113,10 @@ let stateSnapshot = {
         }).catch(() => false)
     },
 
-    // Called after every successful block application. Synchronous work is
-    // limited to the modulo check; the copy itself never blocks consensus.
+    // Called after every successful block application. When enabled, the caller
+    // must await this so snapshot creation is serialized with block application.
     maybeSave: (height) => {
+        if (!stateSnapshot.enabled()) return Promise.resolve(false)
         const interval = stateSnapshot.interval()
         if (!interval || !Number.isInteger(height) || height < 0
             || height % interval !== 0 || saving || !getDb()) return Promise.resolve(false)
@@ -98,6 +135,40 @@ let stateSnapshot = {
             { sort: { height: -1 }, limit: 1 }
         ).toArray()
         return rows && rows[0] ? rows[0].height : null
+    },
+
+    // Pre-flight validation for rollback. Verifies snapshot exists, is ready,
+    // matches height constraints, and is complete/integrity-checked before any
+    // live state or block mutation.
+    preflightAtOrBelow: async (height) => {
+        const database = getDb()
+        if (!database || !Number.isInteger(height)) return null
+        const rows = await database.collection(META_COLLECTION).find(
+            { ready: true, height: { $lte: height } },
+            { sort: { height: -1 }, limit: 1 }
+        ).toArray()
+        const meta = rows && rows[0]
+        if (!meta) return null
+        if (meta.height !== meta._id)
+            throw new Error('state snapshot metadata height mismatch: _id=' + meta._id + ' height=' + meta.height)
+        const expected = Array.isArray(meta.collections) && meta.collections.length > 0
+            ? meta.collections : COLLECTIONS
+        for (const name of COLLECTIONS) {
+            if (expected.indexOf(name) === -1)
+                throw new Error('state snapshot #' + meta.height + ' missing collection metadata for ' + name)
+            const snapName = snapshotCollection(meta.height, name)
+            const exists = await database.listCollections({ name: snapName }).hasNext()
+            if (!exists)
+                throw new Error('state snapshot #' + meta.height + ' missing snapshot collection ' + snapName)
+            if (meta.collectionCounts && Object.prototype.hasOwnProperty.call(meta.collectionCounts, name)) {
+                const expectedCount = meta.collectionCounts[name]
+                const actualCount = await database.collection(snapName).countDocuments({})
+                if (actualCount !== expectedCount)
+                    throw new Error('state snapshot #' + meta.height + ' integrity check failed for ' + name
+                        + ': expected ' + expectedCount + ' docs, found ' + actualCount)
+            }
+        }
+        return meta.height
     },
 
     // Restores derived state to the newest snapshot at/below `height` and
@@ -125,8 +196,10 @@ let stateSnapshot = {
             throw new Error('no state snapshot at or below height ' + height)
         for (const name of COLLECTIONS) {
             await targetDb.collection(name).deleteMany({})
-            const docs = await sourceDb.collection(snapshotCollection(snapshotHeight, name)).find({}).toArray()
-            if (docs.length) await targetDb.collection(name).insertMany(docs)
+            await copyCollection(
+                sourceDb.collection(snapshotCollection(snapshotHeight, name)),
+                targetDb.collection(name)
+            )
         }
         // Keep the persisted head consistent with the restored state; the replay
         // advances it again while re-executing the retained canonical blocks.

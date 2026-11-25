@@ -43,7 +43,10 @@ const collection = (name) => ({
         const cursor = {
             sort: applySort,
             limit: applyLimit,
-            toArray: async () => rows
+            toArray: async () => rows,
+            [Symbol.asyncIterator]: async function* () {
+                for (const r of rows) yield r
+            }
         }
         if (opts && opts.sort) applySort(opts.sort)
         if (opts && opts.limit) applyLimit(opts.limit)
@@ -63,14 +66,23 @@ const collection = (name) => ({
     deleteOne: async (query) => {
         const idx = docs(name).findIndex(d => matches(d, query))
         if (idx !== -1) docs(name).splice(idx, 1)
-    }
+    },
+    countDocuments: async () => docs(name).length
 })
 
-global.db = { collection }
+global.db = {
+    collection,
+    listCollections: (q) => ({
+        hasNext: async () => !!(q && q.name && collections[q.name])
+    })
+}
 
 async function main() {
     console.log('=== State snapshots for automatic rollback ===\n')
+    const prevAuto = process.env.AUTO_ROLLBACK
+    process.env.AUTO_ROLLBACK = '1'
 
+    try {
     await test('restores the newest snapshot at or below the ancestor', async () => {
         for (const k of Object.keys(collections)) delete collections[k]
         docs('accounts').push({ name: 'alice', balance: 10 })
@@ -108,6 +120,50 @@ async function main() {
             else process.env.STATE_SNAPSHOT_KEEP = previous
         }
     })
+
+    await test('skips save/ensure/maybeSave when AUTO_ROLLBACK is disabled', async () => {
+        for (const k of Object.keys(collections)) delete collections[k]
+        docs('accounts').push({ name: 'alice', balance: 1 })
+        docs('state').push({ _id: 0, headBlock: 10 })
+        const prev = process.env.AUTO_ROLLBACK
+        process.env.AUTO_ROLLBACK = '0'
+        try {
+            assert.strictEqual(await stateSnapshot.save(10), false)
+            assert.strictEqual(await stateSnapshot.ensure(10), false)
+            assert.strictEqual(await stateSnapshot.maybeSave(10000), false)
+            assert.strictEqual(docs('stateSnapshots').length, 0)
+        } finally {
+            if (prev === undefined) delete process.env.AUTO_ROLLBACK
+            else process.env.AUTO_ROLLBACK = prev
+        }
+    })
+
+    await test('preflight rejects incomplete snapshot metadata/count mismatch', async () => {
+        for (const k of Object.keys(collections)) delete collections[k]
+        docs('accounts').push({ name: 'alice', balance: 10 })
+        docs('state').push({ _id: 0, headBlock: 50 })
+        await stateSnapshot.save(50)
+        // Corrupt count metadata
+        docs('stateSnapshots')[0].collectionCounts.accounts = 999
+        await assert.rejects(() => stateSnapshot.preflightAtOrBelow(50), /integrity check failed/)
+    })
+
+    await test('streamed copy handles many docs in batches', async () => {
+        for (const k of Object.keys(collections)) delete collections[k]
+        for (let i = 0; i < 2505; i++) docs('accounts').push({ _id: i, balance: i })
+        docs('state').push({ _id: 0, headBlock: 200 })
+        await stateSnapshot.save(200)
+        docs('accounts').length = 0
+        const restored = await stateSnapshot.restore(200)
+        assert.strictEqual(restored, 200)
+        assert.strictEqual(docs('accounts').length, 2505)
+        assert.strictEqual(docs('accounts')[2504].balance, 2504)
+    })
+
+    } finally {
+        if (prevAuto === undefined) delete process.env.AUTO_ROLLBACK
+        else process.env.AUTO_ROLLBACK = prevAuto
+    }
 
     console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED') + ' (' + passed + ' passed, ' + failed + ' failed)')
     process.exit(failed === 0 ? 0 : 1)

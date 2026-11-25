@@ -582,7 +582,9 @@ let chain = {
         chain.output(block)
         // Bounded snapshot for proof-gated reorgs: a rollback restores this state
         // and replays only the short canonical prefix instead of all of history.
-        stateSnapshot.maybeSave(block._id).catch(() => {})
+        // Awaited so snapshot creation is serialized with block application and
+        // the captured state matches this exact block height.
+        await stateSnapshot.maybeSave(block._id)
         cb(null, block)
     },
     output: (block,rebuilding) => {

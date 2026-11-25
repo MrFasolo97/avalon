@@ -1,3 +1,4 @@
+/* eslint-disable no-magic-numbers */
 // == F8: CHAIN DIVERGENCE detection and automatic rollback ==
 // node test/divergence-rollback.js
 //

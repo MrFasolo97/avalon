@@ -1,3 +1,4 @@
+/* eslint-disable no-magic-numbers */
 // == P2P integration: CHAIN DIVERGENCE -> automatic rollback -> recover ==
 // node test/p2p-rollback-integration.js
 //

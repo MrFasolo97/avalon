@@ -1008,9 +1008,9 @@ let p2p = {
             events.emit('recover-giveup', 'error', { rollback: true, error: e.message })
             try {
                 const marker = mongo.getRollbackMarker ? await mongo.getRollbackMarker() : null
-                if (marker && marker.phase === 'swapped') {
+                if (marker && marker.phase === 'swapped') 
                     logr.fatal('CHAIN ROLLBACK left node in swapped-but-untruncated state; restart required for recovery', marker)
-                } else {
+                else {
                     if (mongo.clearRollbackMarker) await mongo.clearRollbackMarker()
                     logr.fatal('CHAIN ROLLBACK failed before swap; node halted to avoid inconsistent in-memory state. Restart to resume from persisted state.')
                 }

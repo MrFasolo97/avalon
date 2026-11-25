@@ -181,10 +181,9 @@ let divergence = {
                     })
                 })
 
-                let markerWritten = false
                 await step('mark-rollback', () => {
                     if (!io.markRollback) return
-                    return Promise.resolve(io.markRollback(decision)).then(() => { markerWritten = true })
+                    return io.markRollback(decision)
                 })
 
                 let paused = false
@@ -226,9 +225,9 @@ let divergence = {
                     // Best-effort rollback cleanup. If we already paused, try to
                     // resume so the node does not stay stuck. The marker remains
                     // when clear did not happen, so startup can recover safely.
-                    if (paused && io.resumeOnFailure) {
+                    if (paused && io.resumeOnFailure) 
                         try { await io.resumeOnFailure(e) } catch (_) {}
-                    }
+                    
                     throw e
                 }
 

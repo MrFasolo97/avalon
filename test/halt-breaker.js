@@ -14,6 +14,8 @@ if (typeof global.config === 'undefined')
 if (typeof global.chain === 'undefined')
     global.chain = {
         getLatestBlock: () => ({ _id: 0, hash: 'genesis' }),
+        schedule: { shuffle: [] },
+        recentBlocks: [],
         leaderLadder: () => ['alice', 'bob', 'carol'],
         deriveBlockRank: (b) => ({ timestamp: b.timestamp, ladderPos: 0, hash: b.hash }),
         compareBlockRank: (a, b) => {
@@ -65,6 +67,9 @@ consensus.activeLeaders = () => testEligible
 consensus.eligibleLeaders = () => testEligible
 
 let applied = null
+// Keep the real implementation: one regression test below needs to verify
+// that applying a winner re-arms the backstop for already-queued candidates.
+const realApplyForceFinalize = consensus._applyForceFinalize
 consensus._applyForceFinalize = (height, winner) => {
     applied = { height, winner }
 }
@@ -185,6 +190,99 @@ test('runHaltBreaker fires on the fresh unanimous set after the dead age out', (
     consensus.runHaltBreaker(1)
     assert.ok(applied, 'fresh unanimity of the remaining three should fire')
     assert.strictEqual(applied.winner.block.hash, 'a')
+})
+
+test('HALT_BREAKER=0 disables the breaker even when chain config enables it', () => {
+    reset()
+    const savedEnv = process.env.HALT_BREAKER
+    try {
+        process.env.HALT_BREAKER = '0'
+        config.haltBreaker = true
+        consensus.possBlocks = [{ block: { _id: 1, hash: 'a', miner: 'alice', timestamp: 1000 } }]
+        applied = null
+        consensus.scheduleHaltBreaker()
+        assert.strictEqual(consensus.haltBreakerTimeout, null, 'the off-switch must not arm the breaker')
+        consensus.runHaltBreaker(1)
+        assert.strictEqual(applied, null, 'the off-switch must not finalize via the breaker')
+    } finally {
+        if (savedEnv === undefined) delete process.env.HALT_BREAKER
+        else process.env.HALT_BREAKER = savedEnv
+        config.haltBreaker = true
+    }
+})
+
+test('FF majority fallback applies signed votes when HALT_BREAKER=0', () => {
+    reset()
+    const savedEnv = process.env.HALT_BREAKER
+    const savedQuorumMin = config.quorumMin
+    const savedFallback = config.forceFinalizeFallback
+    const savedThreshold = consensus._getQuorumThreshold
+    const savedRun = consensus.runHaltBreaker
+    try {
+        process.env.HALT_BREAKER = '0'
+        config.haltBreaker = true
+        config.quorumMin = 3
+        config.forceFinalizeFallback = false
+        consensus._getQuorumThreshold = () => 4
+        consensus.runHaltBreaker = () => { throw new Error('halt breaker must stay off') }
+        const eligible = ['alice', 'bob', 'carol', 'dave', 'erin']
+        consensus.activeLeaders = () => eligible
+        consensus.eligibleLeaders = () => eligible
+
+        const blockA = { _id: 1, hash: 'a', miner: 'alice', timestamp: 1000 }
+        const blockB = { _id: 1, hash: 'b', miner: 'bob', timestamp: 2000 }
+        consensus.possBlocks = [{ block: blockA }, { block: blockB }]
+        consensus.ffProposals = {
+            height: 1,
+            proposals: { a: { block: blockA }, b: { block: blockB } },
+            // 3/5 signed votes: an absolute majority but below the 4-vote quorum.
+            respondents: { alice: 'a', bob: 'a', carol: 'a', dave: 'b', erin: 'b' }
+        }
+
+        applied = null
+        // 7 is the last breaker-off FF attempt (4 base + 4 extra, zero-based).
+        consensus._resolveForceFinalize(1, 0, 7)
+        assert.ok(applied, 'the majority must be applied instead of halting')
+        assert.strictEqual(applied.winner.block.hash, 'a')
+    } finally {
+        if (savedEnv === undefined) delete process.env.HALT_BREAKER
+        else process.env.HALT_BREAKER = savedEnv
+        config.quorumMin = savedQuorumMin
+        config.forceFinalizeFallback = savedFallback
+        consensus._getQuorumThreshold = savedThreshold
+        consensus.runHaltBreaker = savedRun
+        consensus.activeLeaders = () => testEligible
+        consensus.eligibleLeaders = () => testEligible
+        config.haltBreaker = true
+    }
+})
+
+test('force finalize re-arms the backstop for already-queued next-height candidates', () => {
+    reset()
+    const savedApply = consensus._applyForceFinalize
+    const savedSchedule = consensus.scheduleForceFinalize
+    const savedValidate = chain.validateAndAddBlock
+    const savedForceFinalize = config.forceFinalize
+    let scheduled = 0
+    try {
+        config.forceFinalize = true
+        consensus.scheduleForceFinalize = () => { scheduled++ }
+        chain.validateAndAddBlock = (block, revalidate, cb) => cb(null)
+        consensus._applyForceFinalize = realApplyForceFinalize
+
+        consensus.possBlocks = [{ block: { _id: 2, hash: 'next', miner: 'alice', timestamp: 2000 } }]
+        consensus._applyForceFinalize(
+            1,
+            { block: { _id: 1, hash: 'a', miner: 'alice', timestamp: 1000 } },
+            0
+        )
+        assert.strictEqual(scheduled, 1, 'a queued next-height candidate must re-arm force-finalize')
+    } finally {
+        consensus._applyForceFinalize = savedApply
+        consensus.scheduleForceFinalize = savedSchedule
+        chain.validateAndAddBlock = savedValidate
+        config.forceFinalize = savedForceFinalize
+    }
 })
 
 console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED') + ' (' + passed + ' passed, ' + failed + ' failed)')

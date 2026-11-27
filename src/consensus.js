@@ -10,6 +10,19 @@ const events = require('./events')
 // all p2p.sockets referenced here are verified nodes with a node_status
 
 const FF_BACKOFF_MS = [600, 1200, 2400, 4800]
+// With the halt breaker disabled the chain must still recover after a full
+// leader restart. Nodes come back seconds apart, so the short backoff above
+// expires before all signed FF votes arrive and every retry starts with an
+// empty respondent set. Give the breaker-off path extra rounds; the breaker-on
+// path is unchanged (it fires after 21 s).
+const FF_BREAKER_OFF_EXTRA_ATTEMPTS = 4
+const FF_BREAKER_OFF_BACKOFF_MS = 10000
+
+// Layer S/H breaker has two switches: the chain config (`config.haltBreaker`)
+// and the per-node off-switch `HALT_BREAKER=0` used by the drill overlay.
+// The API/metrics already report the effective value; consensus must use the
+// SAME value or it arms a breaker that observability claims is disabled.
+const haltBreakerEnabled = () => !!config.haltBreaker && process.env.HALT_BREAKER !== '0'
 
 // S0' shadow mode: observe every vote in the ledger and compare the ledger's
 // verdict with the production one. Never refuses anything. Off by default.
@@ -1335,8 +1348,7 @@ let consensus = {
         consensus.haltBreakerTimeout = null
     },
     scheduleHaltBreaker: () => {
-        if (!config.haltBreaker) return
-        if (process.env.HALT_BREAKER === '0') return
+        if (!haltBreakerEnabled()) return
         const latestBlock = chain.getLatestBlock()
         const expectedHeight = latestBlock._id + 1
         if (consensus.haltBreakerTimeout) return
@@ -1352,8 +1364,7 @@ let consensus = {
     },
     runHaltBreaker: (height) => {
         consensus.haltBreakerTimeout = null
-        if (!config.haltBreaker) return
-        if (process.env.HALT_BREAKER === '0') return
+        if (!haltBreakerEnabled()) return
         if (consensus.finalizing) return
         if (height !== chain.getLatestBlock()._id + 1) return
 
@@ -1669,9 +1680,11 @@ let consensus = {
             return
         }
 
-        const maxAttempts = FF_BACKOFF_MS.length
+        const maxAttempts = FF_BACKOFF_MS.length + (haltBreakerEnabled() ? 0 : FF_BREAKER_OFF_EXTRA_ATTEMPTS)
         if (ffAttempt + 1 < maxAttempts) {
-            const delay = FF_BACKOFF_MS[ffAttempt + 1]
+            const delay = ffAttempt + 1 < FF_BACKOFF_MS.length
+                ? FF_BACKOFF_MS[ffAttempt + 1]
+                : FF_BREAKER_OFF_BACKOFF_MS
             logr.cons('FF retry ' + (ffAttempt + 1) + '/' + maxAttempts + ' in ' + delay + 'ms for height ' + height)
 
             // Reset respondents for fresh round — preserve existing votes to prevent vote replay
@@ -1705,10 +1718,30 @@ let consensus = {
             // Keep ffProposals: runHaltBreaker() reads its `respondents` to decide
             // whether the surviving leaders agree. Nulling it here (as it was)
             // made the breaker see 0/5 respondents and never fire.
-            if (config.haltBreaker) {
+            if (haltBreakerEnabled()) {
                 logr.warn('FF backoff exhausted for height ' + height + '; trying halt breaker')
                 consensus.finalizing = false
                 consensus.runHaltBreaker(height)
+                return
+            }
+
+            // Conservative breaker-off recovery (G12/G10): a plain 2/3 FF
+            // quorum cannot form when a latency collision splits the eligible
+            // set (3 vs 2 with E=5). Peer PRECOMMITs may never move a local
+            // lock (R3b), but FF votes are an independent, signed protocol:
+            // when one candidate has an absolute majority of the respondents
+            // every node applies THAT hash, so the chain resumes instead of
+            // freezing on locally different winners. No local lock is changed.
+            if (bestBlock && bestVotes >= config.quorumMin && bestVotes * 2 > respondentCount) {
+                logr.cons('FF majority fallback at height ' + height + ': '
+                    + bestVotes + '/' + respondentCount + ' signed votes for '
+                    + height + '#' + bestHash)
+                events.emit('force-finalize-majority', 'warn', {
+                    height: height, hash: bestHash, votes: bestVotes,
+                    respondents: respondentCount, quorum: quorumThreshold
+                })
+                consensus.ffProposals = null
+                consensus._applyForceFinalize(height, bestBlock, candidateRetry)
                 return
             }
 
@@ -1739,11 +1772,11 @@ let consensus = {
         // S0' shadow: force-finalize must not contradict our own precommit.
         // In S1' this becomes a hard refusal (doc §2.6).
         consensus.qcGuard('ff-conflict', () => {
-            if (consensusQuorum.canPrecommit(consensus.qc.ledger, height, winner.block.hash)) return
+            if (consensusQuorum.canPrecommit(consensus.ownVoteLedger, height, winner.block.hash)) return
             consensus.qc.ffConflicts++
             logr.error('QC-FF-CONFLICT force finalize would apply '+height+'#'
                 +winner.block.hash.substr(0, 8)+' but this node precommitted '
-                +String(consensusQuorum.lockedOn(consensus.qc.ledger, height)).substr(0, 8)
+                +String(consensusQuorum.lockedOn(consensus.ownVoteLedger, height)).substr(0, 8)
                 +' (shadow: applying anyway)')
         })
         chain.validateAndAddBlock(winner.block, true, function(err) {
@@ -1766,6 +1799,11 @@ let consensus = {
                     logr.fatal('Force finalize: no remaining candidates for height ' + height + ' after eviction. Chain stalled.')
                 
                 consensus.finalizing = false
+                // Candidates for the NEXT height may already be in possBlocks
+                // (they arrived while we were finalizing this one). Without an
+                // explicit reschedule no new block event fires and the chain
+                // silently stalls even though a backstop candidate exists.
+                if (config.forceFinalize) consensus.scheduleForceFinalize()
                 return
             }
 
@@ -1782,6 +1820,9 @@ let consensus = {
             consensus.possBlocks = newPossBlocks
             consensus.finalizing = false
             consensus.cancelForceFinalize()
+            // See the failure path above: the head moved, so re-arm the
+            // backstop for any candidates already queued at the next height.
+            if (config.forceFinalize) consensus.scheduleForceFinalize()
         })
     },
     verifySignature: (message, cb) => {

@@ -23,6 +23,7 @@ FAST_DRILLS=(
     G11-halt-breaker-recovery.sh
     G13-stale-leader-restart.sh
     G9-old-node.sh
+    G14-slow-leader-view-change.sh
 )
 
 LONG_DRILLS=(

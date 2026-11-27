@@ -36,11 +36,17 @@ const tests = [
     'poss-block-prune.js',
     'block-apply-serialization.js',
     'jail-determinism.js',
+    'jail-checkpoint.js',
     'competing-candidate-finalize.js',
     'single-vote-handover.js',
+    'slow-leader-view-change-drill.js',
     'divergence-rollback.js',
     'state-snapshot.js',
     'p2p-rollback-integration.js',
+    'rollback-rebuild-bson.js',
+    'rollback-rebuild-mongo.js',
+    'rollback-marker-crash.js',
+    'commit-hash.js',
     'vote-proof-wiring.js'
 ]
 

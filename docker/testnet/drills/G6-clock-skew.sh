@@ -31,6 +31,22 @@ SKEW_PLUS="avalon-drills-miner5"
 SKEW_MINUS="avalon-drills-miner4"
 LIBFAKE=/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1
 
+# The running stack may carry extra overlays (single-vote, halt-breaker-off).
+# Recreating miner4/miner5 with only base+drills drops those env vars, which
+# rewrites the shared config overlay with the DEFAULT flags: the two recreated
+# nodes end up with a different singleVote/haltBreaker view than the rest of the
+# network, producing a stuck height with colliding possBlocks. Mirror every
+# overlay that is actually enabled on the running project.
+BASE_COMPOSE=(-f docker-compose.yml -f docker-compose.drills.yml)
+# Inspect the env of a RUNNING node, not `docker compose config`: including an
+# overlay in a config query would always add its env vars even when the live
+# stack was started without it. miner1 is never recreated by the drills, so it
+# carries the env the stack was originally launched with (bootstrap may have
+# been recreated by an earlier drill without the extra overlays).
+node_env=$(docker inspect avalon-drills-miner1 --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null || true)
+echo "$node_env" | grep -q '^LAYER_SH_SINGLE_VOTE=' && BASE_COMPOSE+=(-f docker-compose.drills-single-vote.yml)
+echo "$node_env" | grep -q '^HALT_BREAKER=' && BASE_COMPOSE+=(-f docker-compose.drills-halt-breaker-off.yml)
+
 require_running
 
 if ! docker exec "$BOOTSTRAP" test -f "$LIBFAKE"; then
@@ -40,16 +56,16 @@ fi
 
 restore() {
     ( cd "$TESTNET_DIR" && docker compose -p avalon-drills \
-        -f docker-compose.yml -f docker-compose.drills.yml up -d miner4 miner5 >/dev/null 2>&1 ) || true
+        "${BASE_COMPOSE[@]}" up -d miner4 miner5 >/dev/null 2>&1 ) || true
 }
 trap restore EXIT
 
 start_height=$(get_height)
-log "G6 starting at height $start_height"
+log "G6 starting at height $start_height (compose: ${BASE_COMPOSE[*]})"
 
 log "Recreating $SKEW_PLUS (+300ms) and $SKEW_MINUS (-300ms) with libfaketime"
 ( cd "$TESTNET_DIR" && docker compose -p avalon-drills \
-    -f docker-compose.yml -f docker-compose.drills.yml -f "$OVERLAY" up -d miner4 miner5 >/dev/null 2>&1 ) \
+    "${BASE_COMPOSE[@]}" -f "$OVERLAY" up -d miner4 miner5 >/dev/null 2>&1 ) \
     || fail "could not recreate the nodes with the clock-skew overlay"
 
 # Verify the skew actually took effect: the two nodes must disagree on the wall

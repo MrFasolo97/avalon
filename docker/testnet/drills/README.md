@@ -39,6 +39,13 @@ The suite calls `settle_testnet` before every drill (restarts any container left
 down and waits for the chain to advance), so an interrupted drill no longer
 cascades into the following ones.
 
+G14 exercises the post-14,000,000 single-vote path on the live network. It
+requires the shared overlay generated with `LAYER_SH_SINGLE_VOTE=1`; include
+`-f docker-compose.drills-single-vote.yml` when starting the testnet. The
+headless equivalent (`node test/slow-leader-view-change-drill.js`) drives the
+real consensus engine at the exact 13,999,999/14,000,000 config boundary and
+runs as part of `npm test`.
+
 ## Available scripts
 
 | Script | Drill | Typical duration | Notes |
@@ -56,6 +63,7 @@ cascades into the following ones.
 | `G11-halt-breaker-recovery.sh` | G11 | ~2 min | automatic recovery round |
 | `G12-halt-breaker-off.sh` | G12 | ~2 min | requires the testnet started with `docker-compose.drills-halt-breaker-off.yml` |
 | `G13-stale-leader-restart.sh` | G13 | ~4 min | kills the scheduled leader, lets a backup fill the slot, restarts it stale — F8 fork regression |
+| `G14-slow-leader-view-change.sh` | G14 | ~3 min | requires the single-vote overlay; stops the scheduled leader and asserts a clean view-change finalization with no force-finalize / halt-breaker |
 
 ## Implementation
 

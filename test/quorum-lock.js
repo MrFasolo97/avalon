@@ -241,6 +241,53 @@ test('higher round with same hash does not require justification', () => {
     assert.strictEqual(q.lockedOn(ledger, 24), 'A')
 })
 
+console.log('\n--- R3b: own lock vs peer tally ---')
+
+test('a lock-free peer tally counts votes without ever creating a lock', () => {
+    const eligible = ['l1', 'l2', 'l3', 'l4']
+    const peer = q.createLedger({ singleVote: false, trackLocks: false })
+    for (const signer of eligible)
+        assert.strictEqual(q.recordVote(peer, { h: 30, r: q.PRECOMMIT, hash: 'B', signer, round: 1 }).accepted, true)
+    assert.strictEqual(q.hasQC(peer, 30, q.PRECOMMIT, 'B', eligible, 1).qc, true)
+    assert.strictEqual(q.lockedOn(peer, 30), null)
+    assert.strictEqual(q.canPrecommit(peer, 30, 'A'), true)
+})
+
+test('justifiesUnlock refuses a quorum for the hash we are already locked on', () => {
+    const eligible = ['l1', 'l2', 'l3', 'l4']
+    const peer = q.createLedger({ singleVote: false, trackLocks: false })
+    for (const signer of eligible)
+        q.recordVote(peer, { h: 31, r: q.PRECOMMIT, hash: 'A', signer, round: 1 })
+    assert.strictEqual(q.hasQC(peer, 31, q.PRECOMMIT, 'A', eligible, 1).qc, true)
+    // The flawed 36b8617 rule used this quorum for A to justify switching to B.
+    assert.strictEqual(q.justifiesUnlock(peer, 31, 'B', 0, eligible, 'A'), false)
+    assert.strictEqual(q.justifiesUnlock(peer, 31, 'A', 0, eligible, 'A'), false,
+        'even a quorum for the requested hash is refused when it is the locked hash')
+})
+
+test('justifiesUnlock needs a new-block quorum in a STRICTLY later round', () => {
+    const eligible = ['l1', 'l2', 'l3', 'l4']
+    const peer = q.createLedger({ singleVote: false, trackLocks: false })
+    for (const signer of eligible) {
+        q.recordVote(peer, { h: 32, r: q.PRECOMMIT, hash: 'B', signer, round: 0 })
+        q.recordVote(peer, { h: 32, r: q.PRECOMMIT, hash: 'B', signer, round: 1 })
+    }
+    assert.strictEqual(q.justifiesUnlock(peer, 32, 'B', 1, eligible, 'A'), false,
+        'same round as the lock must not justify')
+    assert.strictEqual(q.justifiesUnlock(peer, 32, 'B', 0, eligible, 'A'), true,
+        'a later-round new-block quorum does justify')
+    assert.strictEqual(q.justifiesUnlock(peer, 32, 'B', 2, eligible, 'A'), false,
+        'an earlier quorum cannot justify a later lock')
+})
+
+test('justifiesUnlock ignores peer votes from outside the eligible set', () => {
+    const eligible = ['l1', 'l2', 'l3', 'l4']
+    const peer = q.createLedger({ singleVote: false, trackLocks: false })
+    for (const signer of ['x1', 'x2', 'x3', 'x4', 'x5'])
+        q.recordVote(peer, { h: 33, r: q.PRECOMMIT, hash: 'B', signer, round: 1 })
+    assert.strictEqual(q.justifiesUnlock(peer, 33, 'B', 0, eligible, 'A'), false)
+})
+
 console.log('\n--- malformed input ---')
 
 test('rejects non-integer heights, unknown phases and empty hashes', () => {

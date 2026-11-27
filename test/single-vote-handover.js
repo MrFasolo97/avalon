@@ -78,7 +78,8 @@ function test(name, fn) {
 }
 
 function reset() {
-    consensus.voteLedger = consensusQuorum.createLedger({ singleVote: true })
+    consensus.ownVoteLedger = consensusQuorum.createLedger({ singleVote: true })
+    consensus.peerVoteLedger = consensusQuorum.createLedger({ singleVote: false, trackLocks: false })
     consensus.possBlocks = []
     consensus.heightSeen = {}
     consensus.commitRetry = {}
@@ -91,6 +92,20 @@ function pb(hash, miner, timestamp, preVotes) {
         0: preVotes || [],
         1: []
     }
+}
+
+function peerPrecommit(hash, signer, vr) {
+    consensus.remoteRoundConfirm({
+        d: { r: PRE, b: { hash }, h, vr },
+        s: { n: signer }
+    })
+}
+
+function peerCommit(hash, signer) {
+    consensus.remoteRoundConfirm({
+        d: { r: COM, b: { hash }, h, vr: 0 },
+        s: { n: signer }
+    })
 }
 
 console.log('=== Single-vote default / round handover (M1, M2) ===\n')
@@ -117,7 +132,7 @@ test('M1: a higher-round backup is precommitted during leader handover', () => {
     assert.strictEqual(consensus.lowestCandidateRound(h), 0)
     assert.strictEqual(consensus.castVote(PRE, backup.block), true,
         'the backup must not be rejected for ranking worse than the stale leader')
-    assert.strictEqual(consensusQuorum.lockedOn(consensus.voteLedger, h), 'a-backup')
+    assert.strictEqual(consensusQuorum.lockedOn(consensus.ownVoteLedger, h), 'a-backup')
 })
 
 test('M1: two candidates in the SAME round still pick one deterministically', () => {
@@ -128,7 +143,7 @@ test('M1: two candidates in the SAME round still pick one deterministically', ()
     assert.strictEqual(consensus.lowestCandidateRound(h), 0)
     assert.strictEqual(consensus.castVote(PRE, worse.block), false)
     assert.strictEqual(consensus.castVote(PRE, better.block), true)
-    assert.strictEqual(consensusQuorum.lockedOn(consensus.voteLedger, h), 'a-same')
+    assert.strictEqual(consensusQuorum.lockedOn(consensus.ownVoteLedger, h), 'a-same')
 })
 
 test('M2: COMMIT follows our own precommit lock', () => {
@@ -137,12 +152,12 @@ test('M2: COMMIT follows our own precommit lock', () => {
     const other = pb('B', 'l2', 2000, ['l1', 'l2', 'l3', 'l4'])
     consensus.possBlocks = [ours, other]
     assert.strictEqual(consensus.castVote(PRE, ours.block), true)
-    assert.strictEqual(consensusQuorum.lockedOn(consensus.voteLedger, h), 'A')
+    assert.strictEqual(consensusQuorum.lockedOn(consensus.ownVoteLedger, h), 'A')
     consensus.heightSeen[h] = Date.now() - 60000 // window settled
     assert.strictEqual(consensus.castVote(COM, other.block), false,
         'must not commit a hash we never precommitted')
     assert.deepStrictEqual(
-        Array.from(consensusQuorum.signersForHash(consensus.voteLedger, h, COM, 'B', 0)), [])
+        Array.from(consensusQuorum.signersForHash(consensus.ownVoteLedger, h, COM, 'B', 0)), [])
 })
 
 test('M2: the highest round with a precommit QC wins the COMMIT', () => {
@@ -164,28 +179,84 @@ test('M2: once locked, a node commits its own candidate when it is the best one'
     assert.strictEqual(consensus.castVote(COM, a.block), true)
 })
 
-test('view-change: peer precommit votes in voteLedger allow justified unlock to backup leader', () => {
+test('R3b: peer precommits alone never create this node\'s local lock', () => {
+    reset()
+    const leader = pb('leader-hash', 'l1', 1000)
+    consensus.possBlocks = [leader]
+    for (const signer of ['l1', 'l2', 'l3', 'l4'])
+        peerPrecommit(leader.block.hash, signer, 0)
+    for (const signer of ['l1', 'l2', 'l3', 'l4'])
+        peerCommit(leader.block.hash, signer)
+
+    // The peer tally counts the votes, but neither its lock nor ours is set.
+    assert.strictEqual(consensusQuorum.qcHash(consensus.peerVoteLedger, h, PRE, ladder, 0).hash, 'leader-hash')
+    assert.strictEqual(consensusQuorum.lockedOn(consensus.peerVoteLedger, h), null)
+    assert.strictEqual(consensusQuorum.lockedOn(consensus.ownVoteLedger, h), null)
+    assert.strictEqual(Array.from(consensusQuorum.signersForHash(
+        consensus.ownVoteLedger, h, COM, 'leader-hash', 0)).length, 0)
+})
+
+test('R3b: peer precommits for another block never move our lock without a new-block QC', () => {
     reset()
     const leader = pb('leader-hash', 'l1', 1000)
     const backup = pb('backup-hash', 'l2', 2000)
     consensus.possBlocks = [leader, backup]
-    // Node precommits leader block at round 0.
     assert.strictEqual(consensus.castVote(PRE, leader.block), true)
-    assert.strictEqual(consensusQuorum.lockedOn(consensus.voteLedger, h), 'leader-hash')
+    assert.strictEqual(consensusQuorum.lockedOn(consensus.ownVoteLedger, h), 'leader-hash')
 
-    // Peer precommits for leader arrive over the network; ledger must record them.
-    for (const signer of ['l1', 'l2', 'l3', 'l4']) 
-        consensus.remoteRoundConfirm({
-            d: { r: PRE, b: { hash: leader.block.hash }, h, vr: 0 },
-            s: { n: signer }
-        })
-    
-    const qc = consensusQuorum.qcHash(consensus.voteLedger, h, PRE, ladder, 0)
-    assert.strictEqual(qc.hash, 'leader-hash')
+    // Two higher-round peer precommits for the backup are below quorum.
+    for (const signer of ['l1', 'l2'])
+        peerPrecommit(backup.block.hash, signer, 1)
+    assert.strictEqual(consensusQuorum.lockedOn(consensus.ownVoteLedger, h), 'leader-hash',
+        'recording peer votes must not move the local lock')
+    assert.strictEqual(consensus.castVote(PRE, backup.block), false,
+        'no valid new-block precommit quorum: the node must stay locked')
+    assert.strictEqual(consensusQuorum.lockedOn(consensus.ownVoteLedger, h), 'leader-hash')
+})
 
-    // With a QC justifying the earlier round, node can switch to backup leader.
+test('R3b: a quorum for the LOCKED block does NOT unlock the node to switch', () => {
+    reset()
+    const leader = pb('leader-hash', 'l1', 1000)
+    const backup = pb('backup-hash', 'l2', 2000)
+    consensus.possBlocks = [leader, backup]
+    assert.strictEqual(consensus.castVote(PRE, leader.block), true)
+    assert.strictEqual(consensusQuorum.lockedOn(consensus.ownVoteLedger, h), 'leader-hash')
+
+    // This is the flawed 36b8617 case: QCs for the block we are ALREADY locked
+    // on, including a higher round, are a reason to STAY — not to switch.
+    for (const vr of [0, 1, 2])
+        for (const signer of ['l1', 'l2', 'l3', 'l4'])
+            peerPrecommit(leader.block.hash, signer, vr)
+    assert.strictEqual(consensusQuorum.qcHash(consensus.peerVoteLedger, h, PRE, ladder, 0).hash, 'leader-hash')
+    assert.strictEqual(consensus.castVote(PRE, backup.block), false,
+        'a QC for the locked block must never justify moving to the backup')
+    assert.strictEqual(consensusQuorum.lockedOn(consensus.ownVoteLedger, h), 'leader-hash')
+    consensus.heightSeen[h] = Date.now() - 60000
+    assert.strictEqual(consensus.castVote(COM, backup.block), false,
+        'commit must still follow our own precommit, not a peer-set lock')
+})
+
+test('R3b: a valid higher-round precommit QC for the NEW block unlocks and commits', () => {
+    reset()
+    const leader = pb('leader-hash', 'l1', 1000)
+    const backup = pb('backup-hash', 'l2', 2000, ['l1', 'l2', 'l3', 'l4'])
+    consensus.possBlocks = [leader, backup]
+    assert.strictEqual(consensus.castVote(PRE, leader.block), true)
+    assert.strictEqual(consensusQuorum.lockedOn(consensus.ownVoteLedger, h), 'leader-hash')
+
+    // Peers precommit the NEW candidate in a strictly later view: a valid
+    // view-change justification, read from the peer tally only.
+    for (const signer of ['l1', 'l2', 'l3', 'l4'])
+        peerPrecommit(backup.block.hash, signer, 1)
+    assert.strictEqual(consensusQuorum.lockedOn(consensus.ownVoteLedger, h), 'leader-hash',
+        'peer votes alone still do not move our lock')
     assert.strictEqual(consensus.castVote(PRE, backup.block), true)
-    assert.strictEqual(consensusQuorum.lockedOn(consensus.voteLedger, h), 'backup-hash')
+    assert.strictEqual(consensusQuorum.lockedOn(consensus.ownVoteLedger, h), 'backup-hash')
+
+    consensus.heightSeen[h] = Date.now() - 60000
+    assert.strictEqual(consensus.castVote(COM, backup.block), true,
+        'after a justified unlock we may commit the new block')
+    assert.ok(consensusQuorum.signersForHash(consensus.ownVoteLedger, h, COM, 'backup-hash', 0).has('me'))
 })
 
 console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED') + ' (' + passed + ' passed, ' + failed + ' failed)')

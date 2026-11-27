@@ -54,9 +54,18 @@ let consensus = {
         return singleVoteAt(chain && chain.getLatestBlock ? chain.getLatestBlock()._id + 1 : 0)
     },
     singleVoteAt,
-    // Production ledger for our OWN votes. singleVote:true so the rule is
-    // enforced by recordVote(); only consulted when singleVote is active at height.
-    voteLedger: consensusQuorum.createLedger({ singleVote: true }),
+    // OWN votes only: this node's PRECOMMITs/COMMITs and its local lock.
+    // singleVote:true enforces INV-1 on OUR votes. NO peer vote may ever enter
+    // this ledger — castVote and the "commit only what we precommitted" check
+    // read it exclusively (R3b).
+    ownVoteLedger: consensusQuorum.createLedger({ singleVote: true }),
+    // Peer tally: network PRECOMMITs/COMMITs counted toward QC checks and
+    // view-change justification. trackLocks:false means peer votes can never
+    // create, move or clear a local lock.
+    peerVoteLedger: consensusQuorum.createLedger({ singleVote: false, trackLocks: false }),
+    // Backwards-compatible alias for older callers/tests: still OWN votes only.
+    get voteLedger() { return consensus.ownVoteLedger },
+    set voteLedger(ledger) { consensus.ownVoteLedger = ledger },
     // Signed PRECOMMITs retained as a transferable fork proof for NODE_STATUS.
     // Top-level (not inside `qc`) because it must exist with QC_SHADOW off.
     voteProofs: new Map(),
@@ -959,18 +968,18 @@ let consensus = {
                 logr.debug('view-change: precommit skipped at ' + h + ' (not the best known in round ' + vr + ')')
                 return false
             }
-            // QC-justified unlock: moving a precommit lock to a higher round on a
-            // different hash requires a valid QC from an earlier round.
+            // QC-justified unlock (R3b): our local lock lives in the OWN ledger.
+            // It may move to a different hash only when the PEER tally shows a
+            // valid precommit quorum for the NEW hash in a round strictly later
+            // than the locked round. A quorum for the hash we are locked on is
+            // a reason to STAY, never to switch to another candidate.
             let justified = false
-            const lock = consensus.voteLedger.locks.get(h)
-            if (lock && lock.hash !== block.hash && vr > (lock.round || 0)) {
-                const eligible = consensus.eligibleLeaders(h)
-                for (let jr = 0; jr < vr; jr++) {
-                    const qc = consensusQuorum.qcHash(consensus.voteLedger, h, consensusQuorum.PRECOMMIT, eligible, jr)
-                    if (qc && qc.hash) { justified = true; break }
-                }
-            }
-            const rec = consensusQuorum.recordVote(consensus.voteLedger, {
+            const lock = consensus.ownVoteLedger.locks.get(h)
+            if (lock && lock.hash !== block.hash && vr > (lock.round || 0))
+                justified = consensusQuorum.justifiesUnlock(
+                    consensus.peerVoteLedger, h, block.hash, lock.round || 0,
+                    consensus.eligibleLeaders(h), lock.hash)
+            const rec = consensusQuorum.recordVote(consensus.ownVoteLedger, {
                 h: h, r: consensusQuorum.PRECOMMIT, hash: block.hash,
                 signer: process.env.NODE_OWNER, round: vr, justified: justified
             })
@@ -1002,7 +1011,7 @@ let consensus = {
         // M2: a node may only COMMIT what it PRECOMMITTED. The ledger keeps one
         // lock per height; following a different best-ranked hash here is what
         // let two nodes commit two blocks at the same height (G10/G11).
-        const locked = consensusQuorum.lockedOn(consensus.voteLedger, h)
+        const locked = consensusQuorum.lockedOn(consensus.ownVoteLedger, h)
         if (!locked || locked !== block.hash) {
             logr.debug('view-change: commit skipped at ' + h + ' (not our precommit)')
             return false
@@ -1016,11 +1025,15 @@ let consensus = {
             logr.debug('one-candidate: not the best committable at ' + h + ', skip commit')
             return false
         }
-        const rec = consensusQuorum.recordVote(consensus.voteLedger, {
+        const rec = consensusQuorum.recordVote(consensus.ownVoteLedger, {
             h: h, r: consensusQuorum.COMMIT, hash: block.hash, signer: process.env.NODE_OWNER, round: 0
         })
         try {
-            consensusQuorum.pruneLedger(consensus.voteLedger, chain.getLatestBlock()._id - config.leaders * 3)
+            const pruneBelow = chain.getLatestBlock()._id - config.leaders * 3
+            consensusQuorum.pruneLedger(consensus.ownVoteLedger, pruneBelow)
+            // The peer tally grows faster than our own votes (one set per active
+            // signer per height); prune it on the same schedule.
+            consensusQuorum.pruneLedger(consensus.peerVoteLedger, pruneBelow)
         } catch (e) { /* head not ready */ }
         if (!rec.accepted) {
             logr.debug('one-candidate: refusing second commit at ' + h + ' (' + rec.reason + ')')
@@ -1128,24 +1141,14 @@ let consensus = {
                 consensus.qcGuard('remote-vote', () => {
                     consensus.qcObserve(qcH, round, block.hash, leader)
                 })
-                // View-change ledger: record collected network/peer votes so
-                // QC-justified unlock and quorum checks see the real network view,
-                // not only this node's own votes (required at >=14000000).
+                // Peer tally (R3b): collected network/peer votes feed QC counts
+                // and view-change justification at >=14000000. They go ONLY to
+                // the lock-free peer ledger: a peer vote must never create, move
+                // or clear this node's local lock in the own-vote ledger.
                 if (singleVoteAt(qcH)) {
-                    let justified = false
-                    if (round === consensusQuorum.PRECOMMIT) {
-                        const lock = consensus.voteLedger.locks.get(qcH)
-                        if (lock && lock.hash !== block.hash && vr > (lock.round || 0)) {
-                            const eligible = consensus.eligibleLeaders(qcH)
-                            for (let jr = 0; jr < vr; jr++) {
-                                const qc = consensusQuorum.qcHash(consensus.voteLedger, qcH, consensusQuorum.PRECOMMIT, eligible, jr)
-                                if (qc && qc.hash) { justified = true; break }
-                            }
-                        }
-                    }
                     const voteRound = round === consensusQuorum.PRECOMMIT ? vr : 0
-                    consensusQuorum.recordVote(consensus.voteLedger, {
-                        h: qcH, r: round, hash: block.hash, signer: leader, round: voteRound, justified
+                    consensusQuorum.recordVote(consensus.peerVoteLedger, {
+                        h: qcH, r: round, hash: block.hash, signer: leader, round: voteRound
                     })
                 }
                 // QC on the wire (doc §2.5): a commit vote may carry the round-0

@@ -939,6 +939,10 @@ let p2p = {
                 voteState.reset()
                 if (consensus.resetVoteProofs) consensus.resetVoteProofs()
                 consensus.voteLedger = consensusQuorum.createLedger({ singleVote: true })
+                // R3b: peer tallies are separate state from our own lock. A
+                // rollback must discard stale peer precommits from the orphaned
+                // branch or they could justify a bad unlock after recovery.
+                consensus.peerVoteLedger = consensusQuorum.createLedger({ singleVote: false, trackLocks: false })
                 chain.blocksToRebuild = []
                 chain.recentBlocks = []
                 chain.recentTxs = {}

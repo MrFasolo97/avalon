@@ -66,8 +66,12 @@ function createLedger(options) {
         // The shadow observer turns it off to mirror Avalon's multi-candidate
         // voting: there the same checks are only counted, never applied.
         singleVote: !options || options.singleVote !== false,
-        votes: new Map(), // "h:r" -> Map(hash -> Set(signer))
-        locks: new Map(), // height -> hash this node precommitted
+        // trackLocks=false is for a PEER TALLY: peer votes are counted for QC
+        // checks but must never create or move a local lock. Only the own-vote
+        // ledger (the default) tracks locks.
+        trackLocks: !options || options.trackLocks !== false,
+        votes: new Map(), // "h:round:r" -> Map(hash -> Set(signer))
+        locks: new Map(), // height -> { hash, round } this node precommitted
         equivocations: [] // { h, r, signer, hash, previousHash }
     }
 }
@@ -122,7 +126,7 @@ function recordVote(ledger, vote) {
     // only when justified by a valid QC from an earlier round (QC-justified
     // unlock); moving on a higher round alone, without QC justification, is
     // refused. The lock entry is { hash, round }.
-    if (r === PRECOMMIT) {
+    if (r === PRECOMMIT && ledger.trackLocks !== false) {
         const lock = ledger.locks.get(h)
         if (lock && lock.hash !== hash) {
             const justified = vote && vote.justified === true
@@ -150,7 +154,7 @@ function recordVote(ledger, vote) {
     if (set.has(signer)) return { accepted: true, reason: 'duplicate', count: set.size }
 
     set.add(signer)
-    if (r === PRECOMMIT) {
+    if (r === PRECOMMIT && ledger.trackLocks !== false) {
         const lock = ledger.locks.get(h)
         if (!lock || round > (lock.round || 0)) ledger.locks.set(h, { hash: hash, round: round })
     }
@@ -197,6 +201,35 @@ function qcHash(ledger, h, r, eligible, round) {
         if (found === null) found = hash
     }
     return { hash: found, conflict }
+}
+
+// A peer precommit quorum justifies moving this node's LOCAL lock only when the
+// quorum is for the NEW hash and was formed in a round STRICTLY later than the
+// locked round (view change). A quorum for the hash we are already locked on is
+// a reason to STAY: it must never be used to unlock and switch to another block.
+//
+// `ledger` must be the peer tally (trackLocks:false), never the own-vote ledger:
+// only network observations may justify a view change.
+function justifiesUnlock(ledger, h, newHash, lockedRound, eligible, lockedHash) {
+    if (!ledger || !ledger.votes) return false
+    if (typeof newHash !== 'string' || newHash.length === 0) return false
+    if (newHash === lockedHash) return false
+    if (!Array.isArray(eligible) || eligible.length === 0) return false
+
+    const from = (Number.isInteger(lockedRound) ? lockedRound : 0) + 1
+    const prefix = h + ':'
+    let maxRound = from - 1
+    for (const key of ledger.votes.keys()) {
+        if (typeof key !== 'string' || key.indexOf(prefix) !== 0) continue
+        const parts = key.split(':')
+        if (parts.length !== 3 || Number(parts[0]) !== h) continue
+        if (Number(parts[2]) !== PRECOMMIT) continue
+        const round = Number(parts[1])
+        if (Number.isInteger(round) && round > maxRound) maxRound = round
+    }
+    for (let round = from; round <= maxRound; round++)
+        if (hasQC(ledger, h, PRECOMMIT, newHash, eligible, round).qc) return true
+    return false
 }
 
 // Shadow-mode comparison between the production rule (a raw count against a
@@ -257,6 +290,7 @@ module.exports = {
     canPrecommit,
     hasQC,
     qcHash,
+    justifiesUnlock,
     compareDecision,
     pruneLedger,
     signersForHash

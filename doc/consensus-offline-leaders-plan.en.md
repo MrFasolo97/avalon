@@ -816,7 +816,11 @@ The node then truncates blocks (BSON index first, so a crash cannot expose a hal
 restores the newest Mongo state snapshot at/below the ancestor, replays only
 `snapshot+1..ancestor` and resumes forward recovery. The database is never dropped; without a
 usable snapshot the node fails closed. `AUTO_ROLLBACK=0` is the safe default; set it to `1`
-to enable. `config.maxReorgDepth` (chain config, default `10`) bounds the walk. Tests:
+to enable **on non-leader/sync nodes only**. Snapshots use server-side MongoDB `$out`
+(atomic, low Node heap) but the node awaits the copy to keep the snapshot at a single height,
+so a leader with `NODE_OWNER_PRIV` risks missed turns/jail; the node logs an explicit startup
+warning when signing keys and `AUTO_ROLLBACK=1` are combined. `config.maxReorgDepth` (chain
+config, default `10`) bounds the walk. Tests:
 `test/divergence-rollback.js`, `test/state-snapshot.js`, `test/p2p-rollback-integration.js`.
 
 Because Layer H is height-gated and its gate is evaluated before the release ships, the
@@ -867,7 +871,9 @@ Estimated effort: **S0+S1 ≈ 10–14 engineering days** (incl. tests), **H1+H2 
 quorum unification, then the standby set.
 
 `eslint` baseline is now **0 errors** (the `src/http/auth/index.js` `no-lonely-if` was fixed);
-`npm test` runs 23 assert-only suites, all green (re-run 2026-11-12).
+`npm test` runs the full assert-only suite registry in `test/run.js`, all green
+(re-run after each security fix; see the final verification log for the exact
+suite count and output).
 
 ### 9.1 Implementation status (this branch — updated 2026-11-12)
 

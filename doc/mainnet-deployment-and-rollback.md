@@ -1,7 +1,7 @@
 # Avalon Mainnet — Deployment (Layer S/H) and Rollback Runbook
 
 **Type:** operational runbook
-**Target release:** the certified **Layer S/H** tag **`v2.2.0`** — the merge of the
+**Target release:** the certified **Layer S/H** tag **`v2.1.1`** — the merge of the
 `feat/auto-force-finalize` release fixes into `feat/view-change` (S and H ship together in
 this cutover). **Freeze the tag before publishing**: `package.json.version` must match it
 exactly, because the G-1 census reads `/version` and `NODE_STATUS`.
@@ -132,7 +132,7 @@ console.log("S:",s.skipRecording,s.skipStrict,s.haltBreaker,"| H:",h.skipStrict,
 # 3. Quality gates on the tagged tree (same as CI)
 npm ci
 npm run lint
-npm test                              # 23 assert-only suites, all green
+npm test                              # full assert-only registry in test/run.js (38 suites on this tree), all green
 node test/run.js schedule-determinism consensus-invariants block-rank schedule-persist leader-health skip-attestation
 ```
 
@@ -222,14 +222,29 @@ In addition to the v2.0.3 set (`CORS_ORIGIN`, `HTTP_HOST`, `TRUST_PROXY`, `ADMIN
 | `QC_SHADOW` | off | `1` recommended | enables the read-only vote-ledger observer (logs `QC-*`, refuses nothing) |
 | `VOTE_STATE_PATH` | `./state/vote_state.json` | leave default | crash-safe vote record (local file, never chain data) |
 | `SCHEDULE_PERSIST_PATH` | `./state/schedule.json` | leave default | persisted epoch schedule (fixes F7 restart divergence) |
-| `AUTO_ROLLBACK` | **off (`0`)** | leave unset | opt-in only: set to `1` to enable proof-gated automatic rollback on `CHAIN DIVERGENCE` |
+| `AUTO_ROLLBACK` | **off (`0`)** | leave unset on leaders; `1` recommended on non-leader/sync nodes only | opt-in only: set to `1` to enable proof-gated automatic rollback on `CHAIN DIVERGENCE`. Snapshot creation pauses block application while copying derived state, so a block-producing leader can miss turns/get jailed; nodes start with an explicit warning if signing keys are configured and this flag is on |
 | `MAX_REORG_DEPTH` | *(env removed)* | do not set | **Chain config** (`config.maxReorgDepth`, default `10` at genesis). Reorg depth is consensus-relevant fork-choice data: a per-node env var would let two nodes make different rollback decisions on the same fork. |
 | `STATE_SNAPSHOT_INTERVAL` | `10000` | leave default | block interval for the derived-state snapshots used to restore on rollback; `0` disables new snapshots (rollback then fails closed) |
 | `STATE_SNAPSHOT_KEEP` | `3` | leave default | number of recent state snapshots retained |
 | `LEADER_STATS` | off | `1` optional | per-leader produced/missed/jail counters |
 
+`AUTO_ROLLBACK=1` is recommended **only on non-leader/sync nodes**. Snapshots are now copied
+server-side with MongoDB `$out` (driver 4.17.2 / server 6.x; a bounded temp+rename fallback
+exists for servers without `$out`), so they no longer stream the whole state through Node,
+but the node still awaits the copy to keep the snapshot height-consistent. A block producer
+with `NODE_OWNER_PRIV`/`NODE_OWNER` can miss a turn while that copy runs: leave the flag unset
+on leaders (the node logs a startup warning if both are set).
+
 `QC_SHADOW=1` is the intended posture during the S→H observation window: it certifies the
 quorum on every block without being able to refuse one.
+
+`AUTO_ROLLBACK=1` is recommended **only on non-leader/sync nodes**. Taking a state snapshot
+briefly pauses block application; on a block producer (detected from `NODE_OWNER_PRIV` /
+`NODE_OWNER`) that can mean a missed turn and jail. Copies are performed server-side with
+MongoDB `$out` (driver 4.x, MongoDB 6.x) so the pause is short and no collection is loaded
+into the Node heap; the metadata row is written `ready:true` only after every collection was
+copied, so an interrupted snapshot fails closed. The node logs an explicit warning at startup
+if automatic rollback is enabled together with leader signing keys.
 
 ---
 

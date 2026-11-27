@@ -952,26 +952,54 @@ let p2p = {
                 consensus.finalizing = false
                 consensus.cancelForceFinalize()
                 txHistory.indexQueue = []
+                // R5: reset the in-memory jail fold too. The checkpoint that
+                // was just restored from the snapshot (now part of the derived
+                // state swap) is loaded again below before replay, so jail
+                // state cannot survive from the orphaned tail.
                 leaderHealth.leaders = {}
                 if (process.env.LEADER_STATS === '1' && leaderStats.reset) leaderStats.reset()
             },
-            rebuildState: () => new Promise((rs, rj) => {
+            // `endHeight` comes from divergence.rollback() and is the common
+            // ancestor. Replay from the restored snapshot up to that height only:
+            // the orphaned tail is still in the block store until truncation.
+            rebuildState: (endHeight) => new Promise((rs, rj) => {
+                const ancestor = Number.isInteger(endHeight) ? endHeight : decision.ancestor
                 const from = Number.isInteger(snapshotHeight)
-                    ? Math.min(snapshotHeight + 1, decision.ancestor + 1)
-                    : decision.ancestor + 1
-                const invoke = () => chain.rebuildState(from, (e, builtTo) => {
+                    ? Math.min(snapshotHeight + 1, ancestor + 1)
+                    : ancestor + 1
+                const invoke = () => chain.rebuildState(from, ancestor, (e, builtTo) => {
                     if (e) return rj(e)
+                    // R5: keep the persisted jail checkpoint in step with the
+                    // rebuilt state. The snapshot restored a checkpoint at
+                    // `snapshotHeight`; the replay above folded the canonical
+                    // tail up to `ancestor` into leaderHealth.leaders, so the
+                    // checkpoint must advance to that height before the swap.
+                    const cpHeight = Number.isInteger(builtTo) ? builtTo : ancestor
+                    leaderHealth.persistCheckpoint(cpHeight).catch(() => {})
                     Promise.all([
                         cache.warmup ? cache.warmup('accounts', parseInt(process.env.WARMUP_ACCOUNTS)) : null,
                         cache.warmup ? cache.warmup('contents', parseInt(process.env.WARMUP_CONTENTS)) : null,
                         cache.warmupLeaders ? cache.warmupLeaders() : null
                     ]).then(() => rs(builtTo), rj)
                 })
-                if (from > 0 && blocks.isOpen && blocks.fd && blocks.fillInMemoryBlocks)
-                    try { blocks.fillInMemoryBlocks(from) } catch (e) { return rj(e) }
-                if (from > 0 && !blocks.isOpen && mongo.fillInMemoryBlocks)
-                    mongo.fillInMemoryBlocks(invoke, from)
-                else invoke()
+                // R5: restore jail state from the checkpoint carried by the
+                // snapshot BEFORE replaying the tail, otherwise the fold would
+                // start from empty leaders and lose all pre-snapshot jail
+                // history/backoff levels (a consensus fork). The checkpoint
+                // lives in the swapped-in (temp) DB at this point.
+                leaderHealth.loadCheckpoint().then(cp => {
+                    const cpHeight = cp && Number.isInteger(cp.lastProcessedHeight)
+                        ? cp.lastProcessedHeight : null
+                    if (cpHeight === null || cpHeight > ancestor)
+                        leaderHealth.leaders = {}
+                    else
+                        leaderHealth.restore(cp)
+                    if (from > 0 && blocks.isOpen && blocks.fd && blocks.fillInMemoryBlocks)
+                        try { blocks.fillInMemoryBlocks(from) } catch (e) { return rj(e) }
+                    if (from > 0 && !blocks.isOpen && mongo.fillInMemoryBlocks)
+                        mongo.fillInMemoryBlocks(invoke, from)
+                    else invoke()
+                }).catch(rj)
             }),
             finalizeState: async () => {
                 if (mongo.finalizeRebuildSwap)

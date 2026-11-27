@@ -580,6 +580,14 @@ let chain = {
         chain.recentBlocks.push(block)
         chain.minerWorker(block)
         chain.output(block)
+        // R5: persist the folded jail state at this EXPLICIT height. The
+        // in-memory head has just advanced, but using chain.getLatestBlock()
+        // here would still be correct; the explicit id keeps the checkpoint
+        // tied to the state that was just flushed even if the head window is
+        // trimmed concurrently. Best-effort: a failed write only costs a longer
+        // replay tail on the next restart. Awaited before snapshotting so a
+        // snapshot at this height captures the matching checkpoint.
+        await leaderHealth.persistCheckpoint(block._id).catch(() => {})
         // Bounded snapshot for proof-gated reorgs: a rollback restores this state
         // and replays only the short canonical prefix instead of all of history.
         // Awaited so snapshot creation is serialized with block application and
@@ -1449,14 +1457,30 @@ let chain = {
     // compute a different jail state than long-running nodes. The activation
     // height is deterministic chain config, so every node folds the same block
     // range in the same order.
-    rebuildLeaderHealth: (cb) => {
+    // `cp` is an optional checkpoint document loaded by the caller (startup is
+    // async; the fold itself stays synchronous so unit tests and the rollback
+    // path can call it directly). R5: fold from `cp.lastProcessedHeight + 1`
+    // instead of the whole jail history when a usable checkpoint is supplied.
+    // Fall back to the full fold from the activation height when the checkpoint
+    // is absent or ahead of the head (a stale checkpoint from a rolled-back
+    // tail must never skip blocks).
+    rebuildLeaderHealth: (cb, cp) => {
         const head = chain.getLatestBlock()._id
-        const from = Math.max(leaderHealth.jailActivationHeight(), 1)
-        leaderHealth.leaders = {}
+        const activation = Math.max(leaderHealth.jailActivationHeight(), 1)
+        const cpHeight = cp && Number.isInteger(cp.lastProcessedHeight)
+            ? cp.lastProcessedHeight : null
+        const usable = cpHeight !== null && cpHeight >= activation - 1 && cpHeight <= head
+        if (usable) leaderHealth.restore(cp)
+        else leaderHealth.leaders = {}
+        const from = usable ? cpHeight + 1 : activation
         if (head < from) return cb(null, 0)
         const fold = (bs) => {
             for (let i = 0; i < bs.length; i++)
                 leaderHealth.processBlock(bs[i], null)
+            // Persist at the actual head: after a full fallback this writes the
+            // checkpoint that makes the next boot incremental; after an
+            // incremental replay it advances the checkpoint height. Best-effort.
+            leaderHealth.persistCheckpoint(head).catch(() => {})
             cb(null, bs.length)
         }
         if (blocks.isOpen) {

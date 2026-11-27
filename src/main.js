@@ -10,6 +10,7 @@ eco = require('./economics.js')
 rankings = require('./rankings.js')
 consensus = require('./consensus')
 leaderStats = require('./leaderStats')
+leaderHealth = require('./leaderHealth')
 
 const dao = require('./dao')
 const daoMaster = require('./daoMaster')
@@ -165,17 +166,28 @@ function startRebuild(startBlock) {
 }
 
 async function startDaemon() {
+    // R8: warn at startup if automatic snapshots are enabled on a node with
+    // leader signing keys: snapshot creation pauses block application and can
+    // make a leader miss turns / get jailed.
+    const snapshot = require('./stateSnapshot')
+    if (snapshot.warnIfLeaderNode) snapshot.warnIfLeaderNode()
     // Make sure a proof-gated rollback always has a snapshot to restore, even
     // on a node started from an existing database before the first interval.
     // Await so snapshot creation is serialized with block application.
     try {
-        await require('./stateSnapshot').ensure(chain.getLatestBlock()._id)
+        await snapshot.ensure(chain.getLatestBlock()._id)
     } catch (e) {
         logr.warn('Initial state snapshot failed: ' + (e && e.message ? e.message : e))
     }
     // Layer S/H: leaderHealth (streaks, jail, absence) is derived state. It must
     // exist before the schedule/active set is computed or this node would rotate
     // jailed leaders back in and diverge from its peers.
+    //
+    // R5: load the persisted checkpoint first so a restart folds only the tail
+    // after `lastProcessedHeight` instead of every block since 13,325,000. A
+    // missing/stale checkpoint is handled by chain.rebuildLeaderHealth(), which
+    // falls back to the full fold and re-persists it for the next boot.
+    const jailCheckpoint = await leaderHealth.loadCheckpoint()
     chain.rebuildLeaderHealth((e, n) => {
         if (e) {
             // H1: starting with an empty jail state would give this node a
@@ -185,9 +197,10 @@ async function startDaemon() {
             if (blocks.isOpen) blocks.close()
             return process.exit(1)
         }
-        logr.info('leaderHealth rebuilt from ' + n + ' recent blocks')
+        logr.info('leaderHealth rebuilt from ' + n + ' recent blocks'
+            + (jailCheckpoint ? ' (jail checkpoint #' + jailCheckpoint.lastProcessedHeight + ')' : ' (full jail fold)'))
         startDaemonAfterLeaderHealth()
-    })
+    }, jailCheckpoint)
 }
 
 function startDaemonAfterLeaderHealth() {

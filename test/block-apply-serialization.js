@@ -92,7 +92,12 @@ async function main() {
     stub('../src/transaction.js', { removeFromPool(){}, eventConfirmation: { emit(){} } })
     stub('../src/notifications.js', { processBlock(){} })
     stub('../src/txHistory', { processBlock(){} })
-    stub('../src/leaderHealth', { processBlock(){} })
+    stub('../src/leaderHealth', {
+        processBlock(){},
+        checkpointCollection: 'jailCheckpoint',
+        persistCheckpoint: () => Promise.resolve(false),
+        loadCheckpoint: () => Promise.resolve(null)
+    })
 
     let insertFails = false
     let inserts = 0

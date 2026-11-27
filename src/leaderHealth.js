@@ -250,6 +250,66 @@ const leaderHealth = {
         }
     },
 
+    // == R5: persisted jail checkpoint ==
+    // Jail/absence/backoff are DERIVED state, but re-folding every block since
+    // 13,325,000 on every restart is O(history) and grows without bound. We keep
+    // a single Mongo document with the fully folded state plus the height it
+    // represents. Startup then folds only `lastProcessedHeight + 1 .. head`.
+    //
+    // The checkpoint lives in its own collection which is part of state
+    // snapshots (R8/R9): a rollback restores the checkpoint at/below the common
+    // ancestor together with the rest of derived state, so the replay that
+    // follows starts from an already-correct jail state. It is NOT the rollback
+    // marker collection and is safe to copy/swap.
+    checkpointCollection: 'jailCheckpoint',
+    checkpointId: 0,
+
+    // Deep-copy helpers so callers/tests cannot mutate the live fold by holding
+    // a reference to the persisted object.
+    serialize: (height) => ({
+        _id: leaderHealth.checkpointId,
+        lastProcessedHeight: height,
+        leaders: JSON.parse(JSON.stringify(leaderHealth.leaders))
+    }),
+    restore: (doc) => {
+        leaderHealth.leaders = (doc && doc.leaders)
+            ? JSON.parse(JSON.stringify(doc.leaders)) : {}
+        return doc && Number.isInteger(doc.lastProcessedHeight) ? doc.lastProcessedHeight : null
+    },
+
+    // Persist the checkpoint. Uses the explicit `height` argument rather than
+    // chain.getLatestBlock() (the in-memory head is advanced only after the
+    // matching state flush). Best-effort: a checkpoint write failure must never
+    // fail block application — a restart simply replays a longer tail.
+    persistCheckpoint: (height, database) => {
+        const dbRef = database || (typeof db !== 'undefined' ? db : null)
+        if (!dbRef || !Number.isInteger(height)) return Promise.resolve(false)
+        try {
+            const col = dbRef.collection(leaderHealth.checkpointCollection)
+            if (!col) return Promise.resolve(false)
+            return Promise.resolve(col.replaceOne(
+                { _id: leaderHealth.checkpointId },
+                leaderHealth.serialize(height),
+                { upsert: true }
+            )).then(() => true).catch(() => false)
+        } catch (e) {
+            return Promise.resolve(false)
+        }
+    },
+
+    loadCheckpoint: (database) => {
+        const dbRef = database || (typeof db !== 'undefined' ? db : null)
+        if (!dbRef) return Promise.resolve(null)
+        try {
+            const col = dbRef.collection(leaderHealth.checkpointCollection)
+            if (!col || !col.findOne) return Promise.resolve(null)
+            return Promise.resolve(col.findOne({ _id: leaderHealth.checkpointId }))
+                .then(doc => doc || null).catch(() => null)
+        } catch (e) {
+            return Promise.resolve(null)
+        }
+    },
+
     // Snapshot for /consensus and /debug/statehash.
     snapshot: (h) => {
         const out = {}

@@ -5,8 +5,19 @@ const fs = require('fs')
 const sha256File = require('sha256-file')
 const spawn = require('child_process').spawn
 const spawnSync = require('child_process').spawnSync
+const rollbackMarker = require('./rollbackMarker')
+const mongoCopy = require('./mongoCopy')
+
+const REBUILD_TEMP_SUFFIX = '_rebuild_tmp'
 
 let mongo = {
+    // The canonical block store stays in the original database even while a
+    // rollback rebuilds derived state into a temporary database. Block reads
+    // must use this reference, never the (possibly swapped) global `db`.
+    originalDb: () => mongo._rebuildOriginalDb || db,
+    // The rollback marker lives in its own collection (R9). Exported so tests
+    // and snapshot code can assert it is never part of the swapped state.
+    rollbackMarkerCollection: rollbackMarker.collection,
     init: (cb) => {
         MongoClient.connect(db_url, {
             useNewUrlParser: true,
@@ -238,21 +249,30 @@ let mongo = {
         // The resolved height is the exact point the caller must replay from.
         return snapshotHeight
     })(),
-    finalizeRebuildSwap: () => (async () => {
+    // `opts.afterRename` is a crash-injection hook used by the recovery test:
+    // it runs after a collection has been renamed over its original. Production
+    // never passes it. The marker is flagged BEFORE any rename so a crash in the
+    // rename window can be recovered at startup (R9).
+    finalizeRebuildSwap: (opts) => (async () => {
         const ctx = mongo._rebuildContext
         if (!ctx) return false
         const { originalDb, tempDb, tempDbName } = ctx
         const stateSnapshot = require('./stateSnapshot')
         const incoming = (name) => name + '_rebuild_incoming'
 
+        const marker = await mongo.getRollbackMarker()
+        if (marker && marker.phase === 'started' && marker.swapping !== true)
+            await mongo.setRollbackMarker(Object.assign({}, marker, { swapping: true }))
+
         // Phase 1: copy rebuilt collections into staging collections in the
         // original DB. The original derived collections are untouched, so a
         // failure here leaves the active DB intact.
         for (const name of stateSnapshot.collections) {
-            const staging = originalDb.collection(incoming(name))
-            await staging.deleteMany({})
-            const docs = await tempDb.collection(name).find({}).toArray()
-            if (docs.length) await staging.insertMany(docs)
+            await originalDb.collection(incoming(name)).deleteMany({})
+            // Server-side copy: the rebuilt collection is never streamed into
+            // the Node heap (R8). `$out` replaces staging atomically; the later
+            // rename is the swap point R9 markers must survive.
+            await mongoCopy.copy(tempDb, name, originalDb, incoming(name))
         }
 
         // Phase 2: swap staging into place. renameCollection with dropTarget
@@ -263,6 +283,7 @@ let mongo = {
             const stagingExists = await originalDb.listCollections({name: stagingName}).hasNext()
             if (!stagingExists) await originalDb.createCollection(stagingName)
             await originalDb.collection(stagingName).rename(name, { dropTarget: true })
+            if (opts && typeof opts.afterRename === 'function') await opts.afterRename(name)
         }
 
         // Recreate indexes on original DB.
@@ -286,39 +307,106 @@ let mongo = {
     })(),
     discardRebuildTemp: () => (async () => {
         const ctx = mongo._rebuildContext
-        if (!ctx) {
-            // Ensure globals are not left pointing at a temp db if context was lost.
-            if (mongo._rebuildOriginalDb) {
-                db = mongo._rebuildOriginalDb
-                mongo.db = mongo._rebuildOriginalDb
-                mongo._rebuildOriginalDb = null
-            }
-            return false
+        const originalDb = ctx ? ctx.originalDb : (mongo._rebuildOriginalDb || db)
+        // Ensure globals are never left pointing at a temp db, even after a
+        // process restart where the in-memory context was lost.
+        if (originalDb) {
+            db = originalDb
+            mongo.db = originalDb
         }
-        const { originalDb, tempDbName } = ctx
-        db = originalDb
-        mongo.db = originalDb
         mongo._rebuildContext = null
         mongo._rebuildOriginalDb = null
-        try { await mongo.client.db(tempDbName).dropDatabase() } catch (e) {
-            logr.warn('Could not drop rebuild temp DB ' + tempDbName + ': ' + e.message)
-        }
-        return true
+        // The temp DB name is deterministic, so it can be dropped after a
+        // crash even without _rebuildContext. A missing DB is not an error.
+        await mongo.dropRebuildTempDb()
+        return !!ctx
     })(),
+    dropRebuildTempDb: () => (async () => {
+        if (!mongo.client || !mongo.dbName) return false
+        const tempDbName = mongo.dbName + REBUILD_TEMP_SUFFIX
+        try {
+            await mongo.client.db(tempDbName).dropDatabase()
+            return true
+        } catch (e) {
+            if (logr && logr.warn) logr.warn('Could not drop rebuild temp DB ' + tempDbName + ': ' + e.message)
+            return false
+        }
+    })(),
+    // Drop staging collections left behind by a rollback that crashed during
+    // the phase-1 copy / phase-2 rename. They are never part of canonical state.
+    cleanupRebuildStaging: () => (async () => {
+        const target = mongo._rebuildOriginalDb || db
+        if (!target || !target.listCollections) return 0
+        let rows = []
+        try {
+            rows = await target.listCollections().toArray()
+        } catch (e) { return 0 }
+        let dropped = 0
+        for (const row of rows) {
+            const name = row && row.name
+            if (typeof name !== 'string' || name.indexOf('_rebuild_incoming') === -1) continue
+            try {
+                await target.collection(name).drop()
+                dropped++
+            } catch (e) {
+                if (logr && logr.warn) logr.warn('Could not drop staging collection ' + name + ': ' + e.message)
+            }
+        }
+        return dropped
+    })(),
+    // After a crash with a `started` marker whose swap began, replay the
+    // staging + rename phases from the still-present temp DB. It is idempotent
+    // (staging is cleared before copy) and lets recovery handle a partial swap.
+    retryRebuildSwap: () => (async () => {
+        if (!mongo.client || !mongo.dbName) return false
+        const originalDb = mongo.client.db(mongo.dbName)
+        const tempDbName = mongo.dbName + REBUILD_TEMP_SUFFIX
+        const tempDb = mongo.client.db(tempDbName)
+        const rebuilt = await tempDb.collection('state').findOne({ _id: 0 })
+        if (!rebuilt) return false
+        mongo._rebuildContext = { originalDb, tempDb, tempDbName }
+        mongo._rebuildOriginalDb = originalDb
+        db = tempDb
+        mongo.db = tempDb
+        try {
+            return await mongo.finalizeRebuildSwap()
+        } catch (e) {
+            db = originalDb
+            mongo.db = originalDb
+            mongo._rebuildContext = null
+            mongo._rebuildOriginalDb = null
+            throw e
+        }
+    })(),
+    // R9: the marker is in its OWN collection. The `state` collection is renamed
+    // during a rebuild swap and must never hold recovery-critical metadata.
     getRollbackMarker: () => (async () => {
         const target = mongo._rebuildOriginalDb || db
-        return target.collection('state').findOne({ _id: 'rollback' })
+        return target.collection(rollbackMarker.collection).findOne({ _id: rollbackMarker.id })
     })(),
     setRollbackMarker: (marker) => (async () => {
         const target = mongo._rebuildOriginalDb || db
-        const doc = Object.assign({ _id: 'rollback', ts: new Date().toISOString() }, marker || {})
-        await target.collection('state').replaceOne({ _id: 'rollback' }, doc, { upsert: true })
+        const existing = await target.collection(rollbackMarker.collection).findOne({ _id: rollbackMarker.id }) || {}
+        // Merge instead of replacing: a partial transition (e.g. `swapping`)
+        // must not lose ancestor/target fields written by markRollback.
+        const doc = Object.assign({ _id: rollbackMarker.id }, existing, marker || {},
+            { ts: new Date().toISOString() })
+        await target.collection(rollbackMarker.collection).replaceOne(
+            { _id: rollbackMarker.id }, doc, { upsert: true })
         return true
     })(),
     clearRollbackMarker: () => (async () => {
         const target = mongo._rebuildOriginalDb || db
-        await target.collection('state').deleteOne({ _id: 'rollback' })
+        await target.collection(rollbackMarker.collection).deleteOne({ _id: rollbackMarker.id })
         return true
+    })(),
+    // Persisted head of the ORIGINAL derived state. Used at startup to tell a
+    // pre-swap crash (head still at the fork tip) from a post-swap crash
+    // (head already replayed to the ancestor).
+    readStateHead: () => (async () => {
+        const target = mongo._rebuildOriginalDb || db
+        const state = await target.collection('state').findOne({ _id: 0 })
+        return state && Number.isInteger(state.headBlock) ? state.headBlock : null
     })(),
     restoreBlocks: (cb) => {
         let dump_dir = process.cwd() + '/dump'

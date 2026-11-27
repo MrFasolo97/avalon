@@ -113,30 +113,15 @@ mongo.init(async function(state) {
     }
 
     ;(async () => {
-        if (!mongo.getRollbackMarker) return
-        const marker = await mongo.getRollbackMarker()
-        if (!marker) return
-        logr.warn('Incomplete rollback marker found at startup', marker)
-        if (marker.phase === 'started') {
-            if (mongo.discardRebuildTemp) await mongo.discardRebuildTemp()
-            if (mongo.clearRollbackMarker) await mongo.clearRollbackMarker()
-            logr.info('Rollback marker (started) cleared; original DB/blocks were not swapped')
-            return
-        }
-        if (marker.phase === 'swapped') {
-            const ancestor = Number.isInteger(marker.ancestor) ? marker.ancestor : null
-            if (ancestor === null) throw new Error('rollback marker missing ancestor')
-            if (blocks.isOpen) blocks.truncate(ancestor)
-            else if (mongo.truncateBlocks) await mongo.truncateBlocks(ancestor)
-            else throw new Error('no block truncation primitive available for rollback recovery')
-            if (mongo.clearRollbackMarker) await mongo.clearRollbackMarker()
-            // Reload head after truncation so startup continues from consistent state.
-            block = blocks.isOpen ? blocks.lastBlock() : await mongo.lastBlock()
-            config = require('./config.js').read(block._id)
-            logr.info('Recovered swapped rollback by truncating blocks to #' + ancestor + '; head is now #' + block._id)
-            return
-        }
-        throw new Error('Unknown rollback marker phase: ' + marker.phase)
+        // R9: marker lives in its own collection and survives a state swap.
+        // All recovery decisions (including a crash between the swap and the
+        // `swapped` transition) are centralized in rollbackRecovery.
+        const result = await require('./rollbackRecovery').recover({ mongo, blocks, logr })
+        if (!result || !result.head) return
+        // Reload head after truncation so startup continues from consistent state.
+        block = result.head
+        config = require('./config.js').read(block._id)
+        logr.info('Rollback recovery truncated blocks to #' + result.ancestor + '; head is now #' + block._id)
     })().then(startAfterRecovery).catch(e => {
         logr.fatal('Incomplete rollback recovery failed; refusing to start with possibly inconsistent state: ' + (e && e.message ? e.message : e))
         process.exit(1)
@@ -146,7 +131,8 @@ mongo.init(async function(state) {
 function startRebuild(startBlock) {
     let rebuildStartTime = new Date().getTime()
     chain.lastRebuildOutput = rebuildStartTime
-    chain.rebuildState(startBlock,(e,headBlockNum) => {
+    // Startup rebuild is unbounded: replay every block in the store.
+    chain.rebuildState(startBlock, Infinity, (e,headBlockNum) => {
         if (e) {
             erroredRebuild = true
             logr.error('Error rebuilding chain at block',headBlockNum, e)

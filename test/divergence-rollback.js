@@ -222,6 +222,7 @@ async function main() {
     await test('rollback: rebuilds and swaps state before truncating blocks, emits events', async () => {
         const calls = []
         const events = []
+        let rebuildEndHeight = null
         const d = {
             shouldRollback: true, fromHeight: 12, ancestor: 9, height: 13,
             hash: 'majority', signers: ['miner1', 'miner2', 'miner3', 'miner4']
@@ -234,7 +235,7 @@ async function main() {
             pause: () => calls.push('pause'),
             resetState: (h) => calls.push('state:' + h),
             resetRuntime: (h) => calls.push('runtime:' + h),
-            rebuildState: (h) => { calls.push('rebuild:' + h); return Promise.resolve(h) },
+            rebuildState: (h) => { rebuildEndHeight = h; calls.push('rebuild:' + h); return Promise.resolve(h) },
             finalizeState: (h) => calls.push('finalize:' + h),
             markSwapped: () => calls.push('markSwapped'),
             truncateBlocks: (h) => { calls.push('truncate:' + h); return h },
@@ -242,6 +243,7 @@ async function main() {
             clearRollbackMarker: () => calls.push('clearMarker')
         })
         assert.deepStrictEqual(calls, ['preflight:9', 'mark', 'pause', 'state:9', 'runtime:9', 'rebuild:9', 'finalize:9', 'markSwapped', 'truncate:9', 'resume:9', 'clearMarker'])
+        assert.strictEqual(rebuildEndHeight, 9, 'rebuild must receive the common ancestor as its inclusive end height')
         assert.deepStrictEqual(events, ['chain-rollback-start', 'chain-rollback'])
     })
 

@@ -49,7 +49,8 @@ global.chain = {
     worker: null,
     recentBlocks: [],
     getLatestBlock: () => ({ _id: localHead, hash: 'local-head', phash: 'local-parent' }),
-    rebuildState: (n, cb) => { calls.push('rebuild:' + n); cb(null, n) },
+    // Real signature: (startHeight, inclusiveEndHeight, cb).
+    rebuildState: (from, end, cb) => { calls.push('rebuild:' + from + '/' + end); cb(null, end) },
     validateAndAddBlock: () => {}
 }
 for (let h = 0; h <= localHead; h++)
@@ -278,7 +279,7 @@ async function main() {
         assert.deepStrictEqual(calls, [
             'preflight-snapshot:5', 'mark-rollback', 'cache-rollback', 'reset-state:5',
             'cache-clear', 'dao-reset', 'daoMaster-reset', 'voteState-reset', 'reset-proof',
-            'cancel-ff', 'leaderStats-reset', 'rebuild:6', 'finalize-swap', 'mark-swapped',
+            'cancel-ff', 'leaderStats-reset', 'rebuild:6/5', 'finalize-swap', 'mark-swapped',
             'truncate-blocks:5', 'tx-requeued:tx6', 'tx-requeued:tx7', 'tx-requeued:tx8',
             'clear-marker', 'recover'
         ])

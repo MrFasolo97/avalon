@@ -200,6 +200,9 @@ let divergence = {
                     })
                     await step('rebuild-state', () => {
                         if (!io.rebuildState) throw new Error('no state rebuild primitive')
+                        // Explicit INCLUSIVE end height: the replay must stop at the
+                        // common ancestor. p2p.js derives the start height from the
+                        // restored snapshot and passes (start, ancestor) to chain.
                         return io.rebuildState(decision.ancestor)
                     })
                     await step('finalize-state', () => {

@@ -1473,20 +1473,72 @@ let chain = {
             fold(bs || [])
         })
     },
-    batchLoadBlocks: (blockNum,cb) => {
-        if (chain.blocksToRebuild.length === 0)
-            if (blocks.isOpen) {
-                chain.blocksToRebuild = blocks.readRange(blockNum, blockNum+max_batch_blocks-1)
-                cb(chain.blocksToRebuild.shift())
-            } else
-                db.collection('blocks').find({_id: { $gte: blockNum, $lt: blockNum+max_batch_blocks }}).toArray((e,loadedBlocks) => {
+    // Load one batch for a state replay. `endHeight` is INCLUSIVE: blocks above
+    // it are never returned, even if they are already buffered or still present
+    // in the block store. A rollback replay must stop at the common ancestor and
+    // must never read the orphaned tail into the rebuilt state.
+    //
+    // Mongo-stored blocks are read through mongo.originalDb(), NOT the global
+    // `db`: during a rollback the global points at the empty temporary rebuild
+    // database while the canonical blocks stay in the original one.
+    batchLoadBlocks: (blockNum, endHeight, cb) => {
+        if (typeof endHeight === 'function') {
+            cb = endHeight
+            endHeight = Infinity
+        }
+        if (typeof cb !== 'function') return
+        if (!Number.isInteger(endHeight)) endHeight = Infinity
+        if (!Number.isInteger(blockNum) || blockNum < 0 || endHeight < blockNum) {
+            cb()
+            return
+        }
+        // Discard stale entries left by an earlier (unbounded) replay.
+        while (chain.blocksToRebuild.length && chain.blocksToRebuild[0]._id < blockNum)
+            chain.blocksToRebuild.shift()
+        if (chain.blocksToRebuild.length && chain.blocksToRebuild[0]._id > endHeight) {
+            chain.blocksToRebuild = []
+            cb()
+            return
+        }
+        if (chain.blocksToRebuild.length === 0) {
+            const last = Math.min(blockNum + max_batch_blocks - 1, endHeight)
+            if (blocks.isOpen)
+                chain.blocksToRebuild = blocks.readRange(blockNum, last) || []
+            else {
+                const mongo = require('./mongo')
+                const blocksDb = mongo.originalDb ? mongo.originalDb() : db
+                blocksDb.collection('blocks').find({_id: {$gte: blockNum, $lte: last}}, {
+                    sort: {_id: 1}
+                }).toArray((e, loadedBlocks) => {
                     if (e) throw e
-                    if (loadedBlocks) chain.blocksToRebuild = loadedBlocks
+                    chain.blocksToRebuild = (loadedBlocks || []).filter(b => b._id <= endHeight)
                     cb(chain.blocksToRebuild.shift())
                 })
-        else cb(chain.blocksToRebuild.shift())
+                return
+            }
+        }
+        const next = chain.blocksToRebuild[0]
+        if (!next || next._id > endHeight) {
+            chain.blocksToRebuild = []
+            cb()
+            return
+        }
+        cb(chain.blocksToRebuild.shift())
     },
-    rebuildState: (blockNum,cb) => {
+    // Replay blocks from `blockNum` up to and INCLUDING `endHeight`. Omitting
+    // `endHeight` keeps the legacy unbounded startup rebuild.
+    rebuildState: (blockNum, endHeight, cb) => {
+        if (typeof endHeight === 'function') {
+            cb = endHeight
+            endHeight = Infinity
+        }
+        if (typeof cb !== 'function') return
+        if (!Number.isInteger(endHeight)) endHeight = Infinity
+        // The restored snapshot already covers the ancestor: nothing to replay.
+        if (blockNum > endHeight) {
+            cb(null, Math.max(endHeight, 0))
+            return
+        }
         // If chain shutting down, stop rebuilding and output last number for resuming
         if (chain.shuttingDown)
             return cb(null,blockNum)
@@ -1497,15 +1549,19 @@ let chain = {
             chain.recentBlocks = [chain.getGenesisBlock()]
             chain.schedule = chain.minerSchedule(chain.getGenesisBlock())
             chain.saveSchedule()
-            chain.rebuildState(blockNum+1,cb)
+            chain.rebuildState(blockNum+1, endHeight, cb)
             return
         }
 
-        chain.batchLoadBlocks(blockNum, async (blockToRebuild) => {
+        chain.batchLoadBlocks(blockNum, endHeight, async (blockToRebuild) => {
             if (!blockToRebuild)
                 // Rebuild is complete
-                return cb(null,blockNum)
-            
+                return cb(null, Math.min(blockNum, endHeight))
+
+            // A stale buffer must never push replay past the common ancestor.
+            if (blockToRebuild._id > endHeight)
+                return cb(null, endHeight)
+
             // Validate block and transactions, then execute them
             if (process.env.REBUILD_NO_VALIDATE !== '1') {
                 let isValidBlock = await chain.isValidNewBlockPromise(blockToRebuild,true,false)
@@ -1557,8 +1613,8 @@ let chain = {
                     // process notifications and leader stats (non blocking)
                     notifications.processBlock(blockToRebuild)
 
-                    // next block
-                    chain.rebuildState(blockNum+1, cb)
+                    // next block (bounded by the common ancestor)
+                    chain.rebuildState(blockNum+1, endHeight, cb)
                 }, blockToRebuild._id % writeInterval === 0)
             })
         })

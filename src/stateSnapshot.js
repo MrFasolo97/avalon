@@ -14,11 +14,20 @@
 // no rollback, never a destructive fallback.
 
 const META_COLLECTION = 'stateSnapshots'
+const rollbackMarker = require('./rollbackMarker')
+const copyCollection = require('./mongoCopy')
 // Derived state only. `blocks` is deliberately excluded: canonical blocks stay
 // on disk (BSON or Mongo) and are the source of truth for the replay.
+// `jailCheckpoint` (R5) is included so a rollback restores jail state together
+// with the state it was folded from; the replay then continues from its height.
+// Keep it as a plain constant: requiring leaderHealth here would create a
+// circular dependency (chain -> stateSnapshot -> leaderHealth -> chain) and
+// expose a partially-initialised module to callers.
+const JAIL_CHECKPOINT_COLLECTION = 'jailCheckpoint'
 const COLLECTIONS = [
     'accounts', 'contents', 'proposals', 'proposalVotes', 'masterdao',
-    'leaders', 'txs', 'distributed', 'notifications', 'playlists', 'state'
+    'leaders', 'txs', 'distributed', 'notifications', 'playlists', 'state',
+    JAIL_CHECKPOINT_COLLECTION
 ]
 
 const snapshotCollection = (height, name) => 'stateSnapshot_' + height + '_' + name
@@ -30,36 +39,18 @@ const warn = (msg) => {
 
 let saving = false
 
-const COPY_BATCH_SIZE = 1000
-
-async function copyCollection(source, target, batchSize = COPY_BATCH_SIZE) {
-    const cursor = source.find({}, { batchSize })
-    let batch = []
-    let count = 0
-    const flush = async () => {
-        if (batch.length === 0) return
-        await target.insertMany(batch, { ordered: true })
-        count += batch.length
-        batch = []
-    }
-    if (cursor && typeof cursor[Symbol.asyncIterator] === 'function') 
-        for await (const doc of cursor) {
-            batch.push(doc)
-            if (batch.length >= batchSize) await flush()
-        }
-    else {
-        const rows = cursor && typeof cursor.toArray === 'function' ? await cursor.toArray() : []
-        for (const doc of rows) {
-            batch.push(doc)
-            if (batch.length >= batchSize) await flush()
-        }
-    }
-    await flush()
-    return count
-}
+// Fail loudly if someone ever adds the recovery marker to the derived set: a
+// snapshot copy or a swap rename would destroy the crash-recovery signal (R9).
+if (COLLECTIONS.indexOf(rollbackMarker.collection) !== -1)
+    throw new Error('rollback marker collection must not be part of derived state snapshots')
+if (COLLECTIONS.indexOf(JAIL_CHECKPOINT_COLLECTION) === -1)
+    throw new Error('jail checkpoint must be part of derived state snapshots (R5)')
 
 let stateSnapshot = {
     collections: COLLECTIONS,
+    // Exposed so the rebuild swap (R9) can copy collections server-side too.
+    serverCopy: (sourceDb, sourceName, targetDb, targetName) =>
+        copyCollection.copy(sourceDb, sourceName, targetDb, targetName),
 
     enabled: () => {
         const v = String(process.env.AUTO_ROLLBACK || '0').toLowerCase()
@@ -77,6 +68,33 @@ let stateSnapshot = {
         return Number.isFinite(n) && n > 0 ? n : 3
     },
 
+    // R8: a block-producing leader with AUTO_ROLLBACK=1 can miss turns while a
+    // snapshot is taken. Leader signing is configured via NODE_OWNER_PRIV and
+    // NODE_OWNER (the same pair chain.hashAndSignBlock uses); we widen the check
+    // to the active set/schedule when available so standbys are warned too.
+    warnIfLeaderNode: () => {
+        if (!stateSnapshot.enabled()) return false
+        const name = process.env.NODE_OWNER
+        if (!name || !process.env.NODE_OWNER_PRIV) return false
+        let elected = false
+        try {
+            const chainRef = (typeof chain !== 'undefined' && chain) ? chain : null
+            const shuffle = chainRef && chainRef.schedule && chainRef.schedule.shuffle
+            if (Array.isArray(shuffle))
+                elected = shuffle.some(l => l && (l.name || l) === name)
+            if (!elected && chainRef && typeof chainRef.activeLeaderSet === 'function')
+                elected = chainRef.activeLeaderSet().some(l => l && (l.name || l) === name)
+        } catch (e) {}
+        warn('AUTO_ROLLBACK=1 is enabled on this block-producing leader (' + name
+            + (elected ? ', currently in the active set' : ', signing key configured')
+            + '): taking a state snapshot briefly pauses block application and can cause missed turns.'
+            + ' AUTO_ROLLBACK=1 is recommended for non-leader/sync nodes only; disable it here'
+            + ' (AUTO_ROLLBACK=0) on leaders.')
+        return true
+    },
+    // Backwards-compatible name for callers/tests using the shorter form.
+    warnIfLeader: () => stateSnapshot.warnIfLeaderNode(),
+
     // Snapshot the state as it stands at `height`. The metadata row is written
     // last (with ready:true) so an interrupted copy is never restoreable.
     save: async (height) => {
@@ -85,16 +103,30 @@ let stateSnapshot = {
         if (!database || !Number.isInteger(height) || height < 0) return false
         const meta = database.collection(META_COLLECTION)
         if (await meta.findOne({ _id: height, ready: true })) return false
+        // R8: the copy must represent exactly one height. Callers invoke save()
+        // after the state flush; refuse a stale head instead of silently
+        // snapshotting a mix of heights.
+        const stateDoc = await database.collection('state').findOne({ _id: 0 })
+        if (stateDoc && Number.isInteger(stateDoc.headBlock) && stateDoc.headBlock !== height)
+            throw new Error('cannot snapshot #' + height + ': state head is #' + stateDoc.headBlock)
         const collectionCounts = {}
-        for (const name of COLLECTIONS) {
-            const target = database.collection(snapshotCollection(height, name))
-            await target.deleteMany({})
-            collectionCounts[name] = await copyCollection(database.collection(name), target)
+        try {
+            for (const name of COLLECTIONS)
+                collectionCounts[name] = await copyCollection.copy(
+                    database, name, database, snapshotCollection(height, name))
+            await meta.replaceOne({ _id: height }, {
+                _id: height, height, ready: true, createdAt: new Date(),
+                collections: COLLECTIONS, collectionCounts
+            }, { upsert: true })
+        } catch (e) {
+            // A failed copy must never leave a restoreable (or partially
+            // restoreable) snapshot behind.
+            for (const name of COLLECTIONS)
+                try { await database.collection(snapshotCollection(height, name)).deleteMany({}) }
+                catch (ignored) {}
+            try { await meta.deleteOne({ _id: height }) } catch (ignored) {}
+            throw e
         }
-        await meta.replaceOne({ _id: height }, {
-            _id: height, height, ready: true, createdAt: new Date(),
-            collections: COLLECTIONS, collectionCounts
-        }, { upsert: true })
         await stateSnapshot.prune()
         return true
     },
@@ -194,13 +226,10 @@ let stateSnapshot = {
         }
         if (snapshotHeight === null)
             throw new Error('no state snapshot at or below height ' + height)
-        for (const name of COLLECTIONS) {
-            await targetDb.collection(name).deleteMany({})
-            await copyCollection(
-                sourceDb.collection(snapshotCollection(snapshotHeight, name)),
-                targetDb.collection(name)
-            )
-        }
+        // `$out` replaces the target collection atomically; no Node-side cursor
+        // batch loop (and no pre-delete window) is needed.
+        for (const name of COLLECTIONS)
+            await copyCollection.copy(sourceDb, snapshotCollection(snapshotHeight, name), targetDb, name)
         // Keep the persisted head consistent with the restored state; the replay
         // advances it again while re-executing the retained canonical blocks.
         await targetDb.collection('state').updateOne(

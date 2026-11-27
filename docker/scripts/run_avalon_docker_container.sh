@@ -1,7 +1,12 @@
 #!/bin/bash
 
-docker build -t avalon .
-# alternative: docker-compose build
+# R6: bake the reviewed commit into the image so /version and NODE_STATUS
+# identify the exact artifact. Images built without a checkout fall back to
+# "unknown" at runtime rather than reporting a stale hardcoded hash.
+GIT_COMMIT="${GIT_COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
+
+docker build --build-arg "GIT_COMMIT=$GIT_COMMIT" -t avalon .
+# alternative: docker-compose build (pass GIT_COMMIT=$GIT_COMMIT in the environment)
 
 sleep 5
 

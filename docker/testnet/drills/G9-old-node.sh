@@ -41,17 +41,22 @@ else
     log "Building old-node image from $OLD_TAG (first run, ~2-3 min)"
     git -C "$REPO_DIR" worktree add --detach "$WORK_DIR/repo" "$OLD_TAG" >/dev/null 2>&1 \
         || fail "Could not create a worktree at $OLD_TAG"
+    OLD_COMMIT="$(git -C "$WORK_DIR/repo" rev-parse --short HEAD 2>/dev/null || echo unknown)"
     cat > "$WORK_DIR/Dockerfile" <<'EOF'
 FROM node:24
 WORKDIR /avalon
 RUN apt-get update && apt-get install -y --no-install-recommends curl libvips-dev && rm -rf /var/lib/apt/lists/*
 ENV SHARP_IGNORE_GLOBAL_LIBVIPS=0
+# R6: the old node must report the commit it was actually built from, not the
+# current checkout's GIT_COMMIT inherited from lib.sh.
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=${GIT_COMMIT}
 COPY repo/package*.json ./
 RUN npm install
 COPY repo/src/ src/
 RUN mkdir -p /avalon/log /avalon/genesis /avalon/blocks
 EOF
-    docker build -t "$OLD_IMAGE" -f "$WORK_DIR/Dockerfile" "$WORK_DIR" >/dev/null 2>&1 \
+    docker build --build-arg "GIT_COMMIT=$OLD_COMMIT" -t "$OLD_IMAGE" -f "$WORK_DIR/Dockerfile" "$WORK_DIR" >/dev/null 2>&1 \
         || fail "docker build of $OLD_IMAGE failed"
 fi
 

@@ -4,16 +4,7 @@
 // that never changed, which made the census unable to tell two releases apart.
 // Informational only: no handshake rejects on it.
 const version = require('../package.json').version
-let commitHash = process.env.GIT_COMMIT || process.env.AVALON_COMMIT || ''
-try {
-    if (!commitHash)
-        commitHash = require('child_process').execSync('git rev-parse --short HEAD', {
-            cwd: require('path').join(__dirname, '..'),
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore']
-        }).trim()
-} catch (e) { commitHash = 'unknown' }
-if (!commitHash) commitHash = 'unknown' 
+const commitHash = require('./commitHash').resolve()
 const default_port = 6001
 const replay_interval = 1500
 const discovery_interval = 60000

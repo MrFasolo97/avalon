@@ -11,6 +11,16 @@ set -uo pipefail
 PROJECT="avalon-drills"
 BOOTSTRAP="avalon-drills-bootstrap"
 
+# R6: Compose build args pick this up automatically. Drill images must report
+# the same commit as the code under test; allow an explicit override for
+# reproducibility, otherwise derive it from the checkout.
+if [ -z "${GIT_COMMIT:-}" ]; then
+    DRILLS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_DIR="$(cd "$DRILLS_LIB_DIR/../../.." && pwd)"
+    GIT_COMMIT="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+fi
+export GIT_COMMIT
+
 # List of leader containers in the drills testnet
 LEADERS=(avalon-drills-miner1 avalon-drills-miner2 avalon-drills-miner3 avalon-drills-miner4 avalon-drills-miner5)
 STANDBYS=(avalon-drills-standby1 avalon-drills-standby2)

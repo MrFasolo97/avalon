@@ -1,17 +1,5 @@
 const pkg = require('../../../package.json')
-const { execSync } = require('child_process')
-const path = require('path')
-
-let commitHash = process.env.GIT_COMMIT || process.env.AVALON_COMMIT || ''
-try {
-    if (!commitHash)
-        commitHash = execSync('git rev-parse --short HEAD', {
-            cwd: path.join(__dirname, '../../..'),
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore']
-        }).trim()
-} catch (e) { commitHash = 'unknown' }
-if (!commitHash) commitHash = 'unknown'
+const commitHash = require('../../commitHash').resolve()
 
 module.exports = {
     init: (app) => {

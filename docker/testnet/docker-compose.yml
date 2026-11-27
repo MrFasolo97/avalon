@@ -20,6 +20,8 @@ services:
     build:
       context: ../..
       dockerfile: docker/testnet/Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     hostname: bootstrap
     container_name: avalon-testnet-bootstrap
     init: true
@@ -54,6 +56,8 @@ services:
     build:
       context: ../..
       dockerfile: docker/testnet/Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     hostname: setup
     container_name: avalon-testnet-setup
     init: true
@@ -76,6 +80,8 @@ services:
     build:
       context: ../..
       dockerfile: docker/testnet/Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     hostname: miner1
     container_name: avalon-testnet-miner1
     init: true
@@ -114,6 +120,8 @@ services:
     build:
       context: ../..
       dockerfile: docker/testnet/Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     hostname: miner2
     container_name: avalon-testnet-miner2
     init: true
@@ -152,6 +160,8 @@ services:
     build:
       context: ../..
       dockerfile: docker/testnet/Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     hostname: miner3
     container_name: avalon-testnet-miner3
     init: true

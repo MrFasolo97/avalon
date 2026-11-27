@@ -1,5 +1,9 @@
 FROM node:24
 
+# R6: testnet/drill images report the same commit as production builds.
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=${GIT_COMMIT}
+
 EXPOSE 6001
 EXPOSE 3001
 

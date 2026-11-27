@@ -1,5 +1,9 @@
 FROM mongo:6.0.2
 
+# R6: image build must carry the exact release commit for /version census.
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=${GIT_COMMIT}
+
 EXPOSE 6029
 EXPOSE 3029
 

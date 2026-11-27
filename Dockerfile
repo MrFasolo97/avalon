@@ -1,4 +1,8 @@
 FROM node:latest
+# R6: bake the exact source commit into the image. Runtime /version and
+# NODE_STATUS read GIT_COMMIT (src/commitHash.js) so releases remain identifiable.
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=${GIT_COMMIT}
 LABEL "project.home"="https://github.com/nannal/avalon"
 RUN git clone git://github.com/skzap/avalon
 WORKDIR /avalon

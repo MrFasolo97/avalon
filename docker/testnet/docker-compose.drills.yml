@@ -98,6 +98,8 @@ services:
     build:
       context: ../..
       dockerfile: docker/testnet/Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     hostname: miner4
     container_name: avalon-drills-miner4
     init: true
@@ -141,6 +143,8 @@ services:
     build:
       context: ../..
       dockerfile: docker/testnet/Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     hostname: miner5
     container_name: avalon-drills-miner5
     init: true
@@ -184,6 +188,8 @@ services:
     build:
       context: ../..
       dockerfile: docker/testnet/Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     hostname: standby1
     container_name: avalon-drills-standby1
     init: true
@@ -227,6 +233,8 @@ services:
     build:
       context: ../..
       dockerfile: docker/testnet/Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     hostname: standby2
     container_name: avalon-drills-standby2
     init: true

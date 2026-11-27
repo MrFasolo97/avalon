@@ -5,6 +5,7 @@ services:
         dockerfile: Dockerfile
         args:
           - rebuild
+          - GIT_COMMIT=${GIT_COMMIT:-unknown}
 
     image: avalon:1.0.0
     hostname: avalon
